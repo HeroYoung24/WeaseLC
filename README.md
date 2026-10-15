@@ -6,6 +6,7 @@
 - [开发进度](weasel-0.17.4/PAUSED_PROGRESS.md)
 - [任务清单](weasel-0.17.4/docs/CORRECTION_TASKS.md)
 - [本地模型测试报告](weasel-0.17.4/docs/LOCAL_MODEL_TESTS.md)
+- [纠错操作与用户习惯](weasel-0.17.4/docs/CORRECTION_REVIEW_AND_LEARNING.md)
 - [模型启动和下载说明](local-model/README.md)
 - [Git/GitHub 使用说明](weasel-0.17.4/docs/GIT_GITHUB_SETUP.md)
 

@@ -18,6 +18,7 @@
     <ClCompile Include="CorrectionClient.cpp" />
     <ClCompile Include="..\..\WeaselDeployer\CorrectionModel.cpp" />
     <ClCompile Include="..\..\WeaselDeployer\CorrectionPreferences.cpp" />
+    <ClCompile Include="..\..\WeaselDeployer\CorrectionLexicon.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)Microsoft.Cpp.targets" />
 </Project>

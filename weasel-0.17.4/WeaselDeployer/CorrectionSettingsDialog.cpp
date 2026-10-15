@@ -8,6 +8,8 @@
 #include <thread>
 #include <vector>
 #include <CorrectionProbe.h>
+#include <CorrectionReview.h>
+#include <CorrectionLexicon.h>
 #include "Resource.h"
 #include "CorrectionPreferences.h"
 #include "CorrectionSettingsDialog.h"
@@ -26,6 +28,9 @@ struct DialogState {
   Preferences preferences;
   Mode editing = Mode::Local;
   std::shared_ptr<Job> job;
+  SuggestionReview review;
+  UserLexicon lexicon;
+  bool lexiconReady = true;
   std::uint64_t version = 1;
   bool updating = false;
   bool testing = false;
@@ -47,6 +52,8 @@ void SetNumber(HWND dialog, int id, unsigned value) { SetDlgItemInt(dialog, id, 
 void Cancel(DialogState& state, HWND dialog) {
   ++state.version;
   if (state.job && !state.job->done.load()) state.job->cancelled.store(true);
+  state.review.Clear();
+  SendDlgItemMessageW(dialog, IDC_CORRECTION_SUGGESTIONS, LB_RESETCONTENT, 0, 0);
   SetDlgItemTextW(dialog, IDC_CORRECTION_RESULT, L"");
 }
 void ReadProfile(HWND dialog, DialogState& state) {
@@ -79,11 +86,81 @@ void ReadProfile(HWND dialog, DialogState& state) {
 void UpdateButtons(HWND dialog, DialogState& state) {
   const bool busy = state.job && !state.job->done.load();
   const bool enabled = state.preferences.mode != Mode::Off;
-  EnableWindow(GetDlgItem(dialog, IDC_CORRECTION_CHECK), enabled && !busy);
+  EnableWindow(GetDlgItem(dialog, IDC_CORRECTION_CHECK), enabled && !busy && state.lexiconReady);
   EnableWindow(GetDlgItem(dialog, IDC_CORRECTION_CANCEL_CHECK), busy);
   EnableWindow(GetDlgItem(dialog, IDC_CORRECTION_SCORE),
       IsDlgButtonChecked(dialog, IDC_CORRECTION_CUSTOM_SCORE) == BST_CHECKED);
   EnableWindow(GetDlgItem(dialog, IDC_CORRECTION_CONSENT), state.preferences.mode == Mode::Online);
+  const auto selected = SendDlgItemMessageW(dialog, IDC_CORRECTION_SUGGESTIONS, LB_GETCURSEL, 0, 0);
+  const bool actionable = selected != LB_ERR && state.review.Selected(static_cast<std::size_t>(selected),
+      Text(dialog, IDC_CORRECTION_TEST_TEXT), state.version) != nullptr;
+  for (int id : {IDC_CORRECTION_APPLY, IDC_CORRECTION_IGNORE, IDC_CORRECTION_KEEP})
+    EnableWindow(GetDlgItem(dialog, id), actionable && state.lexiconReady);
+}
+void ShowSuggestion(HWND dialog, DialogState& state) {
+  const auto selected = SendDlgItemMessageW(dialog, IDC_CORRECTION_SUGGESTIONS, LB_GETCURSEL, 0, 0);
+  const auto* item = state.review.Selected(static_cast<std::size_t>(selected), Text(dialog, IDC_CORRECTION_TEST_TEXT), state.version);
+  std::wstring detail;
+  if (item) {
+    detail = item->original + L" → " + item->replacement + L"\r\n" + item->reason + L"\r\n";
+    detail += state.Text(L"模型分数（未校准）：", L"Model score (uncalibrated): ");
+    detail += std::to_wstring(static_cast<unsigned>(std::lround(item->score * 100))) + L"/100";
+  }
+  SetDlgItemTextW(dialog, IDC_CORRECTION_RESULT, detail.c_str());
+  UpdateButtons(dialog, state);
+}
+void RefreshSuggestions(HWND dialog, DialogState& state) {
+  SendDlgItemMessageW(dialog, IDC_CORRECTION_SUGGESTIONS, LB_RESETCONTENT, 0, 0);
+  for (const auto& item : state.review.Items()) {
+    const auto line = item.original + L" → " + item.replacement;
+    SendDlgItemMessageW(dialog, IDC_CORRECTION_SUGGESTIONS, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(line.c_str()));
+  }
+  if (!state.review.Items().empty()) SendDlgItemMessageW(dialog, IDC_CORRECTION_SUGGESTIONS, LB_SETCURSEL, 0, 0);
+  ShowSuggestion(dialog, state);
+}
+struct TermDialogState { DialogState& owner; UserLexicon working; bool modeless = false; };
+void CloseTerms(HWND dialog, TermDialogState& state, INT_PTR result) {
+  if (state.modeless) DestroyWindow(dialog); else EndDialog(dialog, result);
+}
+void RefreshTerms(HWND dialog, TermDialogState& state) {
+  SendDlgItemMessageW(dialog, IDC_CORRECTION_TERM_LIST, LB_RESETCONTENT, 0, 0);
+  for (const auto& term : state.working.terms)
+    SendDlgItemMessageW(dialog, IDC_CORRECTION_TERM_LIST, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(term.c_str()));
+  const auto count = std::to_wstring(state.working.terms.size()) + L"/256";
+  SetDlgItemTextW(dialog, IDC_CORRECTION_TERM_STATE, count.c_str());
+}
+INT_PTR CALLBACK TermDialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lParam) {
+  auto* state = reinterpret_cast<TermDialogState*>(GetWindowLongPtrW(dialog, DWLP_USER));
+  if (message == WM_INITDIALOG) {
+    state = reinterpret_cast<TermDialogState*>(lParam);
+    SetWindowLongPtrW(dialog, DWLP_USER, reinterpret_cast<LONG_PTR>(state));
+    SendDlgItemMessageW(dialog, IDC_CORRECTION_TERM_TEXT, EM_SETLIMITTEXT, kMaxKeptTermUnits, 0);
+    RefreshTerms(dialog, *state); return TRUE;
+  }
+  if (!state) return FALSE;
+  if (message == WM_CLOSE) { CloseTerms(dialog, *state, IDCANCEL); return TRUE; }
+  if (message != WM_COMMAND) return FALSE;
+  switch (LOWORD(wParam)) {
+    case IDC_CORRECTION_TERM_ADD:
+      if (!KeepTerm(state->working, Text(dialog, IDC_CORRECTION_TERM_TEXT)))
+        SetDlgItemTextW(dialog, IDC_CORRECTION_TERM_STATE, state->owner.Text(L"请输入 1–64 单元的表达；最多 256 条。", L"Use 1–64 units; at most 256 terms."));
+      else { SetDlgItemTextW(dialog, IDC_CORRECTION_TERM_TEXT, L""); RefreshTerms(dialog, *state); }
+      return TRUE;
+    case IDC_CORRECTION_TERM_REMOVE: {
+      auto index = SendDlgItemMessageW(dialog, IDC_CORRECTION_TERM_LIST, LB_GETCURSEL, 0, 0);
+      if (index != LB_ERR) RemoveTerm(state->working, static_cast<std::size_t>(index));
+      RefreshTerms(dialog, *state); return TRUE;
+    }
+    case IDC_CORRECTION_TERM_CLEAR: state->working.terms.clear(); RefreshTerms(dialog, *state); return TRUE;
+    case IDOK:
+      if (!state->owner.demo && !state->owner.testing && !SaveUserLexicon(state->working)) {
+        SetDlgItemTextW(dialog, IDC_CORRECTION_TERM_STATE, state->owner.Text(L"保存失败，原词表未更改。", L"Save failed; original terms unchanged.")); return TRUE;
+      }
+      state->owner.lexicon = state->working; state->owner.lexiconReady = true;
+      CloseTerms(dialog, *state, IDOK); return TRUE;
+    case IDCANCEL: CloseTerms(dialog, *state, IDCANCEL); return TRUE;
+  }
+  return FALSE;
 }
 void LoadProfile(HWND dialog, DialogState& state) {
   state.updating = true;
@@ -102,6 +179,8 @@ void LoadProfile(HWND dialog, DialogState& state) {
 }
 void BeginCheck(HWND dialog, DialogState& state) {
   if (state.job && !state.job->done.load()) return;
+  if (!state.lexiconReady) return;
+  Cancel(state, dialog);
   ReadProfile(dialog, state);
   ModelConfig config = state.Profile();
   config.mode = state.preferences.mode;
@@ -151,20 +230,19 @@ void Poll(HWND dialog, DialogState& state) {
   const auto job = std::move(state.job);
   if (!job->cancelled.load() && job->result.session == 1 && job->result.version == state.version &&
       job->text == Text(dialog, IDC_CORRECTION_TEST_TEXT)) {
-    std::wstring status = StateText(job->result.state, state.chinese);
+    CheckRequest request; request.session = 1; request.version = state.version;
+    request.safeText = true; request.text = job->text;
+    auto result = job->result;
+    FilterKeptTerms(state.lexicon, request, result);
+    if (!state.review.Load(request, result) && result.state == State::Suggestions) result.state = State::InvalidResponse;
+    std::wstring status = StateText(result.state, state.chinese);
     status += L" (" + std::to_wstring(GetTickCount64() - job->started) + L" ms)";
     if (state.demo) status = state.Text(L"离线模拟结果：", L"Offline fixture: ") + status;
     if (job->result.httpStatus && job->result.httpStatus != 200)
       status += L" HTTP " + std::to_wstring(job->result.httpStatus);
     if (job->result.nativeError) status += L" (" + std::to_wstring(job->result.nativeError) + L")";
     SetDlgItemTextW(dialog, IDC_CORRECTION_STATE, status.c_str());
-    std::wstring display;
-    for (const auto& item : job->result.suggestions) {
-      display += item.original + L" → " + item.replacement + L"\r\n" + item.reason + L"\r\n";
-      display += state.Text(L"模型分数（未校准）：", L"Model score (uncalibrated): ");
-      display += std::to_wstring(static_cast<unsigned>(std::lround(item.score * 100))) + L"/100\r\n\r\n";
-    }
-    SetDlgItemTextW(dialog, IDC_CORRECTION_RESULT, display.c_str());
+    RefreshSuggestions(dialog, state);
   }
   UpdateButtons(dialog, state);
 }
@@ -210,6 +288,10 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
                                   L"Offline demo: Check text for fixture suggestions. No model calls or saved settings.") :
             state->Text(L"未连接。填写模型名，选择模式后可手动检查；不会自动读取其他应用。",
                         L"Not connected. Choose mode and model for manual checks; other apps are not read."));
+    if (!state->lexiconReady) SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,
+        state->Text(L"保留词表读取失败，请在“管理保留词”中清空并保存后重试。",
+                    L"Kept terms could not be read. Clear/save them in Manage kept terms before checking."));
+    UpdateButtons(dialog, *state);
     if (!state->testing) SetTimer(dialog, kPoll, 100, nullptr);
     // This interactive window is requested by the user; ignore inherited SW_HIDE.
     if (!state->testing) {
@@ -234,6 +316,7 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
   }
   if (message != WM_COMMAND || state->updating) return FALSE;
   const int id = LOWORD(wParam), event = HIWORD(wParam);
+  if (id == IDC_CORRECTION_SUGGESTIONS && event == LBN_SELCHANGE) { ShowSuggestion(dialog, *state); return TRUE; }
   if ((event == EN_CHANGE && (id == IDC_CORRECTION_TEST_TEXT || id == IDC_CORRECTION_ENDPOINT ||
        id == IDC_CORRECTION_MODEL || id == IDC_CORRECTION_TOKEN || id == IDC_CORRECTION_TIMEOUT ||
        id == IDC_CORRECTION_SCORE)) ||
@@ -250,6 +333,7 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
   if (id >= IDC_CORRECTION_OFF && id <= IDC_CORRECTION_ONLINE && event == BN_CLICKED) {
     Cancel(*state, dialog); ReadProfile(dialog, *state);
     state->preferences.mode = static_cast<Mode>(id - IDC_CORRECTION_OFF);
+    CheckRadioButton(dialog, IDC_CORRECTION_OFF, IDC_CORRECTION_ONLINE, id);
     if (state->preferences.mode != Mode::Off) state->editing = state->preferences.mode;
     LoadProfile(dialog, *state);
     SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,
@@ -258,6 +342,48 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
     return TRUE;
   }
   switch (id) {
+    case IDC_CORRECTION_APPLY:
+    case IDC_CORRECTION_IGNORE:
+    case IDC_CORRECTION_KEEP: {
+      const auto index = static_cast<std::size_t>(SendDlgItemMessageW(dialog, IDC_CORRECTION_SUGGESTIONS, LB_GETCURSEL, 0, 0));
+      const auto text = Text(dialog, IDC_CORRECTION_TEST_TEXT);
+      const auto* selected = state->review.Selected(index, text, state->version);
+      if (!selected) { Cancel(*state, dialog); UpdateButtons(dialog, *state); return TRUE; }
+      const auto item = *selected;
+      if (id == IDC_CORRECTION_IGNORE) {
+        state->review.Ignore(index, text, state->version); RefreshSuggestions(dialog, *state);
+        SetDlgItemTextW(dialog, IDC_CORRECTION_STATE, state->Text(L"已忽略本次建议，没有保存忽略记录。", L"Ignored this suggestion without saving a rule."));
+      } else if (id == IDC_CORRECTION_KEEP) {
+        auto updated = state->lexicon;
+        if (!KeepTerm(updated, item.original) || (!state->demo && !state->testing && !SaveUserLexicon(updated))) {
+          SetDlgItemTextW(dialog, IDC_CORRECTION_STATE, state->Text(L"无法保留：表达过长、词表已满或保存失败。", L"Cannot keep: term too long, list full or save failed.")); return TRUE;
+        }
+        state->lexicon = std::move(updated);
+        Cancel(*state, dialog); UpdateButtons(dialog, *state);
+        SetDlgItemTextW(dialog, IDC_CORRECTION_STATE, state->Text(L"已保留原表达；后续重叠建议将隐藏。可在词表中删除。", L"Original kept; overlapping suggestions will be hidden. Remove it in Manage kept terms."));
+      } else {
+        std::wstring corrected;
+        if (!state->review.Apply(index, text, state->version, corrected)) return TRUE;
+        SendDlgItemMessageW(dialog, IDC_CORRECTION_TEST_TEXT, EM_SETSEL, item.start, item.start + item.original.size());
+        SendDlgItemMessageW(dialog, IDC_CORRECTION_TEST_TEXT, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(item.replacement.c_str()));
+        const bool applied = Text(dialog, IDC_CORRECTION_TEST_TEXT) == corrected;
+        Cancel(*state, dialog); UpdateButtons(dialog, *state);
+        if (applied && !state->testing) SetFocus(GetDlgItem(dialog, IDC_CORRECTION_TEST_TEXT));
+        SetDlgItemTextW(dialog, IDC_CORRECTION_STATE, applied ?
+            state->Text(L"已修改本页文字，可 Ctrl+Z 撤销；请重新检查。", L"Updated this page. Ctrl+Z undoes; check again.") :
+            state->Text(L"本页修改未完成，请检查文字后重新检查。", L"The edit did not complete. Review the text and check again."));
+      }
+      return TRUE;
+    }
+    case IDC_CORRECTION_TERMS: {
+      TermDialogState terms{*state, state->lexicon};
+      if (DialogBoxParamW(reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(dialog, GWLP_HINSTANCE)),
+          MAKEINTRESOURCEW(IDD_CORRECTION_TERMS), dialog, TermDialogProc, reinterpret_cast<LPARAM>(&terms)) == IDOK) {
+        Cancel(*state, dialog); UpdateButtons(dialog, *state);
+        SetDlgItemTextW(dialog, IDC_CORRECTION_STATE, state->Text(L"保留词已保存，旧结果已清除。", L"Kept terms saved; old results cleared."));
+      }
+      return TRUE;
+    }
     case IDC_CORRECTION_CHECK: if (!state->testing) BeginCheck(dialog, *state); return TRUE;
     case IDC_CORRECTION_CANCEL_CHECK:
       Cancel(*state, dialog);
@@ -311,9 +437,36 @@ INT_PTR ShowCorrectionSettings(HINSTANCE instance, bool offlineDemo) {
     state.preferences.mode = Mode::Local;
     state.preferences.local.model = L"offline-fixture";
     state.testClient = []() { return CreateModelClient(Provider::ChatCompletions, std::make_unique<DemoTransport>()); };
-  } else state.preferences = LoadPreferences();
+  } else { state.preferences = LoadPreferences(); state.lexiconReady = LoadUserLexicon(state.lexicon); }
   return DialogBoxParamW(instance, MAKEINTRESOURCEW(IDD_CORRECTION_SETTINGS), nullptr,
                         DialogProc, reinterpret_cast<LPARAM>(&state));
+}
+// Render only this diagnostic's hidden controls, never capture the desktop.
+static void SaveDialogPreview(HWND dialog, const char* filename) {
+  RECT rect = {}; GetWindowRect(dialog, &rect);
+  const int width = rect.right - rect.left, height = rect.bottom - rect.top;
+  if (width <= 0 || height <= 0 || width > 3000 || height > 2000) return;
+  HDC screen = GetDC(nullptr), memory = CreateCompatibleDC(screen);
+  BITMAPINFO info = {}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  info.bmiHeader.biWidth = width; info.bmiHeader.biHeight = -height;
+  info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32;
+  void* pixels = nullptr;
+  HBITMAP bitmap = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+  if (memory && bitmap) {
+    auto previous = SelectObject(memory, bitmap);
+    SendMessageW(dialog, WM_PRINT, reinterpret_cast<WPARAM>(memory), PRF_CLIENT | PRF_CHILDREN | PRF_NONCLIENT | PRF_ERASEBKGND);
+    const DWORD bytes = width * height * 4;
+    BITMAPFILEHEADER header = {}; header.bfType = 0x4d42;
+    header.bfOffBits = sizeof(header) + sizeof(info.bmiHeader); header.bfSize = header.bfOffBits + bytes;
+    std::ofstream out(filename, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    out.write(reinterpret_cast<const char*>(&info.bmiHeader), sizeof(info.bmiHeader));
+    out.write(static_cast<const char*>(pixels), bytes);
+    SelectObject(memory, previous);
+  }
+  if (bitmap) DeleteObject(bitmap);
+  if (memory) DeleteDC(memory);
+  if (screen) ReleaseDC(nullptr, screen);
 }
 bool CheckCorrectionDialogResources(HINSTANCE instance) {
   class FixtureClient final : public IModelClient {
@@ -347,7 +500,9 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
         IDC_CORRECTION_ENDPOINT, IDC_CORRECTION_MODEL, IDC_CORRECTION_TOKEN, IDC_CORRECTION_TIMEOUT,
         IDC_CORRECTION_SCORE, IDC_CORRECTION_TEST_TEXT, IDC_CORRECTION_STATE, IDC_CORRECTION_RESULT,
         IDC_CORRECTION_CHECK, IDC_CORRECTION_CANCEL_CHECK, IDC_CORRECTION_CLI_RESERVED,
-        IDC_CORRECTION_JSON_MODE, IDC_CORRECTION_CONSENT, IDC_CORRECTION_DEFAULTS})
+        IDC_CORRECTION_JSON_MODE, IDC_CORRECTION_CONSENT, IDC_CORRECTION_DEFAULTS,
+        IDC_CORRECTION_SUGGESTIONS, IDC_CORRECTION_APPLY, IDC_CORRECTION_IGNORE,
+        IDC_CORRECTION_KEEP, IDC_CORRECTION_TERMS})
       check(GetDlgItem(dialog, id) != nullptr, "control present");
     check(!IsWindowVisible(dialog), "hidden test window");
     check(!IsWindowEnabled(GetDlgItem(dialog, IDC_CORRECTION_CHECK)) &&
@@ -363,6 +518,51 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
     for (unsigned attempt = 0; state.job && !state.job->done.load() && attempt < 200; ++attempt) Sleep(1);
     Poll(dialog, state);
     check(Text(dialog, IDC_CORRECTION_RESULT).find(L"示例") != std::wstring::npos, "fixture result displayed");
+    if (language == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)) SaveDialogPreview(dialog, "CorrectionDialogPreview.bmp");
+    check(IsWindowEnabled(GetDlgItem(dialog, IDC_CORRECTION_APPLY)), "current suggestion is actionable");
+    SendMessageW(dialog, WM_COMMAND, IDC_CORRECTION_APPLY, 0);
+    check(Text(dialog, IDC_CORRECTION_TEST_TEXT) == L"示例文本" && state.review.Items().empty(), "apply changes own text and invalidates results");
+    check(SendDlgItemMessageW(dialog, IDC_CORRECTION_TEST_TEXT, EM_CANUNDO, 0, 0) != 0 &&
+        SendDlgItemMessageW(dialog, IDC_CORRECTION_TEST_TEXT, EM_UNDO, 0, 0) != 0 &&
+        Text(dialog, IDC_CORRECTION_TEST_TEXT) == L"模拟文本", "apply uses native undo");
+    auto runFixture = [&]() {
+      BeginCheck(dialog, state);
+      for (unsigned attempt = 0; state.job && !state.job->done.load() && attempt < 200; ++attempt) Sleep(1);
+      Poll(dialog, state);
+    };
+    runFixture(); SendMessageW(dialog, WM_COMMAND, IDC_CORRECTION_IGNORE, 0);
+    check(state.review.Items().empty() && state.lexicon.terms.empty(), "ignore does not learn expression");
+    runFixture(); SendMessageW(dialog, WM_COMMAND, IDC_CORRECTION_KEEP, 0);
+    check(state.lexicon.terms == std::vector<std::wstring>{L"模拟"}, "explicit keep records only original expression");
+    runFixture();
+    check(state.review.Items().empty() && Text(dialog, IDC_CORRECTION_RESULT).empty(), "kept original suppresses repeated false positive");
+    TermDialogState terms{state, state.lexicon, true};
+    HWND termDialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_CORRECTION_TERMS),
+        dialog, TermDialogProc, reinterpret_cast<LPARAM>(&terms));
+    check(termDialog && !IsWindowVisible(termDialog), "term manager hidden resources available");
+    if (termDialog) {
+      for (int id : {IDC_CORRECTION_TERM_LIST, IDC_CORRECTION_TERM_TEXT, IDC_CORRECTION_TERM_ADD,
+          IDC_CORRECTION_TERM_REMOVE, IDC_CORRECTION_TERM_CLEAR, IDC_CORRECTION_TERM_STATE, IDOK, IDCANCEL})
+        check(GetDlgItem(termDialog, id) != nullptr, "term manager control present");
+      SetDlgItemTextW(termDialog, IDC_CORRECTION_TERM_TEXT, L"小狼毫");
+      SendMessageW(termDialog, WM_COMMAND, IDC_CORRECTION_TERM_ADD, 0);
+      if (language == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)) SaveDialogPreview(termDialog, "CorrectionTermsPreview.bmp");
+      SendDlgItemMessageW(termDialog, IDC_CORRECTION_TERM_LIST, LB_SETCURSEL, 1, 0);
+      SendMessageW(termDialog, WM_COMMAND, IDC_CORRECTION_TERM_REMOVE, 0);
+      check(terms.working.terms == state.lexicon.terms, "term manager removes selected entry only");
+      SetDlgItemTextW(termDialog, IDC_CORRECTION_TERM_TEXT, L"另一个词");
+      SendMessageW(termDialog, WM_COMMAND, IDC_CORRECTION_TERM_ADD, 0);
+      SendMessageW(termDialog, WM_COMMAND, IDCANCEL, 0);
+      check(state.lexicon.terms.size() == 1, "term manager cancel discards edits");
+    }
+    terms.working = state.lexicon;
+    termDialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_CORRECTION_TERMS),
+        dialog, TermDialogProc, reinterpret_cast<LPARAM>(&terms));
+    if (termDialog) {
+      SendMessageW(termDialog, WM_COMMAND, IDC_CORRECTION_TERM_CLEAR, 0);
+      SendMessageW(termDialog, WM_COMMAND, IDOK, 0);
+      check(state.lexicon.terms.empty(), "term manager clear saved in test memory only");
+    } else check(false, "term manager create for clear");
     BeginCheck(dialog, state);
     SendDlgItemMessageW(dialog, IDC_CORRECTION_TEST_TEXT, EM_SETSEL, 0, -1);
     SendDlgItemMessageW(dialog, IDC_CORRECTION_TEST_TEXT, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(L"文本已改变"));
@@ -418,6 +618,26 @@ bool CheckCorrectionLocalDialog(HINSTANCE instance) {
     report << "local worker/result display = " << passed << '\n';
     valid = passed && valid;
   }
+  SendMessageW(dialog, WM_COMMAND, IDC_CORRECTION_APPLY, 0);
+  const bool applied = Text(dialog, IDC_CORRECTION_TEST_TEXT) == L"这里有错字。" && state.review.Items().empty();
+  report << "real suggestion applied to own page = " << applied << '\n'; valid = valid && applied;
+  const bool undo = SendDlgItemMessageW(dialog, IDC_CORRECTION_TEST_TEXT, EM_UNDO, 0, 0) != 0 &&
+      Text(dialog, IDC_CORRECTION_TEST_TEXT) == L"这里有错子。";
+  report << "real suggestion edit undo = " << undo << '\n'; valid = valid && undo;
+  BeginCheck(dialog, state);
+  const auto keepStart = GetTickCount64();
+  while (state.job && !state.job->done.load() && GetTickCount64() - keepStart < 12000) Sleep(10);
+  Poll(dialog, state); SendMessageW(dialog, WM_COMMAND, IDC_CORRECTION_KEEP, 0);
+  const bool kept = std::find(state.lexicon.terms.begin(), state.lexicon.terms.end(), L"错子") != state.lexicon.terms.end();
+  report << "real suggestion original explicitly kept in test memory = " << kept << '\n'; valid = valid && kept;
+  BeginCheck(dialog, state);
+  const auto repeatStart = GetTickCount64();
+  while (state.job && !state.job->done.load() && GetTickCount64() - repeatStart < 12000) Sleep(10);
+  const bool completed = state.job && state.job->done.load() && state.job->result.state == State::Suggestions &&
+      !state.job->result.suggestions.empty();
+  Poll(dialog, state);
+  const bool suppressed = completed && state.review.Items().empty() && Text(dialog, IDC_CORRECTION_RESULT).empty();
+  report << "kept term suppresses subsequent real model suggestion = " << suppressed << '\n'; valid = valid && suppressed;
   BeginCheck(dialog, state);
   const auto job = state.job;
   SendMessageW(dialog, WM_COMMAND, IDCANCEL, 0);

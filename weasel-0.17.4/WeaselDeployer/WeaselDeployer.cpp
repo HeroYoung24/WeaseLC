@@ -6,6 +6,7 @@
 #include "WeaselDeployer.h"
 #include "Configurator.h"
 #include "CorrectionSettingsDialog.h"
+#include "RimeLearningChecks.h"
 
 CAppModule _Module;
 
@@ -16,6 +17,9 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
                        LPTSTR lpCmdLine,
                        int nCmdShow) {
   UNREFERENCED_PARAMETER(hPrevInstance);
+  if (!wcscmp(L"/rime-learning-selftest", lpCmdLine)) {
+    try { return CheckRimeLearning() ? 0 : 1; } catch (...) { return 1; }
+  }
 
   if (!wcscmp(L"/correction-selftest", lpCmdLine)) {
     return CheckCorrectionDialogResources(hInstance) ? 0 : 1;

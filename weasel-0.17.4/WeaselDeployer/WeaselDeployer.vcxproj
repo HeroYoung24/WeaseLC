@@ -187,6 +187,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="CorrectionPreferences.h" />
+    <ClInclude Include="..\include\CorrectionLexicon.h" />
+    <ClInclude Include="..\include\CorrectionReview.h" />
+    <ClInclude Include="RimeLearningChecks.h" />
     <ClInclude Include="CorrectionSettingsDialog.h" />
     <ClInclude Include="..\include\CorrectionModel.h" />
     <ClInclude Include="Configurator.h" />
@@ -202,6 +205,8 @@
   <ItemGroup>
     <ClCompile Include="CorrectionModel.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="CorrectionPreferences.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="CorrectionLexicon.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="RimeLearningChecks.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="CorrectionSettingsDialog.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="..\RimeWithWeasel\WeaselUtility.cpp" />
     <ClCompile Include="Configurator.cpp" />

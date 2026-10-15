@@ -76,3 +76,6 @@ arm64x_wrapper/*.exp
 /output/ProbeDiagnostics/
 /output/CorrectionTests/
 /output/CorrectionIntegration/
+/output/RimeLearningTests/
+/CorrectionDialogPreview.bmp
+/CorrectionTermsPreview.bmp

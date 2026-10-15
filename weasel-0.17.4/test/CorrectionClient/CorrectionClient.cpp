@@ -6,6 +6,8 @@
 #include <ResponseSlot.h>
 #include <CorrectionSession.h>
 #include <CorrectionQueue.h>
+#include <CorrectionReview.h>
+#include <CorrectionLexicon.h>
 #include "../../WeaselDeployer/CorrectionPreferences.h"
 #include <iostream>
 #include <limits>
@@ -43,6 +45,30 @@ struct MockTransport : IModelTransport {
   }
 };
 int wmain(int argc, wchar_t** argv) {
+  if (argc == 2 && wcscmp(argv[1], L"--storage-checks") == 0) {
+    const auto path = L"Software\\WeaseLC-Lexicon-Test-" + std::to_wstring(GetCurrentProcessId());
+    HKEY key = nullptr; DWORD disposition = 0;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, &disposition) != ERROR_SUCCESS) return 1;
+    if (disposition != REG_CREATED_NEW_KEY) { RegCloseKey(key); return 2; }
+    UserLexicon value, loaded;
+    Check(ReadUserLexiconValue(key, loaded) && loaded.terms.empty(), "missing store starts empty");
+    KeepTerm(value, L"合成保留词");
+    Check(WriteUserLexiconValue(key, value), "explicit term persists");
+    RegCloseKey(key); key = nullptr;
+    Check(RegOpenKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &key) == ERROR_SUCCESS &&
+        ReadUserLexiconValue(key, loaded) && loaded.terms == value.terms, "term restored after reopening store");
+    auto invalid = value; invalid.terms.push_back(L"\n");
+    Check(!WriteUserLexiconValue(key, invalid) && ReadUserLexiconValue(key, loaded) && loaded.terms == value.terms,
+          "invalid save preserves old value");
+    const BYTE malformed[] = {'b','a','d'};
+    RegSetValueExW(key, L"KeptTermsV1", 0, REG_BINARY, malformed, sizeof(malformed));
+    Check(!ReadUserLexiconValue(key, loaded) && loaded.terms == value.terms, "corrupt stored data fails without clearing memory");
+    Check(WriteUserLexiconValue(key, UserLexicon{}) && ReadUserLexiconValue(key, loaded) && loaded.terms.empty(), "explicit clear persisted");
+    RegCloseKey(key);
+    Check(RegDeleteTreeW(HKEY_CURRENT_USER, path.c_str()) == ERROR_SUCCESS, "temporary storage removed");
+    std::cout << "Scoped storage checks = " << checks << ", failures = " << failures << '\n';
+    return failures ? 1 : 0;
+  }
   if (argc == 3 && wcscmp(argv[1], L"--transport-checks") == 0) {
     ModelConfig config; config.mode = Mode::Local; config.model = L"fixture";
     CheckRequest request; request.safeText = true; request.text = L"合成文本。";
@@ -196,6 +222,47 @@ int wmain(int argc, wchar_t** argv) {
   auto nochange = json::object{{"version", 1}, {"decision", "no_change"}, {"suggestions", json::array{}}};
   Check(ParseCorrectionAnswer(json::serialize(Answer({Suggest()})), config, request).state == State::Suggestions,
       "provider-independent answer parser");
+  auto reviewResult = ParseCorrectionAnswer(json::serialize(Answer({Suggest()})), config, request);
+  SuggestionReview review; std::wstring applied;
+  Check(review.Load(request, reviewResult) && review.Apply(0, request.text, request.version, applied) &&
+      applied == L"这里有错字。", "review applies exact current snapshot");
+  Check(!review.Apply(0, request.text, request.version + 1, applied) &&
+      !review.Apply(0, L"文字已经改变", request.version, applied), "review rejects stale actions");
+  Check(!review.Apply(99, request.text, request.version, applied), "review rejects invalid selection");
+  Check(review.Ignore(0, request.text, request.version) && review.Items().empty(), "ignore only consumes current suggestion");
+  Check(review.Load(request, reviewResult) && review.Items().size() == 1, "ignore does not become permanent");
+  auto broken = reviewResult; broken.suggestions.push_back(broken.suggestions[0]);
+  Check(!review.Load(request, broken) && review.Items().empty(), "review fails closed on overlapping items");
+  broken = reviewResult; broken.suggestions[0].start = 5000;
+  Check(!review.Load(request, broken) && review.Items().empty(), "review rejects out of range offsets");
+  auto unsafeReview = request; unsafeReview.safeText = false;
+  Check(!review.Load(unsafeReview, reviewResult), "protected request cannot be reviewed");
+  UserLexicon lexicon;
+  Check(KeepTerm(lexicon, L"错子") && KeepTerm(lexicon, L"错子") && lexicon.terms.size() == 1, "keep deduplicates explicit terms");
+  Check(!KeepTerm(lexicon, L" ") && !KeepTerm(lexicon, L"坏\n词") && !KeepTerm(lexicon, std::wstring(65, L'词')) &&
+      !KeepTerm(lexicon, std::wstring(1, static_cast<wchar_t>(0xd800))), "kept term input bounds");
+  auto filtered = reviewResult; FilterKeptTerms(lexicon, request, filtered);
+  Check(filtered.state == State::Filtered && filtered.suggestions.empty(), "explicitly kept term suppresses suggestion");
+  auto containing = request; containing.text = L"小错子甲又错子乙";
+  auto containingResult = reviewResult; containingResult.suggestions = {{3,L"甲又错子",L"甲又错字",L"测试",.95}};
+  FilterKeptTerms(lexicon, containing, containingResult);
+  Check(containingResult.state == State::Filtered, "any overlapping kept occurrence is protected");
+  UserLexicon other; KeepTerm(other, L"隔壁"); filtered = reviewResult;
+  FilterKeptTerms(other, request, filtered);
+  Check(filtered.state == State::Suggestions, "unrelated kept word preserves typo");
+  auto keptJson = EncodeUserLexicon(lexicon); UserLexicon restored;
+  Check(DecodeUserLexicon(keptJson, restored) && restored.terms == lexicon.terms, "kept terms round trip");
+  Check(!DecodeUserLexicon(R"({"version":2,"terms":[]})", restored) &&
+      !DecodeUserLexicon(R"({"version":1,"terms":["甲","甲"]})", restored) &&
+      !DecodeUserLexicon(R"({"version":1,"terms":[42]})", restored), "bad lexicon does not overwrite restored terms");
+  Check(restored.terms == lexicon.terms, "invalid lexicon preserves previous state");
+  Check(keptJson.find("这里") == std::string::npos && keptJson.find("endpoint") == std::string::npos &&
+      keptJson.find("score") == std::string::npos, "lexicon stores explicit expression only");
+  Check(RemoveTerm(lexicon, 0) && !RemoveTerm(lexicon, 0), "kept expression can be removed");
+  filtered = reviewResult; FilterKeptTerms(lexicon, request, filtered);
+  Check(filtered.state == State::Suggestions, "remove restores future suggestions");
+  for (unsigned i = 0; i < kMaxKeptTerms; ++i) KeepTerm(lexicon, L"词" + std::to_wstring(i));
+  Check(!KeepTerm(lexicon, L"新词") && lexicon.terms.size() == kMaxKeptTerms, "kept list capacity enforced");
   auto protectedAnswer = [&](const wchar_t* target, const char* original, const char* replacement) {
     auto textRequest = request; textRequest.text = target;
     auto item = Suggest(original); item["replacement"] = replacement;
