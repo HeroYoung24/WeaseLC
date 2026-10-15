@@ -6,6 +6,7 @@
 #include <future>
 #include <thread>
 #include <optional>
+#include <limits>
 #include <CorrectionSession.h>
 #include <CorrectionQueue.h>
 #include <resource.h>
@@ -247,23 +248,32 @@ static bool Run(HMODULE module, bool live, bool local, bool holdout, const std::
             << ", model calls = " << modelCalls << ", live = " << live << '\n';
   return valid;
 }
+#include "AutomaticChecks.inc"
+
 int wmain(int argc, wchar_t** argv) {
-  if (argc != 2 && argc != 5 && argc != 6) return 2;
+  const bool automatic = argc == 3 && !wcscmp(argv[2], L"--automatic");
+  const bool automaticLocal = argc == 4 && !wcscmp(argv[2], L"--automatic-local");
+  if (argc != 2 && argc != 5 && argc != 6 && !automatic && !automaticLocal) return 2;
   const bool live = argc == 6 && wcscmp(argv[2], L"--live-codex") == 0;
   const bool local = (argc == 5 || argc == 6) && wcscmp(argv[2], L"--local-http") == 0;
   const bool holdout = local && argc == 6 && wcscmp(argv[5], L"--holdout") == 0;
   if (local && argc == 6 && !holdout) return 2;
-  if (argc != 2 && !live && !local) return 2;
+  if (argc != 2 && !live && !local && !automatic && !automaticLocal) return 2;
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
   if (CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED) != S_OK) return 1;
   HMODULE module = LoadLibraryW(argv[1]);
-  bool valid = module && Run(module, live, local, holdout, (live || local) ? argv[3] : L"",
-      (live || local) ? argv[4] : L"", live ? argv[5] : L"");
+  bool valid = module && ((automatic || automaticLocal) ? RunAutomaticChecks(module,
+      automaticLocal ? argv[3] : L"", automaticLocal) : Run(module, live, local, holdout,
+      (live || local) ? argv[3] : L"", (live || local) ? argv[4] : L"", live ? argv[5] : L""));
   bool released = module != nullptr;
   if (module) {
     auto unload = reinterpret_cast<HRESULT(WINAPI*)()>(GetProcAddress(module,"DllCanUnloadNow"));
     released = unload && unload() == S_OK;
     FreeLibrary(module);
+    WNDCLASSW hintClass{};
+    const bool classRetired = !GetClassInfoW(module, L"WeaseLC.AutomaticCorrection.V1", &hintClass);
+    released = classRetired && released;
+    std::cout << "Hint window class retired = " << classRetired << '\n';
     HMODULE remaining = nullptr;
     released = !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
         reinterpret_cast<LPCWSTR>(module), &remaining) && GetLastError() == ERROR_MOD_NOT_FOUND && released;

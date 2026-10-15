@@ -49,6 +49,8 @@ class UI {
   void ShowWithTimeout(size_t millisec);
   bool IsCountingDown() const;
   bool IsShown() const;
+  bool WindowRect(RECT&) const;
+  UINT WindowDpi() const;
 
   // 重绘界面
   void Refresh();

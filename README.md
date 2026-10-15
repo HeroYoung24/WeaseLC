@@ -1,12 +1,13 @@
 # WeaseLC
 
-基于 Weasel 0.17.4 的中文上下文纠错实验项目。当前版本为本地初始快照，包含此前修改，不包含 Weasel 上游历史，也不能回退到建立本仓库之前的中间状态。
+基于 Weasel 0.17.4 的中文上下文纠错实验项目。仓库从已有修改建立初始快照并持续迭代，不包含 Weasel 上游历史，也不能回退到建立本仓库之前的中间状态。
 
 - [源码、原项目说明和许可证](weasel-0.17.4/README.md)
 - [开发进度](weasel-0.17.4/PAUSED_PROGRESS.md)
 - [任务清单](weasel-0.17.4/docs/CORRECTION_TASKS.md)
 - [本地模型测试报告](weasel-0.17.4/docs/LOCAL_MODEL_TESTS.md)
 - [纠错操作与用户习惯](weasel-0.17.4/docs/CORRECTION_REVIEW_AND_LEARNING.md)
+- [自动提示、Tab 纠错与布局设置](weasel-0.17.4/docs/AUTOMATIC_CORRECTION.md)
 - [模型启动和下载说明](local-model/README.md)
 - [Git/GitHub 使用说明](weasel-0.17.4/docs/GIT_GITHUB_SETUP.md)
 

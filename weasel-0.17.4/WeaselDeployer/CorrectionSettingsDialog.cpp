@@ -119,6 +119,48 @@ void RefreshSuggestions(HWND dialog, DialogState& state) {
   ShowSuggestion(dialog, state);
 }
 struct TermDialogState { DialogState& owner; UserLexicon working; bool modeless = false; };
+struct AutomaticDialogState { DialogState& owner; AutomaticOptions working; bool modeless = false; };
+INT_PTR CALLBACK AutomaticDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM l) {
+  auto* state = reinterpret_cast<AutomaticDialogState*>(GetWindowLongPtrW(dialog, DWLP_USER));
+  if (message == WM_INITDIALOG) {
+    state = reinterpret_cast<AutomaticDialogState*>(l);
+    SetWindowLongPtrW(dialog, DWLP_USER, reinterpret_cast<LONG_PTR>(state));
+    const auto& options = state->working;
+    CheckDlgButton(dialog, IDC_AUTO_ENABLED, options.enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dialog, IDC_AUTO_TAB, options.tab ? BST_CHECKED : BST_UNCHECKED);
+    for (const auto* label : {state->owner.Text(L"右侧（默认）", L"Right (default)"),
+         state->owner.Text(L"左侧", L"Left"), state->owner.Text(L"下方", L"Below")})
+      SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label));
+    SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_SETCURSEL, options.side, 0);
+    for (const auto pair : {std::pair<int, unsigned>{IDC_AUTO_GAP, options.gap},
+         {IDC_AUTO_WIDTH, options.width}, {IDC_AUTO_FONT, options.font}, {IDC_AUTO_DEBOUNCE, options.debounce}}) {
+      SetNumber(dialog, pair.first, pair.second);
+      SendDlgItemMessageW(dialog, pair.first, EM_SETLIMITTEXT, 4, 0);
+    }
+    return TRUE;
+  }
+  if (!state) return FALSE;
+  auto close = [&](int result) { if (state->modeless) DestroyWindow(dialog); else EndDialog(dialog, result); };
+  if (message == WM_CLOSE) { close(IDCANCEL); return TRUE; }
+  if (message != WM_COMMAND) return FALSE;
+  if (LOWORD(w) == IDCANCEL) { close(IDCANCEL); return TRUE; }
+  if (LOWORD(w) == IDOK) {
+    auto options = state->working;
+    options.enabled = IsDlgButtonChecked(dialog, IDC_AUTO_ENABLED) == BST_CHECKED;
+    options.tab = IsDlgButtonChecked(dialog, IDC_AUTO_TAB) == BST_CHECKED;
+    options.side = static_cast<unsigned>(SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_GETCURSEL, 0, 0));
+    options.gap = GetDlgItemInt(dialog, IDC_AUTO_GAP, nullptr, FALSE);
+    options.width = GetDlgItemInt(dialog, IDC_AUTO_WIDTH, nullptr, FALSE);
+    options.font = GetDlgItemInt(dialog, IDC_AUTO_FONT, nullptr, FALSE);
+    options.debounce = GetDlgItemInt(dialog, IDC_AUTO_DEBOUNCE, nullptr, FALSE);
+    if (!ValidAutomaticOptions(options)) {
+      SetDlgItemTextW(dialog, IDC_AUTO_STATE, state->owner.Text(L"参数超出范围，请按标注范围填写。", L"Use the ranges shown beside each field.")); return TRUE;
+    }
+    state->owner.preferences.automatic = options;
+    close(IDOK); return TRUE;
+  }
+  return FALSE;
+}
 void CloseTerms(HWND dialog, TermDialogState& state, INT_PTR result) {
   if (state.modeless) DestroyWindow(dialog); else EndDialog(dialog, result);
 }
@@ -255,8 +297,8 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
         state->Text(L"【小狼毫】纠错界面离线演示（模拟响应）", L"Weasel: Offline correction demo (fixtures)"));
     if (state->demo) SetDlgItemTextW(dialog, IDOK, state->Text(L"关闭演示", L"Close demo"));
     state->updating = true;
-    for (const auto* label : {state->Text(L"下次同一场景输入时（预留）", L"At next input (reserved)"),
-                              state->Text(L"检测后立即提示（预留）", L"Immediately (reserved)")})
+    for (const auto* label : {state->Text(L"下次同一输入框开始输入时", L"At next composition"),
+                              state->Text(L"检测后立即提示", L"Immediately")})
       SendDlgItemMessageW(dialog, IDC_CORRECTION_TIMING, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label));
     SendDlgItemMessageW(dialog, IDC_CORRECTION_TIMING, CB_SETCURSEL, state->preferences.timing, 0);
     for (const auto* label : {state->Text(L"保守（90）", L"Conservative (90)"),
@@ -286,8 +328,8 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
     SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,
         state->demo ? state->Text(L"离线演示：点击“检查文本”查看模拟建议；不调用模型，不保存设置。",
                                   L"Offline demo: Check text for fixture suggestions. No model calls or saved settings.") :
-            state->Text(L"未连接。填写模型名，选择模式后可手动检查；不会自动读取其他应用。",
-                        L"Not connected. Choose mode and model for manual checks; other apps are not read."));
+            state->Text(L"填写模型名后可手动检查；自动提示需在左下方单独开启（仅本地模型）。",
+                        L"Set a model for manual checks. Enable automatic hints separately (local only)."));
     if (!state->lexiconReady) SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,
         state->Text(L"保留词表读取失败，请在“管理保留词”中清空并保存后重试。",
                     L"Kept terms could not be read. Clear/save them in Manage kept terms before checking."));
@@ -337,8 +379,8 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
     if (state->preferences.mode != Mode::Off) state->editing = state->preferences.mode;
     LoadProfile(dialog, *state);
     SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,
-        state->Text(L"模式已改变；仅影响本页手动检查，尚未启用自动纠错。",
-                    L"Mode changed for manual checks only. Automatic correction is not enabled."));
+        state->Text(L"模式已改变；自动提示需要本地模式，并在左下方单独开启。",
+                    L"Mode changed. Automatic hints require Local mode and a separate opt-in."));
     return TRUE;
   }
   switch (id) {
@@ -384,6 +426,12 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
       }
       return TRUE;
     }
+    case IDC_CORRECTION_AUTOMATIC: {
+      AutomaticDialogState settings{*state, state->preferences.automatic};
+      DialogBoxParamW(reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(dialog, GWLP_HINSTANCE)),
+          MAKEINTRESOURCEW(IDD_CORRECTION_AUTOMATIC), dialog, AutomaticDialogProc, reinterpret_cast<LPARAM>(&settings));
+      return TRUE;
+    }
     case IDC_CORRECTION_CHECK: if (!state->testing) BeginCheck(dialog, *state); return TRUE;
     case IDC_CORRECTION_CANCEL_CHECK:
       Cancel(*state, dialog);
@@ -403,6 +451,12 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
       if (state->testing) return TRUE;
       if (state->demo) { EndDialog(dialog, IDOK); return TRUE; }
       ReadProfile(dialog, *state);
+      if (state->preferences.automatic.enabled && state->preferences.mode == Mode::Local &&
+          (!ValidateConfig(state->preferences.local) || !Text(dialog, IDC_CORRECTION_TOKEN).empty())) {
+        MessageBoxW(dialog, state->Text(L"自动提示需要有效的本地回环接口及模型名，目前不支持保存访问密钥。",
+            L"Automatic hints require a valid loopback endpoint and model, without an access token."), L"Weasel", MB_OK | MB_ICONERROR);
+        return TRUE;
+      }
       state->preferences.timing = static_cast<unsigned>(SendDlgItemMessageW(dialog, IDC_CORRECTION_TIMING, CB_GETCURSEL, 0, 0));
       if (!SavePreferences(state->preferences)) {
         MessageBoxW(dialog, state->Text(L"无法保存。超时需为 2–60 秒，分数需为 0–100。", L"Cannot save. Timeout must be 2–60 seconds, score 0–100."),
@@ -502,9 +556,36 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
         IDC_CORRECTION_CHECK, IDC_CORRECTION_CANCEL_CHECK, IDC_CORRECTION_CLI_RESERVED,
         IDC_CORRECTION_JSON_MODE, IDC_CORRECTION_CONSENT, IDC_CORRECTION_DEFAULTS,
         IDC_CORRECTION_SUGGESTIONS, IDC_CORRECTION_APPLY, IDC_CORRECTION_IGNORE,
-        IDC_CORRECTION_KEEP, IDC_CORRECTION_TERMS})
+        IDC_CORRECTION_KEEP, IDC_CORRECTION_TERMS, IDC_CORRECTION_AUTOMATIC})
       check(GetDlgItem(dialog, id) != nullptr, "control present");
     check(!IsWindowVisible(dialog), "hidden test window");
+    AutomaticDialogState automatic{state, state.preferences.automatic, true};
+    HWND autoDialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_CORRECTION_AUTOMATIC), dialog,
+        AutomaticDialogProc, reinterpret_cast<LPARAM>(&automatic));
+    check(autoDialog != nullptr, "automatic layout dialog created");
+    if (autoDialog) {
+      check(IsDlgButtonChecked(autoDialog, IDC_AUTO_ENABLED) == BST_UNCHECKED &&
+          SendDlgItemMessageW(autoDialog, IDC_AUTO_SIDE, CB_GETCOUNT, 0, 0) == 3,
+          "automatic opt-in defaults and layout choices");
+      if (language == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)) SaveDialogPreview(autoDialog, "CorrectionAutomaticPreview.bmp");
+      SetDlgItemInt(autoDialog, IDC_AUTO_WIDTH, 1, FALSE);
+      SendMessageW(autoDialog, WM_COMMAND, IDOK, 0);
+      check(IsWindow(autoDialog) && !state.preferences.automatic.enabled, "invalid layout cannot be accepted");
+      SetDlgItemInt(autoDialog, IDC_AUTO_WIDTH, 400, FALSE);
+      CheckDlgButton(autoDialog, IDC_AUTO_ENABLED, BST_CHECKED);
+      SendMessageW(autoDialog, WM_COMMAND, IDCANCEL, 0);
+      check(!state.preferences.automatic.enabled, "layout cancel leaves options unchanged");
+      autoDialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_CORRECTION_AUTOMATIC), dialog,
+          AutomaticDialogProc, reinterpret_cast<LPARAM>(&automatic));
+      if (autoDialog) {
+        CheckDlgButton(autoDialog, IDC_AUTO_ENABLED, BST_CHECKED);
+        SetDlgItemInt(autoDialog, IDC_AUTO_WIDTH, 400, FALSE);
+        SendMessageW(autoDialog, WM_COMMAND, IDOK, 0);
+        check(state.preferences.automatic.enabled && state.preferences.automatic.width == 400 && !IsWindow(autoDialog),
+            "layout confirmation changes parent memory only");
+        state.preferences.automatic = AutomaticOptions{};
+      } else check(false, "automatic layout recreated");
+    }
     check(!IsWindowEnabled(GetDlgItem(dialog, IDC_CORRECTION_CHECK)) &&
         IsDlgButtonChecked(dialog, IDC_CORRECTION_OFF) == BST_CHECKED, "off default");
     SendMessageW(dialog, WM_COMMAND, MAKEWPARAM(IDC_CORRECTION_LOCAL, BN_CLICKED), 0);

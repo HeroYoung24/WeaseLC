@@ -9,6 +9,13 @@ CRITICAL_SECTION g_cs;
 
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 #ifdef _M_IX86
+#pragma comment(linker, "/EXPORT:WeaselProbeAutomaticConfigure=_WeaselProbeAutomaticConfigure@16")
+#pragma comment(linker, "/EXPORT:WeaselProbeAutomaticInject=_WeaselProbeAutomaticInject@8")
+#pragma comment(linker, "/EXPORT:WeaselProbeAutomaticState=_WeaselProbeAutomaticState@12")
+#pragma comment(linker, "/EXPORT:WeaselProbeAutomaticPoll=_WeaselProbeAutomaticPoll@4")
+#pragma comment(linker, "/EXPORT:WeaselProbeAutomaticExpire=_WeaselProbeAutomaticExpire@4")
+#pragma comment(linker, "/EXPORT:WeaselProbeAutomaticKey=_WeaselProbeAutomaticKey@24")
+#pragma comment(linker, "/EXPORT:WeaselProbeAutomaticPreedit=_WeaselProbeAutomaticPreedit@16")
 // WINAPI exports are decorated on x86. Give the diagnostic the same stable
 // names as x64; these aliases are absent from ordinary Weasel builds.
 #pragma comment(linker, "/EXPORT:WeaselProbeGetActivationStage=_WeaselProbeGetActivationStage@0")

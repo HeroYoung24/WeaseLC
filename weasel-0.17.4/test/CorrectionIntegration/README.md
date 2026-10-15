@@ -1,5 +1,7 @@
 # 真实 TSF 文本写入与模型回路
 
+自动提示新增 `--automatic`（双架构各 46 项）和 `--automatic-local <WeaselDeployer.exe 绝对路径>`（双架构各 16 项）模式：在独立宿主验证提示、真实键盘事件接收器的 Tab 接受、保留预编辑、拒绝/过期写回和独立模型进程。具体行为、限制及命令见 [自动提示说明](../../docs/AUTOMATIC_CORRECTION.md)。这些模式也不激活或注册 TIP，不采集实际输入。
+
 `CorrectionIntegration.vcxproj` 支持 Release x64/Win32。只加载匹配的探测 DLL，以 `TF_TMAE_NOACTIVATETIP` 创建自己的 TSF 宿主；不注册、激活或安装任何输入法，不与现有 WeaselServer 建立会话。
 
 默认模式：快照所有权自检、真实上下文/编辑锁/组合写入、普通字段提交、未知/密码字段跳过、固定响应校验和结果失效，19 项通过。普通/拼音按键与 Rime 响应未包含在该模式。

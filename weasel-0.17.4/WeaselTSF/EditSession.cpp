@@ -89,6 +89,20 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeCreateBoundEditSessio
   return S_OK;
 }
 
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticPreedit(
+    ITfTextInputProcessorEx* service, ITfContext* context, TfEditCookie cookie, const WCHAR* text) {
+  if (!service || !context || !text) return E_INVALIDARG;
+  auto* tsf = static_cast<WeaselTSF*>(service);
+  tsf->_BindEditContext(context);
+  ServerResponse response;
+  response.config.inline_preedit = TRUE; response.status.composing = TRUE;
+  auto content = std::make_shared<weasel::Context>(); content->preedit.str = text;
+  response.context = content;
+  const HRESULT hr = tsf->_ApplyCompositionResponse(cookie, context, response);
+  tsf->Automatic().Position(RECT{100, 100, 110, 120});
+  return hr;
+}
+
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeInvalidateEditSessions(
     ITfTextInputProcessorEx* service) {
   if (!service) return E_POINTER;

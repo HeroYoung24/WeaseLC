@@ -7,6 +7,7 @@
 #include "Configurator.h"
 #include "CorrectionSettingsDialog.h"
 #include "RimeLearningChecks.h"
+#include "CorrectionWorker.h"
 
 CAppModule _Module;
 
@@ -17,6 +18,8 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
                        LPTSTR lpCmdLine,
                        int nCmdShow) {
   UNREFERENCED_PARAMETER(hPrevInstance);
+  if (!wcscmp(L"/correction-worker", lpCmdLine)) return RunCorrectionWorker();
+  if (!wcscmp(L"/correction-worker-selftest", lpCmdLine)) return RunCorrectionWorker(true);
   if (!wcscmp(L"/rime-learning-selftest", lpCmdLine)) {
     try { return CheckRimeLearning() ? 0 : 1; } catch (...) { return 1; }
   }

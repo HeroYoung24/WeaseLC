@@ -332,10 +332,22 @@ int wmain(int argc, wchar_t** argv) {
       decoded.local.model == L"test-model" && decoded.online.minimumScore == .75 &&
       decoded.local.bearerToken.empty() && !decoded.online.onlineConsent, "separate profile roundtrip");
   Check(!DecodePreferences("invalid", decoded), "invalid preferences");
-  auto settings = json::parse(encoded); settings.at("version") = 3;
+  auto settings = json::parse(encoded); settings.at("version") = 4;
   Check(!DecodePreferences(json::serialize(settings), decoded), "future preferences rejected");
   settings = json::parse(encoded); settings.at("local").at("timeout") = 0;
   Check(!DecodePreferences(json::serialize(settings), decoded), "invalid saved timeout");
+  preferences.automatic.enabled = true; preferences.automatic.side = 2;
+  preferences.automatic.gap = 16; preferences.automatic.font = 18;
+  Check(DecodePreferences(EncodePreferences(preferences), decoded) && decoded.automatic.enabled &&
+      decoded.automatic.side == 2 && decoded.automatic.gap == 16 && decoded.automatic.font == 18,
+      "automatic options roundtrip");
+  auto legacy = json::parse(encoded); legacy.at("version") = 2; legacy.as_object().erase("automatic");
+  Check(DecodePreferences(json::serialize(legacy), decoded) && !decoded.automatic.enabled,
+      "v2 migration keeps automatic capture disabled");
+  for (const char* field : {"side", "gap", "width", "font", "debounce"}) {
+    auto invalid = json::parse(encoded); invalid.at("automatic").at(field) = 99999;
+    Check(!DecodePreferences(json::serialize(invalid), decoded), "automatic options bounds enforced");
+  }
   std::cout << "Offline correction checks = " << checks << ", failures = " << failures << '\n';
   return failures ? 1 : 0;
 }

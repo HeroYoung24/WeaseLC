@@ -1,6 +1,7 @@
 target("WeaselTSF")
   set_kind("shared")
   add_files("./*.cpp", "WeaselTSF.def")
+  add_files("../WeaselDeployer/CorrectionPreferences.cpp")
   add_rules("add_rcfiles", "use_weaselconstants")
   add_deps("WeaselIPC", "WeaselUI")
   local fname = ''

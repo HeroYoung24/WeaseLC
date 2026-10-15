@@ -368,6 +368,8 @@ void CCandidateList::_MakeUIWindow() {
 
 void WeaselTSF::_UpdateUI(const Context& ctx, const Status& status) {
   _cand->UpdateUI(ctx, status);
+  if (status.ascii_mode || status.disabled) _automatic->Cancel();
+  else _automatic->Refresh();
 }
 
 void WeaselTSF::_StartUI() {
@@ -384,6 +386,7 @@ void WeaselTSF::_ShowUI() {
 
 void WeaselTSF::_HideUI() {
   _cand->Show(FALSE);
+  _automatic->Cancel();
 }
 
 com_ptr<ITfContext> WeaselTSF::_GetUIContextDocument() {

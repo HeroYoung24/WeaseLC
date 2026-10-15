@@ -134,6 +134,11 @@ correction::ProbeResult ProbeContext(ITfContext* context,
 }
 }  // namespace
 
+bool WeaselTSF::_CorrectionSafeScope(ITfContext* context, TfEditCookie cookie, ITfRange* range) {
+  correction::ProbeStatus status = correction::ProbeStatus::ScopeUnavailable;
+  return context && range && IsOrdinaryTextScope(context, cookie, range, status);
+}
+
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 namespace {
 correction::CommitCaptureSink commitSink = nullptr;
@@ -221,6 +226,7 @@ STDAPI WeaselTSF::OnEndEdit(ITfContext* pContext,
   }
 
   /* text modification? */
+  _automatic->Observe(pContext, ecReadOnly);
   bool text_changed = false;
   if (pEditRecord->GetTextAndPropertyUpdates(TF_GTP_INCL_TEXT, NULL, 0,
                                              &pEnumTextChanges) == S_OK) {

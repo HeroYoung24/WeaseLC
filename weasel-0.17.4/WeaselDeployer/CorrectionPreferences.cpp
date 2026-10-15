@@ -53,8 +53,11 @@ void ReadProfile(const json::value& value, ModelConfig& config) {
 }
 }  // namespace
 std::string EncodePreferences(const Preferences& preferences) {
-  return json::serialize(json::object{{"version", 2},
+  const auto& a = preferences.automatic;
+  return json::serialize(json::object{{"version", 3},
       {"mode", static_cast<unsigned>(preferences.mode)}, {"timing", preferences.timing},
+      {"automatic", {{"enabled", a.enabled}, {"tab", a.tab}, {"side", a.side},
+          {"gap", a.gap}, {"width", a.width}, {"font", a.font}, {"debounce", a.debounce}}},
       {"local", Profile(preferences.local)}, {"online", Profile(preferences.online)}});
 }
 bool DecodePreferences(const std::string& encoded, Preferences& preferences) {
@@ -62,7 +65,8 @@ bool DecodePreferences(const std::string& encoded, Preferences& preferences) {
   try {
     json::parse_options options; options.max_depth = 8;
     auto object = json::parse(encoded, {}, options).as_object();
-    if (object.at("version").as_int64() != 2) return false;
+    const auto version = object.at("version").as_int64();
+    if (version != 2 && version != 3) return false;
     Preferences decoded;
     const auto mode = json::value_to<unsigned>(object.at("mode"));
     decoded.timing = json::value_to<unsigned>(object.at("timing"));
@@ -70,6 +74,17 @@ bool DecodePreferences(const std::string& encoded, Preferences& preferences) {
     decoded.mode = static_cast<Mode>(mode);
     ReadProfile(object.at("local"), decoded.local);
     ReadProfile(object.at("online"), decoded.online);
+    if (version == 3) {
+      const auto& saved = object.at("automatic").as_object();
+      auto& a = decoded.automatic;
+      a.enabled = saved.at("enabled").as_bool(); a.tab = saved.at("tab").as_bool();
+      a.side = json::value_to<unsigned>(saved.at("side"));
+      a.gap = json::value_to<unsigned>(saved.at("gap"));
+      a.width = json::value_to<unsigned>(saved.at("width"));
+      a.font = json::value_to<unsigned>(saved.at("font"));
+      a.debounce = json::value_to<unsigned>(saved.at("debounce"));
+      if (!ValidAutomaticOptions(a)) return false;
+    }
     preferences = std::move(decoded);
     return true;
   } catch (...) { return false; }

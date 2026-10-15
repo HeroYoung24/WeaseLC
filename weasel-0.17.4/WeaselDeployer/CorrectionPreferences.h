@@ -1,10 +1,12 @@
 #pragma once
 #include <CorrectionModel.h>
+#include <CorrectionAutomatic.h>
 
 namespace correction {
 struct Preferences {
   Mode mode = Mode::Off;
-  unsigned timing = 0;  // Reserved for future automatic checks, not manual ones.
+  unsigned timing = 0;  // next composition / immediately after result
+  AutomaticOptions automatic;
   ModelConfig local;
   ModelConfig online;
   Preferences() {

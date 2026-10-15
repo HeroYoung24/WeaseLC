@@ -3,6 +3,7 @@
 #include "Globals.h"
 #include <WeaselIPC.h>
 #include <WeaselIPCData.h>
+#include "AutomaticCorrection.h"
 
 class CCandidateList;
 class CLangBarItemButton;
@@ -22,6 +23,8 @@ class WeaselTSF : public ITfTextInputProcessorEx,
  public:
   WeaselTSF();
   ~WeaselTSF();
+  AutomaticCorrection& Automatic() { return *_automatic; }
+  bool _CorrectionSafeScope(ITfContext*, TfEditCookie, ITfRange*);
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   HRESULT ProbeGetCandidate(IUnknown** candidate);
   HRESULT ProbeExerciseLanguageBar(ITfThreadMgr* manager);
@@ -177,6 +180,8 @@ class WeaselTSF : public ITfTextInputProcessorEx,
                         bool* const scroll_next);
 
  private:
+  friend class AutomaticCorrection;
+  std::unique_ptr<AutomaticCorrection> _automatic;
   /* ui callback functions private */
   void _SelectCandidateOnCurrentPage(const size_t index);
   void _HandleMouseHoverEvent(const size_t index);

@@ -79,3 +79,4 @@ arm64x_wrapper/*.exp
 /output/RimeLearningTests/
 /CorrectionDialogPreview.bmp
 /CorrectionTermsPreview.bmp
+/CorrectionAutomaticPreview.bmp

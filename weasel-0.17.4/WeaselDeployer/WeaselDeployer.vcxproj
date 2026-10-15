@@ -203,6 +203,7 @@
     <ClInclude Include="WeaselDeployer.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CorrectionWorker.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="CorrectionModel.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="CorrectionPreferences.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="CorrectionLexicon.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>

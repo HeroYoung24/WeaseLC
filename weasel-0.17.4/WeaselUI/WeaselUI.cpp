@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include <WeaselUI.h>
 #include "WeaselPanel.h"
+#include <CorrectionAutomatic.h>
 
 using namespace weasel;
 
@@ -147,6 +148,14 @@ bool UI::IsCountingDown() const {
 
 bool UI::IsShown() const {
   return pimpl_ && pimpl_->IsShown();
+}
+
+bool UI::WindowRect(RECT& rect) const {
+  return pimpl_ && pimpl_->panel.IsWindow() && pimpl_->IsShown() &&
+      ::GetWindowRect(pimpl_->panel.m_hWnd, &rect);
+}
+UINT UI::WindowDpi() const {
+  return pimpl_ && pimpl_->panel.IsWindow() ? correction::AutomaticWindowDpi(pimpl_->panel.m_hWnd) : 0;
 }
 
 void UI::Refresh() {

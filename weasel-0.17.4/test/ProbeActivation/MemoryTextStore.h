@@ -80,6 +80,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   STDMETHODIMP RequestLock(DWORD flags, HRESULT* result) override {
     if (!result) return E_POINTER;
     if (!sink_) return E_FAIL;
+    if (refuseWrites && (flags & TS_LF_READWRITE) == TS_LF_READWRITE) { *result = E_FAIL; return S_OK; }
     if (lock_) {
       if (flags & TS_LF_SYNC) *result = TS_E_SYNCHRONOUS;
       else { pendingLock_ |= flags; *result = TS_S_ASYNC; }
@@ -241,6 +242,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   }
   unsigned candidateStarts = 0;
   unsigned candidateEnds = 0;
+  bool refuseWrites = false;  // synthetic refusal; never affects a real host
 
  private:
   bool RangeValid(LONG start, LONG end) const {

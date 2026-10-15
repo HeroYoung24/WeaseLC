@@ -79,6 +79,7 @@ WeaselTSF::WeaselTSF() {
   _fCUASWorkaroundTested = _fCUASWorkaroundEnabled = FALSE;
 
   _cand.Attach(new CCandidateList(this));
+  _automatic = std::make_unique<AutomaticCorrection>(this);
 
   DllAddRef();
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
@@ -88,6 +89,7 @@ WeaselTSF::WeaselTSF() {
 }
 
 WeaselTSF::~WeaselTSF() {
+  _automatic.reset();
   _cand->DetachService();
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   InterlockedIncrement(&g_probeDestroyed);

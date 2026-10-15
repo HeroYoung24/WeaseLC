@@ -88,6 +88,9 @@ STDAPI WeaselTSF::OnTestKeyDown(ITfContext* pContext,
                                 WPARAM wParam,
                                 LPARAM lParam,
                                 BOOL* pfEaten) {
+  if (_automatic->Key(pContext, wParam, lParam, true, false, pfEaten)) {
+    _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
+  }
   _fTestKeyUpPending = FALSE;
   if (_fTestKeyDownPending) {
     *pfEaten = TRUE;
@@ -104,6 +107,9 @@ STDAPI WeaselTSF::OnKeyDown(ITfContext* pContext,
                             WPARAM wParam,
                             LPARAM lParam,
                             BOOL* pfEaten) {
+  if (_automatic->Key(pContext, wParam, lParam, false, false, pfEaten)) {
+    _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
+  }
   _fTestKeyUpPending = FALSE;
   if (_fTestKeyDownPending) {
     _fTestKeyDownPending = FALSE;
@@ -119,6 +125,9 @@ STDAPI WeaselTSF::OnTestKeyUp(ITfContext* pContext,
                               WPARAM wParam,
                               LPARAM lParam,
                               BOOL* pfEaten) {
+  if (_automatic->Key(pContext, wParam, lParam, true, true, pfEaten)) {
+    _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
+  }
   _fTestKeyDownPending = FALSE;
   if (_fTestKeyUpPending) {
     *pfEaten = TRUE;
@@ -135,6 +144,9 @@ STDAPI WeaselTSF::OnKeyUp(ITfContext* pContext,
                           WPARAM wParam,
                           LPARAM lParam,
                           BOOL* pfEaten) {
+  if (_automatic->Key(pContext, wParam, lParam, false, true, pfEaten)) {
+    _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
+  }
   _fTestKeyDownPending = FALSE;
   if (_fTestKeyUpPending) {
     _fTestKeyUpPending = FALSE;

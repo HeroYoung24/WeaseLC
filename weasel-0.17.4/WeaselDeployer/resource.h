@@ -72,6 +72,16 @@
 #define IDC_CORRECTION_TERM_REMOVE      1041
 #define IDC_CORRECTION_TERM_CLEAR       1042
 #define IDC_CORRECTION_TERM_STATE       1043
+#define IDD_CORRECTION_AUTOMATIC        161
+#define IDC_CORRECTION_AUTOMATIC        1044
+#define IDC_AUTO_ENABLED                1045
+#define IDC_AUTO_TAB                    1046
+#define IDC_AUTO_SIDE                   1047
+#define IDC_AUTO_GAP                    1048
+#define IDC_AUTO_WIDTH                  1049
+#define IDC_AUTO_FONT                   1050
+#define IDC_AUTO_DEBOUNCE               1051
+#define IDC_AUTO_STATE                  1052
 #define IDC_SCHEMA_LIST                 1000
 #define IDC_SCHEMA_DESCRIPTION          1001
 #define IDC_GET_SCHEMATA                1002

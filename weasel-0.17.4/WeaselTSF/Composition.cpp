@@ -321,6 +321,7 @@ void WeaselTSF::_SetCompositionPosition(const RECT& rc) {
   _rc.top = _rc.bottom = rc.bottom;
   m_client.UpdateInputPosition(rc);
   _cand->UpdateInputPosition(rc);
+  _automatic->Position(rc);
 }
 
 /* Inline Preedit */
@@ -476,11 +477,14 @@ HRESULT WeaselTSF::_ApplyCompositionResponse(TfEditCookie cookie, ITfContext* co
     CInsertTextEditSession insert(this, context, _pComposition, response.commit);
     hr = insert.DoEditSession(cookie);
     if (FAILED(hr)) return hr;
+    com_ptr<ITfRange> committedRange;
+    if (_pComposition) _pComposition->GetRange(&committedRange);
     _committed = TRUE;
     if (!current()) return TF_E_DISCONNECTED;
     hr = end(FALSE);
     if (FAILED(hr)) return hr;
     if (!current()) return TF_E_DISCONNECTED;
+    _automatic->Capture(context, cookie, committedRange, response.commit);
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
     ProbeCaptureCommit(context, cookie, response.commit);
 #endif
@@ -552,6 +556,7 @@ void WeaselTSF::_UpdateComposition(com_ptr<ITfContext> pContext) {
 
 /* Composition State */
 void WeaselTSF::_InvalidateEditSessions() {
+  _automatic->Cancel();
   ++_editGeneration;
   _lastCapturedStyle.reset();
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
