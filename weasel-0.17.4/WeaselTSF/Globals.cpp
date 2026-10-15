@@ -1,0 +1,102 @@
+#include "stdafx.h"
+#include "Globals.h"
+
+HINSTANCE g_hInst;
+
+LONG g_cRefDll = -1;
+
+CRITICAL_SECTION g_cs;
+
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+#ifdef _M_IX86
+// WINAPI exports are decorated on x86. Give the diagnostic the same stable
+// names as x64; these aliases are absent from ordinary Weasel builds.
+#pragma comment(linker, "/EXPORT:WeaselProbeGetActivationStage=_WeaselProbeGetActivationStage@0")
+#pragma comment(linker, "/EXPORT:WeaselProbeGetActivationResult=_WeaselProbeGetActivationResult@0")
+#pragma comment(linker, "/EXPORT:WeaselProbeGetLifecycleCounts=_WeaselProbeGetLifecycleCounts@16")
+#pragma comment(linker, "/EXPORT:WeaselProbeGetCandidate=_WeaselProbeGetCandidate@8")
+#pragma comment(linker, "/EXPORT:WeaselProbeExerciseComposition=_WeaselProbeExerciseComposition@28")
+#pragma comment(linker, "/EXPORT:WeaselProbeCreateCompositionSession=_WeaselProbeCreateCompositionSession@24")
+#pragma comment(linker, "/EXPORT:WeaselProbeRequestCompositionSession=_WeaselProbeRequestCompositionSession@12")
+#pragma comment(linker, "/EXPORT:WeaselProbeCreateBoundEditSession=_WeaselProbeCreateBoundEditSession@16")
+#pragma comment(linker, "/EXPORT:WeaselProbeInvalidateEditSessions=_WeaselProbeInvalidateEditSessions@4")
+#pragma comment(linker, "/EXPORT:WeaselProbeSetCommitSink=_WeaselProbeSetCommitSink@8")
+#pragma comment(linker, "/EXPORT:WeaselProbeSnapshotChecks=_WeaselProbeSnapshotChecks@0")
+#pragma comment(linker, "/EXPORT:WeaselProbeCreateTextSession=_WeaselProbeCreateTextSession@24")
+#pragma comment(linker, "/EXPORT:WeaselProbeApplySyntheticResponse=_WeaselProbeApplySyntheticResponse@16")
+#pragma comment(linker, "/EXPORT:WeaselProbeCopyLanguageBarTrace=_WeaselProbeCopyLanguageBarTrace@8")
+#pragma comment(linker, "/EXPORT:WeaselProbeExerciseLanguageBar=_WeaselProbeExerciseLanguageBar@8")
+#pragma comment(linker, "/EXPORT:WeaselProbeCaptureResultsInMemory=_WeaselProbeCaptureResultsInMemory@4")
+#pragma comment(linker, "/EXPORT:WeaselProbeGetCapturedResult=_WeaselProbeGetCapturedResult@4")
+#endif
+// Test-only TSF identity: {B749B45E-7DCE-4496-8414-9EE10970260A}
+static const GUID c_clsidTextService = {
+    0xb749b45e,
+    0x7dce,
+    0x4496,
+    {0x84, 0x14, 0x9e, 0xe1, 0x09, 0x70, 0x26, 0x0a}};
+
+// Test-only language profile: {A2F702D2-DD84-4C9E-9C18-66FEBA75C4E3}
+static const GUID c_guidProfile = {
+    0xa2f702d2,
+    0xdd84,
+    0x4c9e,
+    {0x9c, 0x18, 0x66, 0xfe, 0xba, 0x75, 0xc4, 0xe3}};
+#else
+// {A3F4CDED-B1E9-41EE-9CA6-7B4D0DE6CB0A}
+static const GUID c_clsidTextService = {
+    0xa3f4cded,
+    0xb1e9,
+    0x41ee,
+    {0x9c, 0xa6, 0x7b, 0x4d, 0xd, 0xe6, 0xcb, 0xa}};
+
+// {3D02CAB6-2B8E-4781-BA20-1C9267529467}
+static const GUID c_guidProfile = {
+    0x3d02cab6,
+    0x2b8e,
+    0x4781,
+    {0xba, 0x20, 0x1c, 0x92, 0x67, 0x52, 0x94, 0x67}};
+#endif
+
+// {341F9E3A-B8AD-499D-936C-48701E329FB2}
+static const GUID c_guidLangBarItemButton = {
+    0x341f9e3a,
+    0xb8ad,
+    0x499d,
+    {0x93, 0x6c, 0x48, 0x70, 0x1e, 0x32, 0x9f, 0xb2}};
+
+// {2AC87E79-3260-4B32-9DEA-F8390976C20B}
+static const GUID c_guidDisplayAttributeInput = {
+    0x2ac87e79,
+    0x3260,
+    0x4b32,
+    {0x9d, 0xea, 0xf8, 0x39, 0x09, 0x76, 0xc2, 0x0b}};
+
+#ifdef WEASEL_USING_OLDER_TSF_SDK
+
+/* For Windows 8 */
+const GUID GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT = {
+    0x13A016DF,
+    0x560B,
+    0x46CD,
+    {0x94, 0x7A, 0x4C, 0x3A, 0xF1, 0xE0, 0xE3, 0x5D}};
+
+const GUID GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT = {
+    0x25504FB4,
+    0x7BAB,
+    0x4BC1,
+    {0x9C, 0x69, 0xCF, 0x81, 0x89, 0x0F, 0x0E, 0xF5}};
+
+#endif
+
+const GUID GUID_LBI_INPUTMODE = {
+    0x2C77A81E,
+    0x41CC,
+    0x4178,
+    {0xA3, 0xA7, 0x5F, 0x8A, 0x98, 0x75, 0x68, 0xE6}};
+
+const GUID GUID_IME_MODE_PRESERVED_KEY = {
+    0x0bd899fc,
+    0xa8f7,
+    0x4b42,
+    {0xa9, 0x6d, 0xce, 0xc7, 0xc5, 0x0e, 0x0e, 0xae}};

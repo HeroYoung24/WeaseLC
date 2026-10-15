@@ -1,0 +1,8 @@
+[submodule "librime"]
+	path = weasel-0.17.4/librime
+	url = https://github.com/rime/librime.git
+	ignore = untracked
+[submodule "plum"]
+	path = weasel-0.17.4/plum
+	url = https://github.com/rime/plum.git
+	ignore = untracked

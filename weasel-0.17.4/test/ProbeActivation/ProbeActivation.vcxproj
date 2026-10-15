@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{65184D32-0D28-4C73-B9CE-5AD9EBB55373}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>ProbeActivation</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)Microsoft.Cpp.props" />
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <OutDir>$(ProjectDir)..\..\output\ProbeDiagnostics\$(Platform)\</OutDir>
+    <IntDir>$(ProjectDir)..\..\msbuild\ProbeDiagnostics\$(Platform)\</IntDir>
+    <TargetName>ProbeActivation</TargetName>
+    <ProbeManifest>ProbeProfile.manifest</ProbeManifest>
+    <ProbeManifest Condition="'$(Platform)'=='Win32'">ProbeProfile.Win32.manifest</ProbeManifest>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="ProbeActivation.cpp" />
+    <ClInclude Include="FailedActivation.h" />
+    <ClInclude Include="HostBoundary.h" />
+    <ClInclude Include="RegistrationTests.h" />
+    <ClInclude Include="ClassFactoryTests.h" />
+    <ClInclude Include="CompositionTests.h" />
+    <ClInclude Include="LocalProfile.h" />
+    <ClInclude Include="MemoryTextStore.h" />
+    <ClInclude Include="ContextProbeTests.h" />
+    <ClInclude Include="LanguageBarOwnership.h" />
+    <ClInclude Include="TemporaryKeyboardCategory.h" />
+    <ClInclude Include="TemporaryHiddenProfile.h" />
+    <None Include="ProbeProfile.manifest" />
+    <None Include="ProbeProfile.Win32.manifest" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)Microsoft.Cpp.targets" />
+  <Target Name="CopyLocalProfileFiles" AfterTargets="Build">
+    <Copy SourceFiles="$(ProjectDir)$(ProbeManifest)" DestinationFiles="$(OutDir)ProbeProfile.manifest" />
+    <Copy SourceFiles="$(ProjectDir)..\..\output\Probe\v3\$(Platform)\weaselProbe.dll" DestinationFolder="$(OutDir)" Condition="Exists('$(ProjectDir)..\..\output\Probe\v3\$(Platform)\weaselProbe.dll')" />
+    <Copy SourceFiles="$(ProjectDir)..\..\output\Probe\v3\$(Platform)\weaselProbe.pdb" DestinationFolder="$(OutDir)" Condition="Exists('$(ProjectDir)..\..\output\Probe\v3\$(Platform)\weaselProbe.pdb')" />
+  </Target>
+</Project>

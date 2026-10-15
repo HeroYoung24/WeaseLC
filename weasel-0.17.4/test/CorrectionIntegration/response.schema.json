@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "version": {"type": "integer", "enum": [1]},
+    "decision": {"type": "string", "enum": ["no_change", "suggestions"]},
+    "suggestions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "original": {"type": "string"},
+          "replacement": {"type": "string"},
+          "reason": {"type": "string"},
+          "score": {"type": "number"}
+        },
+        "required": ["original", "replacement", "reason", "score"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["version", "decision", "suggestions"],
+  "additionalProperties": false
+}

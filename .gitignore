@@ -1,0 +1,16 @@
+# Downloaded model/runtime files; keep deployment scripts and manifests.
+/local-model/runtime/
+/local-model/*.gguf
+/local-model/*.zip
+/local-model/*.partial
+/local-model/*.log
+/local-model/*.pid
+/local-model/ready.json
+/local-model/warmup-metrics.json
+
+# Machine-local secrets and editor state.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
