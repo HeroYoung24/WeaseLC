@@ -35,6 +35,13 @@ function Set-TestMachineRoot([bool]$Remove) {
     }}finally{$base.Dispose()}
   }
 }
+function Enable-InstalledTestProfile {
+  $checker=Join-Path $PSScriptRoot '..\..\output\LocalTest\x64\ProfileCheck.exe'
+  if(!(Test-Path -LiteralPath $checker)){throw 'Build the x64 ProfileCheck before installation.'}
+  if((Invoke-Program $checker '--enable-installed') -ne 0){throw 'Could not enable the independent installed profile.'}
+  # Never use the writing process's cached GetProfile as the persistence gate.
+  if((Invoke-Program $checker '') -ne 0){throw 'Fresh-process verification of installed profile failed.'}
+}
 function Remove-TestRegistration {
   Set-TestInputList $true
   # Only our two DLLs are unregistered; no ordinary Weasel setup/uninstaller.

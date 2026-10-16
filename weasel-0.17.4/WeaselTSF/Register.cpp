@@ -69,9 +69,11 @@ HRESULT RegisterProfiles() {
   // fallback hans enable
   hansEnable = hansEnable || (!hantEnable && !hansEnable);
 #ifdef WEASELC_LOCAL_TEST_BUILD
-  // Registration alone must not enable this build for every Windows user.
-  // The explicit local-test launcher adds only the current user's profile.
-  hansEnable = FALSE;
+  // A disabled machine profile can remain unavailable to the Windows switcher
+  // even when legacy per-user EnableLanguageProfile reports success. Make the
+  // Simplified Chinese profile available, without selecting a default IME.
+  // InstallLayoutOrTip still adds it only to the current user's input list.
+  hansEnable = TRUE;
   hantEnable = FALSE;
 #endif
 

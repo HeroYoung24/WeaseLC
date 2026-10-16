@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory=$true)][ValidateSet('Install','Unregister')][string]$Action)
+﻿param([Parameter(Mandatory=$true)][ValidateSet('Install','Unregister','EnableProfile')][string]$Action)
 $ErrorActionPreference='Stop'
 $source=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $report=Join-Path $source 'output\LocalTest'
@@ -7,7 +7,7 @@ $code=1;$message=''
 Start-Transcript -LiteralPath (Join-Path $report ('elevated-'+$Action+'.log')) -Force
 try{
   if($Action -eq 'Install'){& (Join-Path $PSScriptRoot 'Install.ps1') -Action Install -ValidateRoundTrip}
-  else{& (Join-Path $PSScriptRoot 'Install.ps1') -Action Unregister}
+  else{& (Join-Path $PSScriptRoot 'Install.ps1') -Action $Action}
   $code=0
 }catch{$message=$_.Exception.ToString();Write-Output $message}
 finally{

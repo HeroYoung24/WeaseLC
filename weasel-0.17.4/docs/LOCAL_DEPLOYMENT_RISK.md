@@ -1,5 +1,7 @@
 # 本机独立部署风险评估（2026-10-16）
 
+**最新：已修复输入项不可见。用户确认测试项出现、中文输入与搜狗正常。自动纠错仍默认关闭，尚未完成真实应用纠错验收。下面保留首次部署与定位经过，最新修复见文末。**
+
 ## 决策与授权
 
 用户授权：评估风险；若极大概率不会造成不可逆系统损伤，直接本机部署并测试。本次授权取代之前仅在虚拟机内安装的约束。虚拟机安装包的保护仍保留，不绕过它来覆盖日常版本。
@@ -59,3 +61,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\test\LocalDeployment\Rollb
 确认 `output\LocalTest\elevated-Unregister.json` 的结果后，运行 `Install.ps1 -Action Status` 应没有机器 COM/TIP 根。脚本保留非活动程序文件与独立测试词库用于诊断，不安排重启删除，不对其他输入法执行卸载。已打开应用可能继续持有 DLL；若语言栏/切换异常，先停用测试项并保存工作，重启 Windows 清除会话状态。文件可在注销且所有宿主退出后另行清理。
 
 官方接口依据：[TSF 注册](https://learn.microsoft.com/en-us/windows/win32/tsf/text-service-registration)、[InstallLayoutOrTip 的添加/删除与默认项标志](https://learn.microsoft.com/en-us/windows/win32/tsf/installlayoutortip)、[ActivateProfile 的进程/会话范围](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-itfinputprocessorprofilemgr-activateprofile)。
+
+## 重启后不可见修复与实际输入确认
+
+1. 用户重启并运行 Start.cmd 后仍没有测试项；真实交互令牌的 GetProfile 仍为 flags=0，排除“重启即可解决”的假设。
+2. 本机测试构建人为设置 RegisterProfile 的 `bEnabledByDefault=FALSE`；普通版本简体 Profile 为 TRUE。用户级 Enable=1、SortOrder 项完整、EnableLanguageProfile 成功，仍不足以让新进程看到启用状态。
+3. 用管理员官方 `EnableLanguageProfileByDefault` 只调整新 CLSID 的简体 Profile 可用性。此调用影响该 Profile 对所有用户的默认可用属性，**不设置用户的默认输入法、不激活 TIP**；本用户的输入列表仍通过 InstallLayoutOrTip 单独添加。不能将它描述成仅写 HKCU。
+4. 最初修复脚本报告失败：写入进程仍读到旧缓存并以退出码 8 报错。但后续两个独立进程均读到 flags=2，用户测试时读到 flags=3（启用且活动），切回搜狗后为 flags=2。这一错误日志保留，不据此声称 API 写入失败。
+5. 辅助工具已改为按写入 API 的 HRESULT 返回，安装/修复流程另外启动只读进程验证持久化。新构建简体 Profile 改为可用；繁体及其他 Profile 仍禁用。现有安装通过 API 修复注册元数据，**没有替换已加载的 DLL**。
+6. 用户确认：**测试项已出现、中文输入及搜狗均正常**。这完成本轮基本可选与中文输入验证，不代表自动纠错、Tab/鼠标边界或全部应用通过验收。
+7. 原版 DLL 哈希/COM/机器配置基线一致，默认输入法仍为搜狗。重启后原版后端 PID 24436、搜狗 PID 19664 保持不变；独立后端 PID 21700 保留运行供继续测试，未增加自启动。
+
+依据：[EnableLanguageProfileByDefault 的所有用户可用范围](https://learn.microsoft.com/en-us/windows/win32/api/msctf/nf-msctf-itfinputprocessorprofiles-enablelanguageprofilebydefault)、[TF_INPUTPROCESSORPROFILE 的启用/活动标志](https://learn.microsoft.com/en-us/windows/win32/api/msctf/ns-msctf-tf_inputprocessorprofile)。

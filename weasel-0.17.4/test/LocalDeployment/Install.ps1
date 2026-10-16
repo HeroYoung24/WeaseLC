@@ -1,4 +1,4 @@
-﻿param([ValidateSet('Install','Unregister','Status')][string]$Action='Status',[switch]$ValidateRoundTrip)
+﻿param([ValidateSet('Install','Unregister','Status','EnableProfile')][string]$Action='Status',[switch]$ValidateRoundTrip)
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $source=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $stage=Join-Path $source 'output\LocalTest\Deployment'
@@ -11,6 +11,11 @@ if(!(Test-Admin)){throw 'This operation needs the Windows UAC administrator prom
 $baseline=Get-DailyBaseline
 try{
   if($Action -eq 'Unregister'){Remove-TestRegistration;exit 0}
+  if($Action -eq 'EnableProfile'){
+    if(!(Test-Path -LiteralPath (Join-Path $script:TestRoot 'weaselx64.dll'))){throw 'Independent installed DLL missing.'}
+    Enable-InstalledTestProfile
+    exit 0
+  }
   if((Test-Path -LiteralPath $script:TestRoot) -or @(Get-TestRegistration).Count){throw 'Local-test state already exists. Inspect/unregister it before a fresh install.'}
   $manifest=Get-Content (Join-Path $stage 'manifest.json') -Raw | ConvertFrom-Json
   if($manifest.format -ne 1 -or $manifest.purpose -ne 'weaselc-side-by-side-local-test'){throw 'Wrong manifest.'}
@@ -56,6 +61,7 @@ try{
         if($code -ne 0){throw 'Registration after rollback rehearsal failed.'}
       }
     }
+    Enable-InstalledTestProfile
     if((Get-DailyBaseline) -ne $baseline){throw 'Daily installation changed unexpectedly.'}
     $success=$true
     Write-Output 'Installed WeaseLC side by side. No default input method, Windows service or startup entry was changed.'

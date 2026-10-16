@@ -4,6 +4,7 @@ $ErrorActionPreference='Stop'
 $source=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $stage=Join-Path $source 'output\LocalTest\Deployment'
 if(Test-Path -LiteralPath $stage){throw 'Deployment staging already exists. Inspect it before creating another package.'}
+if(!(Test-Path -LiteralPath (Join-Path $source 'output\LocalTest\x64\ProfileCheck.exe'))){throw 'Build the x64 ProfileCheck.vcxproj before preparing deployment.'}
 $null=New-Item -ItemType Directory -Path (Join-Path $stage 'App\Win32') -Force
 foreach($arch in @('x64','Win32')){
   $dest=if($arch -eq 'x64'){Join-Path $stage 'App'}else{Join-Path $stage 'App\Win32'}
