@@ -6,6 +6,7 @@
 #include "resource.h"
 #include "WeaselUtility.h"
 #include <thread>
+#include <WeaselCommandLine.h>
 
 #include "InstallOptionsDlg.h"
 
@@ -21,6 +22,9 @@ int WINAPI _tWinMain(HINSTANCE hInstance,
                      HINSTANCE /*hPrevInstance*/,
                      LPTSTR lpstrCmdLine,
                      int /*nCmdShow*/) {
+  std::wstring option;
+  if (!weasel::ParseSingleOption(GetCommandLineW(), option) || !weasel::SetupOption(option)) return 2;
+  lpstrCmdLine = option.data();
   HRESULT hRes = ::CoInitialize(NULL);
   ATLASSERT(SUCCEEDED(hRes));
 

@@ -9,6 +9,7 @@
 #include <atomic>
 #include <SafePipeServer.h>
 #include <mutex>
+#include <WeaselCommandLine.h>
 
 unsigned checks = 0, failures = 0;
 void Check(bool value, const char* name) {
@@ -50,6 +51,18 @@ bool SidAccess(PSECURITY_DESCRIPTOR descriptor, PSID sid, DWORD access) {
 }
 int main() try {
   using namespace correction;
+  std::wstring option;
+  Check(weasel::ParseSingleOption(L"\"C:\\test app\\WeaselDeployer.exe\" /correction-selftest ",option) &&
+      option==L"/correction-selftest" && weasel::DeployerOption(option),"trailing spaces preserve diagnostic dispatch");
+  Check(weasel::ParseSingleOption(L"test.exe\t\"/correction-worker\" \t",option) &&
+      option==L"/correction-worker","quoted worker switch and whitespace normalized");
+  Check(!weasel::ParseSingleOption(L"test.exe /correction-selftest /deploy",option),"multiple switches rejected before deployment");
+  Check(weasel::ParseSingleOption(L"test.exe /unknown ",option) && !weasel::DeployerOption(option) &&
+      !weasel::ServerOption(option) && !weasel::SetupOption(option),"unknown commands cannot configure, restart or install");
+  Check(weasel::ParseSingleOption(L"test.exe /q ",option) && option==L"/q" && weasel::ServerOption(option),"quit cannot become service restart due to trailing whitespace");
+  Check(weasel::ParseSingleOption(L"test.exe /s ",option) && option==L"/s" && weasel::SetupOption(option),"silent setup switch preserved");
+  Check(weasel::ParseSingleOption(L"test.exe \"/userdir:C:\\test user\\Rime\" ",option) &&
+      option==L"/userdir:C:\\test user\\Rime" && weasel::SetupOption(option),"quoted user-directory argument preserved");
   Check(CorrectionWorkerPath(L"C:\\Windows\\System32\\weasel.dll", L"C:\\Windows", L"C:\\Program Files\\WeaseLC") ==
       L"C:\\Program Files\\WeaseLC\\WeaselDeployer.exe", "installed x64 worker uses machine root");
   Check(CorrectionWorkerPath(L"C:\\WINDOWS\\SysWOW64\\weasel.dll", L"c:\\windows", L"D:\\测试 目录\\") ==

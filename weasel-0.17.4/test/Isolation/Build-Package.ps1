@@ -9,7 +9,7 @@ if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Commit reviewed source changes befo
 $name = 'WeaseLC-isolation-'+$head.Substring(0,8)+'-'+$Label
 $out = Join-Path $sourceRoot 'output\IsolationTest'
 $bundle = Join-Path $out $name
-if ((Test-Path -LiteralPath $bundle) -or (Test-Path -LiteralPath ($bundle+'.zip'))) { throw 'Package already exists; choose a new source commit rather than overwriting it.' }
+if ((Test-Path -LiteralPath $bundle) -or (Test-Path -LiteralPath ($bundle+'.zip'))) { throw 'Package already exists; use a different -Label rather than overwriting it.' }
 New-Item -ItemType Directory -Path $bundle -Force | Out-Null
 function Copy-Payload([string]$Relative, [string]$Destination) {
   $from=Join-Path $sourceRoot $Relative
@@ -48,7 +48,9 @@ try {
 } finally {$sourceZip.Dispose()}
 'Source archive omits the two obsolete upstream prebuilt output/7z.exe and output/curl.exe. Source code and submodule pins are unchanged.' |
   Set-Content -LiteralPath (Join-Path $bundle 'SOURCE_OMISSIONS.txt') -Encoding UTF8
-& $Git -C $repositoryRoot submodule status | Set-Content -LiteralPath (Join-Path $bundle 'SUBMODULES.txt') -Encoding UTF8
+$submodules=& $Git -C $repositoryRoot ls-tree HEAD weasel-0.17.4/librime weasel-0.17.4/plum
+if($LASTEXITCODE -ne 0 -or @($submodules).Count -ne 2){throw 'Submodule provenance unavailable.'}
+$submodules | Set-Content -LiteralPath (Join-Path $bundle 'SUBMODULES.txt') -Encoding UTF8
 # Verify PE bitness without loading/executing payloads.
 $pe=@{}
 foreach($file in Get-ChildItem -LiteralPath $bundle -Recurse -File | Where-Object Extension -In '.exe','.dll'){

@@ -12,7 +12,7 @@
   <PropertyGroup><OutDir>$(ProjectDir)..\..\output\SecurityChecks\$(Platform)\</OutDir><IntDir>$(ProjectDir)..\..\msbuild\SecurityChecks\$(Platform)\</IntDir></PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile><LanguageStandard>stdcpp17</LanguageStandard><WarningLevel>Level4</WarningLevel><AdditionalIncludeDirectories>$(ProjectDir)..\..\include;$(BOOST_ROOT)</AdditionalIncludeDirectories><PreprocessorDefinitions>WIN32;UNICODE;_UNICODE;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions><RuntimeLibrary>MultiThreaded</RuntimeLibrary></ClCompile>
-    <Link><SubSystem>Console</SubSystem><AdditionalLibraryDirectories>$(BOOST_ROOT)\stage\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>advapi32.lib;authz.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+    <Link><SubSystem>Console</SubSystem><AdditionalLibraryDirectories>$(BOOST_ROOT)\stage\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>advapi32.lib;authz.lib;user32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="SecurityChecks.cpp" /><ClCompile Include="..\..\WeaselIPC\PipeChannel.cpp" /></ItemGroup>
   <Import Project="$(VCTargetsPath)Microsoft.Cpp.targets" />

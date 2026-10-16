@@ -8,6 +8,7 @@
 #include "CorrectionSettingsDialog.h"
 #include "RimeLearningChecks.h"
 #include "CorrectionWorker.h"
+#include <WeaselCommandLine.h>
 
 CAppModule _Module;
 
@@ -18,6 +19,9 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
                        LPTSTR lpCmdLine,
                        int nCmdShow) {
   UNREFERENCED_PARAMETER(hPrevInstance);
+  std::wstring option;
+  if (!weasel::ParseSingleOption(GetCommandLineW(), option) || !weasel::DeployerOption(option)) return 2;
+  lpCmdLine = option.data();
   if (!wcscmp(L"/correction-worker", lpCmdLine)) return RunCorrectionWorker();
   if (!wcscmp(L"/correction-worker-selftest", lpCmdLine)) return RunCorrectionWorker(true);
   if (!wcscmp(L"/rime-learning-selftest", lpCmdLine)) {

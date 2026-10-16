@@ -14,6 +14,7 @@
 #include <ShellScalingApi.h>
 #include <WinUser.h>
 #include <memory>
+#include <WeaselCommandLine.h>
 #include <atlstr.h>
 #pragma comment(lib, "Shcore.lib")
 CAppModule _Module;
@@ -22,6 +23,9 @@ int WINAPI _tWinMain(HINSTANCE hInstance,
                      HINSTANCE /*hPrevInstance*/,
                      LPTSTR lpstrCmdLine,
                      int nCmdShow) {
+  std::wstring option;
+  if (!weasel::ParseSingleOption(GetCommandLineW(), option) || !weasel::ServerOption(option)) return 2;
+  lpstrCmdLine = option.data();
   LANGID langId = get_language_id();
   SetThreadUILanguage(langId);
   SetThreadLocale(langId);
