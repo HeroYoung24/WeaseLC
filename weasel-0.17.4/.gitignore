@@ -82,3 +82,5 @@ arm64x_wrapper/*.exp
 /CorrectionAutomaticPreview.bmp
 /CorrectionHintPreview.bmp
 /output/CorrectionHint*.bmp
+/output/SecurityChecks/
+/output/IsolationTest/

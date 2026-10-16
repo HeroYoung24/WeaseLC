@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include <PipeChannel.h>
+#include <PipeSecurity.h>
 
 using namespace weasel;
 using namespace std;
@@ -54,11 +55,14 @@ bool PipeChannelBase::_Ensure() {
 
 HANDLE PipeChannelBase::_Connect(const wchar_t* name) {
   HANDLE pipe = INVALID_HANDLE_VALUE;
-  while (_Invalid(pipe = _TryConnect()))
-    ::WaitNamedPipe(name, 500);
+  const auto deadline = GetTickCount64() + 1500;
+  while (_Invalid(pipe = _TryConnect())) {
+    if (GetTickCount64() >= deadline) throw DWORD(ERROR_SEM_TIMEOUT);
+    ::WaitNamedPipe(name, 100);
+  }
   DWORD mode = PIPE_READMODE_MESSAGE;
   if (!SetNamedPipeHandleState(pipe, &mode, NULL, NULL)) {
-    _ThrowLastError;
+    const DWORD error = GetLastError(); CloseHandle(pipe); throw error;
   }
   return pipe;
 }
@@ -69,8 +73,8 @@ void PipeChannelBase::_Reconnect() {
 }
 
 HANDLE PipeChannelBase::_TryConnect() {
-  auto pipe = ::CreateFile(pname.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL,
-                           OPEN_EXISTING, 0, NULL);
+  auto pipe = ::CreateFile(pname.c_str(), kPipeClientAccess, 0, NULL,
+                           OPEN_EXISTING, SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, NULL);
   if (!_Invalid(pipe)) {
     // connected to the pipe
     return pipe;
@@ -120,10 +124,11 @@ void PipeChannelBase::_Receive(HANDLE pipe, LPVOID msg, size_t rec_len) {
 HANDLE PipeChannelBase::_ConnectServerPipe(std::wstring& pn) {
   HANDLE pipe =
       CreateNamedPipe(pn.c_str(), PIPE_ACCESS_DUPLEX,
-                      PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+                      PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                       PIPE_UNLIMITED_INSTANCES, buff_size, buff_size, 0, sa);
-  if (pipe == INVALID_HANDLE_VALUE || !::ConnectNamedPipe(pipe, NULL)) {
-    _ThrowLastError;
+  if (pipe == INVALID_HANDLE_VALUE) _ThrowLastError;
+  if (!::ConnectNamedPipe(pipe, NULL) && GetLastError() != ERROR_PIPE_CONNECTED) {
+    const DWORD error = GetLastError(); CloseHandle(pipe); throw error;
   }
   return pipe;
 }

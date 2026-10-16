@@ -9,6 +9,7 @@
 - [纠错操作与用户习惯](weasel-0.17.4/docs/CORRECTION_REVIEW_AND_LEARNING.md)
 - [自动提示、Tab 纠错与布局设置](weasel-0.17.4/docs/AUTOMATIC_CORRECTION.md)
 - [纠错鲁棒性与交互检查](weasel-0.17.4/docs/CORRECTION_ROBUSTNESS.md)
+- [安全复查与首次隔离部署](weasel-0.17.4/docs/SECURITY_REVIEW_2026-10-16.md)
 - [模型启动和下载说明](local-model/README.md)
 - [Git/GitHub 使用说明](weasel-0.17.4/docs/GIT_GITHUB_SETUP.md)
 

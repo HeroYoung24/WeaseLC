@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <CorrectionProbe.h>
 #include <CorrectionHintView.h>
+#include <CorrectionDeployment.h>
 
 namespace {
 constexpr ULONGLONG kLifetime = 10000;
@@ -464,11 +465,16 @@ bool AutomaticCorrection::StartWorker() {
     WCHAR module[32768]{};
     const DWORD count = GetModuleFileNameW(g_hInst, module, _countof(module));
     if (!count || count == _countof(module)) return false;
-    executable = module;
-    executable.resize(executable.find_last_of(L"\\/") + 1);
-    executable += L"WeaselDeployer.exe";
+    WCHAR windows[32768]{};
+    const auto length = GetWindowsDirectoryW(windows, _countof(windows));
+    if (!length || length >= _countof(windows)) return false;
+    const auto installed = correction::SystemCorrectionModule(module, windows);
+    executable = correction::CorrectionWorkerPath(module, windows,
+        installed ? correction::InstalledCorrectionRoot() : L"");
   }
-  if (executable.empty() || GetFileAttributesW(executable.c_str()) == INVALID_FILE_ATTRIBUTES) return false;
+  const auto fileAttributes = executable.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(executable.c_str());
+  if (fileAttributes == INVALID_FILE_ATTRIBUTES || (fileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
+  const auto directory = executable.substr(0, executable.find_last_of(L"\\/"));
   auto cleanup = [&]() {
     if (startup.lpAttributeList) DeleteProcThreadAttributeList(startup.lpAttributeList);
     Close(input); Close(write); Close(outputWrite); Close(error); Close(process.hThread); Close(process.hProcess);
@@ -500,7 +506,7 @@ bool AutomaticCorrection::StartWorker() {
 #endif
   if (!job_ || !SetInformationJobObject(job_, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) ||
       !CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, TRUE,
-          CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr,
+          CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT, nullptr, directory.c_str(),
           &startup.StartupInfo, &process)) { cleanup(); StopWorker(); return false; }
   if (!AssignProcessToJobObject(job_, process.hProcess)) {
     TerminateProcess(process.hProcess, 1); cleanup(); StopWorker(); return false;

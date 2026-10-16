@@ -7,9 +7,10 @@
 #include <PipeChannel.h>
 
 #include "SecurityAttribute.h"
+#include <SafePipeServer.h>
 
 namespace weasel {
-class PipeServer;
+using PipeServer = SafePipeServer<PipeMessage>;
 
 typedef CWinTraits<WS_DISABLED, WS_EX_TRANSPARENT> ServerWinTraits;
 
@@ -88,15 +89,18 @@ class ServerImpl : public CWindowImpl<ServerImpl, CWindow, ServerWinTraits>
 
  private:
   void _Finailize();
+  void _StopConnections();
   template <typename _Resp>
   void HandlePipeMessage(PipeMessage pipe_msg, _Resp resp);
 
+  // Construct before channel takes its SECURITY_ATTRIBUTES pointer.
+  SecurityAttribute sa;
   std::unique_ptr<PipeServer> channel;
+  PipeServer::Session* activeChannel = nullptr;  // only under g_api_mutex
   std::unique_ptr<boost::thread> pipeThread;
   RequestHandler* m_pRequestHandler;  // reference
   std::map<UINT, CommandHandler> m_MenuHandlers;
   HMODULE m_hUser32Module;
-  SecurityAttribute sa;
   BOOL m_darkMode;
 };
 

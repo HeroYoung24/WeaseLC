@@ -34,18 +34,10 @@ class WeaselServerApp {
   }
 
   static bool check_update() {
-    // when checked manually, show testing versions too
-    std::string feed_url = GetCustomResource("ManualUpdateFeedURL", "APPCAST");
-    std::wstring channel{};
-    auto ret = RegGetStringValue(HKEY_CURRENT_USER, L"Software\\Rime\\Weasel",
-                                 L"UpdateChannel", channel);
-    if (!ret && channel == L"testing") {
-      feed_url = GetCustomResource("TestingManualUpdateFeedURL", "APPCAST");
-    }
-    if (!feed_url.empty()) {
-      win_sparkle_set_appcast_url(feed_url.c_str());
-    }
-    win_sparkle_check_update_with_ui();
+    const bool chinese = PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE;
+    MessageBoxW(nullptr, chinese ? L"当前开发版暂不提供在线更新，请使用项目提供的构建版本。" :
+        L"Online updates are unavailable in this development build. Use a build supplied by this project.",
+        L"WeaseLC", MB_OK | MB_ICONINFORMATION);
     return true;
   }
 

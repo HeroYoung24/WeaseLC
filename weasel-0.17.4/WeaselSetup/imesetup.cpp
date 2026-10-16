@@ -503,27 +503,30 @@ int register_text_service(const std::wstring& tsf_path,
     }
   }
 
-  std::wstring app = L"regsvr32.exe";
+  WCHAR systemDirectory[MAX_PATH]{};
+  if (!GetSystemDirectoryW(systemDirectory, _countof(systemDirectory))) return 1;
+  // The existing install caller controls WOW64 redirection for the native
+  // registration. Never resolve an elevated executable through CWD or PATH.
+  std::wstring app = std::wstring(systemDirectory) + L"\\regsvr32.exe";
   if (is_wowarm32) {
-    WCHAR sysarm32[MAX_PATH];
-    get_wow_arm32_system_dir(sysarm32, _countof(sysarm32));
+    WCHAR sysarm32[MAX_PATH]{};
+    if (!get_wow_arm32_system_dir(sysarm32, _countof(sysarm32))) return 1;
 
-    app = std::wstring(sysarm32) + L"\\" + app;
+    app = std::wstring(sysarm32) + L"\\regsvr32.exe";
   }
 
-  SHELLEXECUTEINFOW shExInfo = {0};
-  shExInfo.cbSize = sizeof(shExInfo);
-  shExInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
-  shExInfo.hwnd = 0;
-  shExInfo.lpVerb = L"open";               // Operation to perform
-  shExInfo.lpFile = app.c_str();           // Application to start
-  shExInfo.lpParameters = params.c_str();  // Additional parameters
-  shExInfo.lpDirectory = 0;
-  shExInfo.nShow = SW_SHOW;
-  shExInfo.hInstApp = 0;
-  if (ShellExecuteExW(&shExInfo)) {
-    WaitForSingleObject(shExInfo.hProcess, INFINITE);
-    CloseHandle(shExInfo.hProcess);
+  // Create directly on this thread so the caller's WOW64 redirection setting
+  // selects the matching regsvr32, without shell brokering or path searches.
+  std::wstring command = L"\"" + app + L"\"" + params;
+  STARTUPINFOW startup{sizeof(startup)};
+  PROCESS_INFORMATION registration{};
+  if (CreateProcessW(app.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+      nullptr, systemDirectory, &startup, &registration)) {
+    DWORD code = 1;
+    const bool registered = WaitForSingleObject(registration.hProcess, INFINITE) == WAIT_OBJECT_0 &&
+        GetExitCodeProcess(registration.hProcess, &code) && code == 0;
+    CloseHandle(registration.hThread); CloseHandle(registration.hProcess);
+    if (!registered) return 1;
   } else {
     WCHAR msg[100];
     CString str;
@@ -552,6 +555,7 @@ int install(bool hant, bool silent, bool old_ime_support) {
   }
   retval += install_ime_file(ime_src_path, L".dll", hant, silent,
                              &register_text_service);
+  if (retval) return 1;
 
   // 写注册表
   WCHAR drive[_MAX_DRIVE];
@@ -581,19 +585,21 @@ int install(bool hant, bool silent, bool old_ime_support) {
   // https://learn.microsoft.com/zh-cn/windows/win32/tsf/installlayoutortip
   // example in ref page not right with "*PTF_ INSTALLLAYOUTORTIP"
   // space inside should be removed
-  HMODULE hInputDLL = LoadLibrary(TEXT("input.dll"));
+  HMODULE hInputDLL = LoadLibraryExW(L"input.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+  bool listed = false;
   if (hInputDLL) {
     PTF_INSTALLLAYOUTORTIP pfnInstallLayoutOrTip;
     pfnInstallLayoutOrTip =
         (PTF_INSTALLLAYOUTORTIP)GetProcAddress(hInputDLL, "InstallLayoutOrTip");
     if (pfnInstallLayoutOrTip) {
       if (hant)
-        (*pfnInstallLayoutOrTip)(PSZTITLE_HANT, 0);
+        listed = (*pfnInstallLayoutOrTip)(PSZTITLE_HANT, 0) != FALSE;
       else
-        (*pfnInstallLayoutOrTip)(PSZTITLE_HANS, 0);
+        listed = (*pfnInstallLayoutOrTip)(PSZTITLE_HANS, 0) != FALSE;
     }
     FreeLibrary(hInputDLL);
   }
+  if (!listed) return 1;
 
   // https://learn.microsoft.com/zh-cn/windows/win32/wer/collecting-user-mode-dumps
   const std::wstring dmpPathW = WeaselLogPath().wstring();
@@ -632,7 +638,7 @@ int uninstall(bool silent) {
     DWORD len = sizeof(data);
     ret = RegQueryValueEx(hKey, L"Hant", NULL, &type, (LPBYTE)&data, &len);
     if (ret == ERROR_SUCCESS && type == REG_DWORD) {
-      HMODULE hInputDLL = LoadLibrary(TEXT("input.dll"));
+      HMODULE hInputDLL = LoadLibraryExW(L"input.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
       if (hInputDLL) {
         PTF_INSTALLLAYOUTORTIP pfnInstallLayoutOrTip;
         pfnInstallLayoutOrTip = (PTF_INSTALLLAYOUTORTIP)GetProcAddress(

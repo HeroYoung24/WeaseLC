@@ -1,5 +1,18 @@
 # 独立输入法完整注册与真实应用测试计划
 
+## 当前执行方案（2026-10-16）
+
+用户再次确认仍无隔离环境，本轮准备 [首次测试包及客体脚本](../test/Isolation/README.md)、[真实应用矩阵](../test/Isolation/APPLICATION_MATRIX.md)，暂未实际安装。安全修复和验证见 [本轮安全报告](SECURITY_REVIEW_2026-10-16.md)。下方 10 月 9 日方案保留为历史参考，其“未开始模型集成”等状态已由后续记录更新。
+
+1. 在本机已有工具之外，可选择 [Oracle VirtualBox 官方基础包](https://www.oracle.com/virtualization/technologies/vm/downloads/virtualbox-downloads.html)，安装前确认其当前主机要求。未自动下载或安装虚拟化驱动，也不安装 Extension Pack。
+2. 使用有权使用的 Windows 11 x64 镜像；[Microsoft 企业版评估入口](https://www.microsoft.com/en-us/evalcenter/evaluate-windows-11-enterprise)提供需要登记的 90 天评估，具体条件以官方页面为准。
+3. 建议客体 4 vCPU、8GB 内存、64GB 以上磁盘；先建立干净快照，专用账户、无个人数据，关闭共享剪贴板/拖放，仅用只读共享传入 ZIP，再复制到客体本地并断开共享。
+4. 先运行注册前 SmokeTest。然后在全新客体中安装正式构建，使用正式 CLSID，确保从未有 Weasel/系统 weasel.dll；测试探测 DLL 不参与系统注册。**日常电脑上的原版注册仍不得替换。**
+5. VM 管理员终端只做安装，关闭后用同一测试账户的普通终端部署词库、启动服务、进行记事本基本输入及固定响应连线检查。初次不需要 NSIS、下载工具或 GPU。
+6. 第一个应用完全通过后建立阶段快照，再检查其他架构/应用、输入法共存和客体本地小模型。失败保存合成日志，恢复快照；不以 Setup 成功返回码代替实际加载和输入验证。
+
+## 早期方案记录
+
 更新：2026-10-09。状态：方案已保存，尚未执行。用户目前暂无 Windows 虚拟机或备用测试电脑。
 
 ## 1. 已知结果与待验证问题

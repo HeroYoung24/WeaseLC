@@ -5,33 +5,14 @@
 #include <resource.h>
 #include <WeaselUtility.h>
 
-namespace weasel {
-class PipeServer : public PipeChannel<DWORD, PipeMessage> {
- public:
-  using ServerRunner = std::function<void()>;
-  using Respond = std::function<void(Msg)>;
-  using ServerHandler = std::function<void(PipeMessage, Respond)>;
-
-  PipeServer(std::wstring&& pn_cmd, SECURITY_ATTRIBUTES* s);
-
- public:
-  void Listen(ServerHandler const& handler);
-  /* Get a server runner */
-  ServerRunner GetServerRunner(ServerHandler const& handler);
-
- private:
-  void _ProcessPipeThread(HANDLE pipe, ServerHandler const& handler);
-};
-}  // namespace weasel
-
 using namespace weasel;
 
 extern CAppModule _Module;
 
 ServerImpl::ServerImpl()
-    : m_pRequestHandler(NULL),
-      m_darkMode(IsUserDarkMode()),
-      channel(std::make_unique<PipeServer>(GetPipeName(), sa.get_attr())) {
+    : channel(std::make_unique<PipeServer>(GetPipeName(), sa)),
+      m_pRequestHandler(NULL),
+      m_darkMode(IsUserDarkMode()) {
   m_hUser32Module = GetModuleHandle(_T("user32.dll"));
 }
 
@@ -39,14 +20,17 @@ ServerImpl::~ServerImpl() {
   _Finailize();
 }
 
-void ServerImpl::_Finailize() {
+void ServerImpl::_StopConnections() {
   if (pipeThread != nullptr) {
-    pipeThread->interrupt();
+    channel->RequestStop();
+    PipeServer::CancelUntilExited(pipeThread->native_handle());
+    pipeThread->join();
     pipeThread = nullptr;
-  } else {
-    // avoid finalize again
-    return;
+    channel->JoinWorkers();
   }
+}
+void ServerImpl::_Finailize() {
+  _StopConnections();
 
   if (IsWindow()) {
     DestroyWindow();
@@ -100,10 +84,7 @@ LRESULT ServerImpl::OnEndSystemSession(UINT uMsg,
                                        WPARAM wParam,
                                        LPARAM lParam,
                                        BOOL& bHandled) {
-  if (m_pRequestHandler) {
-    m_pRequestHandler->Finalize();
-    m_pRequestHandler = nullptr;
-  }
+  Stop();  // Run drains connections before the application's finalization.
   return 0;
 }
 
@@ -171,17 +152,20 @@ int ServerImpl::Run() {
   // auto handler = boost::bind(&ServerImpl::HandlePipeMessage, this);
   // auto listener = boost::bind(&PipeServer::Listen, channel.get(), handler);
   //
-  auto listener = [this](PipeMessage msg, PipeServer::Respond resp) -> void {
+  auto listener = [this](PipeMessage msg, PipeServer::Respond resp, PipeServer::Session& session) -> void {
     std::lock_guard guard(g_api_mutex);
+    activeChannel = &session;
+    struct Reset { PipeServer::Session*& channel; ~Reset() { channel = nullptr; } } reset{activeChannel};
     HandlePipeMessage(msg, resp);
   };
   pipeThread = std::make_unique<boost::thread>(
-      [this, &listener]() { channel->Listen(listener); });
+      [this, listener]() { channel->Listen(listener); });
 
   CMessageLoop theLoop;
   _Module.AddMessageLoop(&theLoop);
   int nRet = theLoop.Run();
   _Module.RemoveMessageLoop();
+  _StopConnections();  // retire clients before handler/UI finalization
   return nRet;
 }
 
@@ -197,9 +181,9 @@ DWORD ServerImpl::OnStartSession(WEASEL_IPC_COMMAND uMsg,
   if (!m_pRequestHandler)
     return 0;
   return m_pRequestHandler->AddSession(
-      reinterpret_cast<LPWSTR>(channel->ReceiveBuffer()),
+      activeChannel->Body(),
       [this](std::wstring& msg) -> bool {
-        *channel << msg;
+        *activeChannel << msg;
         return true;
       });
 }
@@ -219,7 +203,7 @@ DWORD ServerImpl::OnKeyEvent(WEASEL_IPC_COMMAND uMsg,
     return 0;
 
   auto eat = [this](std::wstring& msg) -> bool {
-    *channel << msg;
+    *activeChannel << msg;
     return true;
   };
   return m_pRequestHandler->ProcessKeyEvent(KeyEvent(wParam), lParam, eat);
@@ -337,7 +321,7 @@ DWORD ServerImpl::OnHighlightCandidateOnCurrentPage(WEASEL_IPC_COMMAND uMsg,
                                                     DWORD lParam) {
   if (m_pRequestHandler) {
     auto eat = [this](std::wstring& msg) -> bool {
-      *channel << msg;
+      *activeChannel << msg;
       return true;
     };
     m_pRequestHandler->HighlightCandidateOnCurrentPage(wParam, lParam, eat);
@@ -350,7 +334,7 @@ DWORD ServerImpl::OnChangePage(WEASEL_IPC_COMMAND uMsg,
                                DWORD lParam) {
   if (m_pRequestHandler) {
     auto eat = [this](std::wstring& msg) -> bool {
-      *channel << msg;
+      *activeChannel << msg;
       return true;
     };
     m_pRequestHandler->ChangePage(wParam, lParam, eat);
@@ -400,41 +384,6 @@ void ServerImpl::HandlePipeMessage(PipeMessage pipe_msg, _Resp resp) {
   END_MAP_PIPE_MSG_HANDLE(result);
 
   resp(result);
-}
-
-PipeServer::PipeServer(std::wstring&& pn_cmd, SECURITY_ATTRIBUTES* s)
-    : PipeChannel(std::move(pn_cmd), s) {}
-
-void PipeServer::Listen(ServerHandler const& handler) {
-  for (;;) {
-    HANDLE pipe = INVALID_HANDLE_VALUE;
-    try {
-      boost::this_thread::interruption_point();
-      pipe = _ConnectServerPipe(pname);
-      boost::thread th(
-          [&handler, pipe, this] { _ProcessPipeThread(pipe, handler); });
-    } catch (DWORD ex) {
-      _FinalizePipe(pipe);
-    }
-    boost::this_thread::interruption_point();
-  }
-}
-
-PipeServer::ServerRunner PipeServer::GetServerRunner(
-    ServerHandler const& handler) {
-  return [&handler, this]() { Listen(handler); };
-}
-
-void PipeServer::_ProcessPipeThread(HANDLE pipe, ServerHandler const& handler) {
-  try {
-    for (;;) {
-      Res msg;
-      _Receive(pipe, &msg, sizeof(msg));
-      handler(msg, [this, pipe](Msg resp) { _Send(pipe, resp); });
-    }
-  } catch (...) {
-    _FinalizePipe(pipe);
-  }
 }
 
 // weasel::Server
