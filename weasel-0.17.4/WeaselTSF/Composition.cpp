@@ -497,9 +497,10 @@ HRESULT WeaselTSF::_ApplyCompositionResponse(TfEditCookie cookie, ITfContext* co
   if (!current()) return TF_E_DISCONNECTED;
   if (_IsComposing() && response.config.inline_preedit) {
     CInlinePreeditEditSession inlineSession(this, context, _pComposition, response.context);
-    return inlineSession.DoEditSession(cookie);
+    hr = inlineSession.DoEditSession(cookie);
   }
-  return S_OK;
+  if (SUCCEEDED(hr) && current()) _automatic->RecordInput(context, cookie);
+  return hr;
 }
 
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
@@ -556,6 +557,7 @@ void WeaselTSF::_UpdateComposition(com_ptr<ITfContext> pContext) {
 
 /* Composition State */
 void WeaselTSF::_InvalidateEditSessions() {
+  _automatic->ResetKeys();
   _automatic->Cancel();
   ++_editGeneration;
   _lastCapturedStyle.reset();

@@ -255,6 +255,7 @@ STDAPI WeaselTSF::OnEndEdit(ITfContext* pContext,
 STDAPI WeaselTSF::OnLayoutChange(ITfContext* pContext,
                                  TfLayoutCode lcode,
                                  ITfContextView* pContextView) {
+  _automatic->LayoutChanged(pContext, lcode == TF_LC_DESTROY);
   if (!_IsComposing())
     return S_OK;
 

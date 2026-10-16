@@ -4,6 +4,7 @@
 #include <initguid.h>
 #include <inputscope.h>
 #include <algorithm>
+#include <functional>
 
 // Scratch document owned solely by this test. Key calls go through TSF, never
 // SendInput. Candidate UI is captured by the host instead of shown on screen.
@@ -101,6 +102,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   STDMETHODIMP GetStatus(TS_STATUS* status) override {
     if (!status) return E_POINTER;
     *status = {};
+    status->dwDynamicFlags = dynamicStatus;
     return S_OK;
   }
   STDMETHODIMP QueryInsert(LONG start, LONG end, ULONG, LONG* outStart,
@@ -111,6 +113,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   }
   STDMETHODIMP GetSelection(ULONG index, ULONG count, TS_SELECTION_ACP* selection,
                              ULONG* fetched) override {
+    if (onGetSelection) { auto callback = std::move(onGetSelection); onGetSelection = {}; callback(); }
     if (!ReadLocked()) return TS_E_NOLOCK;
     if (!selection || !fetched || !count ||
         (index != 0 && index != TS_DEFAULT_SELECTION)) return E_INVALIDARG;
@@ -127,6 +130,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   STDMETHODIMP GetText(LONG start, LONG end, WCHAR* plain, ULONG requested,
       ULONG* returned, TS_RUNINFO* runs, ULONG runsRequested,
       ULONG* runsReturned, LONG* next) override {
+    ++textReads;
     if (!ReadLocked()) return TS_E_NOLOCK;
     if (end == -1) end = static_cast<LONG>(text.size());
     if (!RangeValid(start, end) || !returned || !runsReturned || !next ||
@@ -170,7 +174,8 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   }
   STDMETHODIMP GetTextExt(TsViewCookie, LONG, LONG, RECT* rect, BOOL* clipped) override {
     if (!rect || !clipped) return E_POINTER;
-    *rect = {0, 0, 10, 20}; *clipped = FALSE; return S_OK;
+    if (!layoutAvailable) return TS_E_NOLAYOUT;
+    *rect = textRect; *clipped = textClipped; return S_OK;
   }
   STDMETHODIMP GetScreenExt(TsViewCookie, RECT* rect) override {
     if (!rect) return E_POINTER; *rect = {0, 0, 200, 80}; return S_OK;
@@ -243,6 +248,34 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   unsigned candidateStarts = 0;
   unsigned candidateEnds = 0;
   bool refuseWrites = false;  // synthetic refusal; never affects a real host
+  DWORD dynamicStatus = 0;
+  unsigned textReads = 0;
+  RECT textRect{100, 100, 110, 120};
+  BOOL textClipped = FALSE;
+  bool layoutAvailable = true;
+  std::function<void()> onGetSelection;
+  LONG SelectionEnd() const { return selection_.acpEnd; }
+  // Simulate a host's own mouse/paste events outside TSF locks. Only this
+  // scratch document changes; standard sink notifications update tracked ranges.
+  HRESULT UserSelect(LONG start, LONG end) {
+    if (lock_ || !sink_ || !RangeValid(start, end)) return E_UNEXPECTED;
+    selection_ = {start, end, {TS_AE_END, FALSE}};
+    return sink_->OnSelectionChange();
+  }
+  HRESULT UserReplace(LONG start, LONG end, const std::wstring& value) {
+    if (lock_ || !sink_ || !RangeValid(start, end)) return E_UNEXPECTED;
+    text.replace(start, end - start, value);
+    TS_TEXTCHANGE change{start, end, start + static_cast<LONG>(value.size())};
+    selection_.acpStart = selection_.acpEnd = change.acpNewEnd;
+    const auto hr = sink_->OnTextChange(0, &change);
+    sink_->OnSelectionChange(); return hr;
+  }
+  void ChangeScope(InputScope scope) {
+    scope_ = scope;
+    const TS_ATTRID input = GUID_PROP_INPUTSCOPE;
+    if (sink_) sink_->OnAttrsChange(0, static_cast<LONG>(text.size()), 1, &input);
+  }
+  void ChangeStatus(DWORD flags) { dynamicStatus = flags; if (sink_) sink_->OnStatusChange(flags); }
 
  private:
   bool RangeValid(LONG start, LONG end) const {

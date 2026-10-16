@@ -80,3 +80,5 @@ arm64x_wrapper/*.exp
 /CorrectionDialogPreview.bmp
 /CorrectionTermsPreview.bmp
 /CorrectionAutomaticPreview.bmp
+/CorrectionHintPreview.bmp
+/output/CorrectionHint*.bmp

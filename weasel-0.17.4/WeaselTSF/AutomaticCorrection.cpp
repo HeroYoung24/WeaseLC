@@ -8,6 +8,7 @@
 #include <vector>
 #include <cstdio>
 #include <CorrectionProbe.h>
+#include <CorrectionHintView.h>
 
 namespace {
 constexpr ULONGLONG kLifetime = 10000;
@@ -63,7 +64,7 @@ TfClientId AutomaticCorrection::Client() const {
 bool AutomaticCorrection::Focused(ITfContext* target) const {
   if (!target) target = context_;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
-  if (testing_) return target != nullptr;
+  if (testing_) return testFocused_ && target != nullptr;
 #endif
   if (!target || !owner_->_pThreadMgr || Client() == TF_CLIENTID_NULL) return false;
   com_ptr<ITfDocumentMgr> document;
@@ -81,9 +82,12 @@ void AutomaticCorrection::StopWorker() {
   Close(job_); Close(process_); Close(output_);
 }
 void AutomaticCorrection::Cancel() {
-  ++revision_; ready_ = false; testedTab_ = false; downTab_ = false;
+  ++revision_; ready_ = false;
   StopWorker(); Hide();
   context_.Release(); range_.Release();
+  expectedSelection_.Release(); expectedPreedit_.clear(); expectedComposing_ = false;
+  positionValid_ = false;
+  measuredDpi_ = 0; measuredSize_ = {};
   if (!text_.empty()) SecureZeroMemory(text_.data(), text_.size() * sizeof(WCHAR));
   text_.clear(); label_.clear(); item_ = {};
   caret_ = {};
@@ -96,9 +100,12 @@ bool AutomaticCorrection::EnsureWindow() {
   wc.lpszClassName = L"WeaseLC.AutomaticCorrection.V1";
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
   if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
-  window_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TRANSPARENT,
+  window_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED,
       wc.lpszClassName, L"WeaseLC correction hint", WS_POPUP, 0, 0, 0, 0,
       nullptr, nullptr, g_hInst, this);
+  if (window_ && !SetLayeredWindowAttributes(window_, 0, 255, LWA_ALPHA)) {
+    DestroyWindow(window_); window_ = nullptr;
+  }
   return window_ != nullptr;
 }
 LRESULT CALLBACK AutomaticCorrection::WindowProc(HWND window, UINT message, WPARAM w, LPARAM l) {
@@ -111,26 +118,25 @@ LRESULT CALLBACK AutomaticCorrection::WindowProc(HWND window, UINT message, WPAR
   if (message == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
   if (message == WM_NCHITTEST) return HTTRANSPARENT;
   if (message == WM_ERASEBKGND) return 1;
+  if (message == WM_SYSCOLORCHANGE || message == WM_SETTINGCHANGE || message == WM_THEMECHANGED) {
+    InvalidateRect(window, nullptr, TRUE);
+  }
   if (message == WM_TIMER) {
     // Host callbacks can release the last external service reference.
     auto* owner = self->owner_; owner->AddRef();
     try { self->Poll(); } catch (...) { self->Cancel(); }
     owner->Release(); return 0;
   }
-  if (message == WM_PAINT) {
-    PAINTSTRUCT ps; HDC dc = BeginPaint(window, &ps);
-    RECT bounds; GetClientRect(window, &bounds);
-    HBRUSH background = CreateSolidBrush(RGB(248, 250, 255));
-    FillRect(dc, &bounds, background); DeleteObject(background);
-    FrameRect(dc, &bounds, reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
-    const UINT dpi = correction::AutomaticWindowDpi(window);
-    HFONT font = CreateFontW(-MulDiv(self->preferences_.automatic.font, dpi, 96), 0, 0, 0,
-        FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Microsoft YaHei UI");
-    auto previous = SelectObject(dc, font); SetBkMode(dc, TRANSPARENT); SetTextColor(dc, RGB(25, 45, 75));
-    InflateRect(&bounds, -MulDiv(10, dpi, 96), -MulDiv(6, dpi, 96));
-    DrawTextW(dc, self->label_.c_str(), static_cast<int>(self->label_.size()), &bounds,
-        DT_LEFT | DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS);
-    SelectObject(dc, previous); DeleteObject(font); EndPaint(window, &ps); return 0;
+  if (message == WM_PAINT || message == WM_PRINTCLIENT) {
+    PAINTSTRUCT ps{};
+    HDC dc = message == WM_PAINT ? BeginPaint(window, &ps) : reinterpret_cast<HDC>(w);
+    RECT bounds{}; GetClientRect(window, &bounds);
+    correction::PaintHint(dc, bounds, correction::AutomaticWindowDpi(window), self->preferences_.automatic.font,
+        std::wstring(self->item_.original, self->item_.originalUnits),
+        std::wstring(self->item_.replacement, self->item_.replacementUnits), self->preferences_.automatic.tab,
+        PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE);
+    if (message == WM_PAINT) EndPaint(window, &ps);
+    return 0;
   }
   if (message == WM_NCDESTROY) SetWindowLongPtrW(window, GWLP_USERDATA, 0);
   return DefWindowProcW(window, message, w, l);
@@ -174,13 +180,10 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   started_ = GetTickCount64();
   SettingsTime(settingsWrite_);
   if (!Validate(cookie, context) || !EnsureWindow()) { Cancel(); return; }
-  com_ptr<ITfRange> captured = range_;
-  const auto revision = revision_;
-  com_ptr<ITfContextView> view; BOOL clipped = TRUE; RECT caret{};
-  if (context->GetActiveView(&view) == S_OK && view &&
-      view->GetTextExt(cookie, captured, &caret, &clipped) == S_OK && !clipped && revision == revision_) caret_ = caret;
-  if (revision != revision_) return;
+  RecordInput(context, cookie);
+  if (!context_) return;
   nextSettings_ = started_ + 500;
+  nextValidation_ = started_;
   SetTimer(window_, 1, 40, nullptr);
 } catch (...) { Cancel(); }
 bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
@@ -200,6 +203,9 @@ bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
   BOOL empty = FALSE;
   if (hr != S_OK || count != 1 || !selected || selection.style.fInterimChar ||
       selected->IsEmpty(cookie, &empty) != S_OK || !empty || revision != revision_) return false;
+  if (expectedSelection_ && (!Same(expectedSelection_, selected, cookie, TF_ANCHOR_START, TF_ANCHOR_START) ||
+      !Same(expectedSelection_, selected, cookie, TF_ANCHOR_END, TF_ANCHOR_END) ||
+      expectedComposing_ != !!owner_->_IsComposing())) return false;
   if (owner_->_IsComposing()) {
     com_ptr<ITfRange> composition;
     com_ptr<ITfComposition> live = owner_->_pComposition;
@@ -208,16 +214,67 @@ bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
     LONG start = -1, end = 1;
     if (composition->CompareStart(cookie, selected, TF_ANCHOR_START, &start) != S_OK || start > 0 ||
         composition->CompareEnd(cookie, selected, TF_ANCHOR_END, &end) != S_OK || end < 0) return false;
+    if (expectedSelection_ && !ReadExact(composition, cookie, expectedPreedit_)) return false;
   } else if (!Same(target, selected, cookie, TF_ANCHOR_END, TF_ANCHOR_END)) return false;
   return revision == revision_;
 }
 void AutomaticCorrection::Observe(ITfContext* context, TfEditCookie cookie) try {
   if (context_ && !Validate(cookie, context)) Cancel();
 } catch (...) { Cancel(); }
+void AutomaticCorrection::RecordInput(ITfContext* context, TfEditCookie cookie) try {
+  if (!context_ || context_ != context) return;
+  const auto revision = revision_;
+  com_ptr<ITfContext> held = context_;
+  TF_SELECTION selection{}; ULONG count = 0;
+  const HRESULT hr = context->GetSelection(cookie, TF_DEFAULT_SELECTION, 1, &selection, &count);
+  com_ptr<ITfRange> selected; selected.Attach(selection.range);
+  BOOL empty = FALSE;
+  if (hr != S_OK || count != 1 || !selected || selected->IsEmpty(cookie, &empty) != S_OK || !empty ||
+      selected->SetGravity(cookie, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD) != S_OK) { Cancel(); return; }
+  std::wstring preedit;
+  const bool composing = !!owner_->_IsComposing();
+  if (composing) {
+    com_ptr<ITfComposition> live = owner_->_pComposition;
+    com_ptr<ITfRange> range;
+    WCHAR buffer[1025]{}; ULONG units = 0;
+    if (!live || live->GetRange(&range) != S_OK || !range ||
+        !owner_->_CorrectionSafeScope(context, cookie, range) ||
+        range->GetText(cookie, 0, buffer, _countof(buffer), &units) != S_OK || units > 1024) { Cancel(); return; }
+    preedit.assign(buffer, units); SecureZeroMemory(buffer, sizeof(buffer));
+  }
+  if (revision != revision_) return;
+  expectedSelection_ = selected; expectedPreedit_ = std::move(preedit); expectedComposing_ = composing;
+  if (!Validate(cookie, context)) { Cancel(); return; }
+  ReadPosition(context, cookie);
+} catch (...) { Cancel(); }
+void AutomaticCorrection::ReadPosition(ITfContext* context, TfEditCookie cookie) {
+  const auto revision = revision_;
+  TF_SELECTION selection{}; ULONG count = 0;
+  const auto hr = context->GetSelection(cookie, TF_DEFAULT_SELECTION, 1, &selection, &count);
+  com_ptr<ITfRange> selected; selected.Attach(selection.range);
+  com_ptr<ITfContextView> view; BOOL clipped = TRUE; RECT rect{};
+  HWND host = nullptr;
+  const bool available = hr == S_OK && count == 1 && selected &&
+      context->GetActiveView(&view) == S_OK && view &&
+      view->GetTextExt(cookie, selected, &rect, &clipped) == S_OK && !clipped && rect.bottom > rect.top;
+  if (revision != revision_) return;
+  positionValid_ = available;
+  if (available) {
+    caret_ = rect;
+    if (view->GetWnd(&host) == S_OK && host) anchorDpi_ = correction::AutomaticWindowDpi(host);
+  } else Hide();
+}
+void AutomaticCorrection::LayoutChanged(ITfContext* context, bool destroyed) {
+  if (!context_ || context_ != context) return;
+  if (destroyed) { Cancel(); return; }
+  positionValid_ = false; Hide(); nextValidation_ = 0;
+}
 HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool apply, bool* applied) {
   if (applied) *applied = false;
   if (!Validate(cookie, context)) { Cancel(); return S_FALSE; }
+  ReadPosition(context, cookie);
   if (!apply) return S_OK;
+  if (!positionValid_) { Hide(); return S_FALSE; }
   if (!ready_ || !window_ || !IsWindowVisible(window_) || !preferences_.automatic.tab) return S_FALSE;
   const auto revision = revision_;
   const auto item = item_;
@@ -279,9 +336,10 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
 }
 bool AutomaticCorrection::Request(bool apply, ITfContext* context) {
   if (requesting_ || !context_ || context_ != context) return false;
+  com_ptr<AutomaticEdit> session;
   requesting_ = true;
   struct Guard { bool& flag; ~Guard() { flag = false; } } guard{requesting_};
-  com_ptr<AutomaticEdit> session; session.Attach(new AutomaticEdit(owner_, context, apply));
+  session.Attach(new AutomaticEdit(owner_, context, apply));
   HRESULT edit = E_FAIL;
   const HRESULT hr = context->RequestEditSession(Client(), session,
       TF_ES_SYNC | (apply ? TF_ES_READWRITE : TF_ES_READ), &edit);
@@ -291,10 +349,14 @@ bool AutomaticCorrection::Request(bool apply, ITfContext* context) {
   // SYNC only: a refused lock must never leave a delayed document write queued.
   return apply ? session->applied : hr == S_OK && edit == S_OK;
 }
-void AutomaticCorrection::Position(const RECT& caret) { caret_ = caret; Refresh(); }
+void AutomaticCorrection::Position(const RECT& caret) {
+  // Candidate position alone does not prove that the host caret is visible.
+  if (positionValid_) caret_ = caret;
+  Refresh();
+}
 void AutomaticCorrection::Refresh() {
   if (ready_ && GetTickCount64() - started_ >= kLifetime) { Cancel(); return; }
-  if (!ready_ || !window_ || !Focused() ||
+  if (!ready_ || !window_ || !positionValid_ || !Focused() ||
       (!preferences_.timing && !owner_->_IsComposing())) { Hide(); return; }
   RECT anchor = caret_;
   if (owner_->_IsComposing()) {
@@ -310,10 +372,23 @@ void AutomaticCorrection::Refresh() {
   if (!GetMonitorInfoW(MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST), &monitor)) { Hide(); return; }
   // Use the anchor monitor DPI, also when moving from a different monitor.
   const UINT dpi = owner_->_cand->WindowDpi();
-  const UINT scale = dpi ? dpi : correction::AutomaticWindowDpi(window_);
+  const UINT scale = dpi ? dpi : anchorDpi_;
   const auto& options = preferences_.automatic;
-  SIZE size{MulDiv(options.width, scale, 96), MulDiv(options.font * 4 + 20, scale, 96)};
+  SIZE size{(std::min)(static_cast<LONG>(MulDiv(options.width, scale, 96)), monitor.rcWork.right - monitor.rcWork.left), 0};
+  if (size.cx != measuredSize_.cx || scale != measuredDpi_) {
+    HDC dc = GetDC(window_);
+    const auto layout = correction::MeasureHint(dc, size.cx, scale, options.font,
+        std::wstring(item_.original, item_.originalUnits), std::wstring(item_.replacement, item_.replacementUnits),
+        options.tab, PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE);
+    ReleaseDC(window_, dc);
+    measuredSize_ = {size.cx, layout.complete ? layout.height : -1}; measuredDpi_ = scale;
+  }
+  size.cy = measuredSize_.cy;
+  if (size.cy <= 0 || size.cy > monitor.rcWork.bottom - monitor.rcWork.top) { Hide(); return; }
   const RECT placed = correction::PlaceAutomaticHint(anchor, monitor.rcWork, size, options.side, MulDiv(options.gap, scale, 96));
+  if (IsRectEmpty(&placed)) { Hide(); return; }
+  RECT previous{}; GetWindowRect(window_, &previous);
+  if (EqualRect(&previous, &placed) && IsWindowVisible(window_)) return;
   InvalidateRect(window_, nullptr, TRUE);
   SetWindowPos(window_, HWND_TOPMOST, placed.left, placed.top, placed.right - placed.left,
       placed.bottom - placed.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -321,21 +396,21 @@ void AutomaticCorrection::Refresh() {
 bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, bool test, bool up, BOOL* eaten) try {
   if (!eaten) return false;
   if (key != VK_TAB) {
-    testedTab_ = false;
     if (!up && (key == VK_ESCAPE || key == VK_LEFT || key == VK_RIGHT || key == VK_HOME ||
         key == VK_END || key == VK_DELETE || key == VK_BACK || key == VK_SHIFT || key == VK_CONTROL || key == VK_MENU)) Cancel();
+    else if (!up && context_ && !Request(false, context)) Cancel();
     return false;
   }
   if (up) {
-    if (!downTab_) { testedTab_ = false; return false; }
+    if (!downTab_) return false;
     *eaten = TRUE;
-    if (!test) { downTab_ = false; testedTab_ = false; }
+    if (!test) downTab_ = false;
     return true;
   }
   if (downTab_) { *eaten = TRUE; return true; }  // Don't accept twice on autorepeat.
   const bool modifiers = (GetKeyState(VK_SHIFT) | GetKeyState(VK_CONTROL) | GetKeyState(VK_MENU) | GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000;
   if (modifiers || (flags & (1LL << 30)) || !ready_ || !preferences_.automatic.tab ||
-      !window_ || !IsWindowVisible(window_) || !Focused()) { testedTab_ = false; return false; }
+      !window_ || !IsWindowVisible(window_) || !Focused()) return false;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   if (!testing_)
 #endif
@@ -343,9 +418,8 @@ bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, boo
         (owner_->_isToOpenClose && !owner_->_IsKeyboardOpen())) { Cancel(); return false; }
   if (test) {
     if (!Request(false, context)) { Cancel(); return false; }
-    testedTab_ = true; *eaten = TRUE; return true;
+    *eaten = TRUE; return true;
   }
-  testedTab_ = false;
   if (!Request(true, context)) { Cancel(); return false; }
   downTab_ = true; *eaten = TRUE; return true;
 } catch (...) { Cancel(); return false; }
@@ -363,10 +437,13 @@ bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
   }
   if (!reply.count) return false;
   item_ = reply.items[0];
+  measuredDpi_ = 0; measuredSize_ = {};
   label_ = std::wstring(item_.original, item_.originalUnits) + L" → " + std::wstring(item_.replacement, item_.replacementUnits);
   const bool chinese = PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE;
   label_ += preferences_.automatic.tab ? (chinese ? L"\nTab 接受 · Esc 忽略" : L"\nTab accepts · Esc dismisses") :
       (chinese ? L"\n纠错建议（Tab 已关闭）" : L"\nCorrection (Tab disabled)");
+  SetWindowTextW(window_, (std::wstring(correction::HintTitle(chinese)) + L": " + label_).c_str());
+  InvalidateRect(window_, nullptr, TRUE);
   ready_ = true; return true;
 }
 bool AutomaticCorrection::StartWorker() {
@@ -445,7 +522,12 @@ void AutomaticCorrection::Poll() {
   polling_ = true;
   struct Guard { bool& flag; ~Guard() { flag = false; } } guard{polling_};
   const auto now = GetTickCount64();
-  if (!Focused() || now - started_ >= kLifetime) { Cancel(); return; }
+  if (!Focused()) { ResetKeys(); Cancel(); return; }
+  if (now - started_ >= kLifetime) { Cancel(); return; }
+  if (now >= nextValidation_) {
+    if (!Request(false, context_)) { Cancel(); return; }
+    nextValidation_ = now + 120;
+  }
   if (now >= nextSettings_) {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
     if (!testing_)
@@ -485,10 +567,12 @@ bool AutomaticCorrection::SettingsCurrent() const {
 }
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 void AutomaticCorrection::ConfigureTest(const correction::Preferences& preferences, TfClientId client, const std::wstring& worker) {
-  Cancel(); testing_ = true; preferences_ = preferences; testClient_ = client; testWorker_ = worker;
+  Cancel(); ResetKeys(); testing_ = true; testFocused_ = true;
+  preferences_ = preferences; testClient_ = client; testWorker_ = worker;
 }
 bool AutomaticCorrection::InjectTest(const correction::AutomaticReply& reply) {
   if (!testing_ || !context_ || !AcceptReply(reply)) return false;
+  if (!Request(false, context_)) { Cancel(); return false; }
   Refresh(); return true;
 }
 
@@ -517,6 +601,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticPoll(ITfText
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticExpire(ITfTextInputProcessorEx* service) {
   if (!service) return E_INVALIDARG;
   static_cast<WeaselTSF*>(service)->Automatic().ExpireTest(); return S_OK;
+}
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticEnvironment(
+    ITfTextInputProcessorEx* service, BOOL focused, DWORD* process) {
+  if (!service || !process) return E_INVALIDARG;
+  auto& automatic = static_cast<WeaselTSF*>(service)->Automatic();
+  automatic.FocusTest(focused != FALSE); *process = automatic.ProcessTest(); return S_OK;
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticKey(
     ITfTextInputProcessorEx* service, ITfContext* context, WPARAM key, LPARAM flags, DWORD operation, BOOL* eaten) {

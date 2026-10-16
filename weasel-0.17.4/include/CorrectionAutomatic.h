@@ -61,6 +61,25 @@ inline RECT PlaceAutomaticHint(RECT anchor, RECT work, SIZE size,
   if (side == 2 && y + height > work.bottom) y = anchor.top - gap - height;
   x = (std::max)(work.left, (std::min)(x, work.right - width));
   y = (std::max)(work.top, (std::min)(y, work.bottom - height));
-  return {x, y, x + width, y + height};
+  RECT placed{x, y, x + width, y + height}, intersection{};
+  if (!IntersectRect(&intersection, &placed, &anchor)) return placed;
+  // Clamping a preferred side may cover candidates. Try the other free sides.
+  const RECT alternatives[] = {
+      {anchor.left, anchor.bottom + gap, anchor.left + width, anchor.bottom + gap + height},
+      {anchor.left, anchor.top - gap - height, anchor.left + width, anchor.top - gap},
+      {anchor.right + gap, anchor.top, anchor.right + gap + width, anchor.top + height},
+      {anchor.left - gap - width, anchor.top, anchor.left - gap, anchor.top + height}};
+  for (auto alternative : alternatives) {
+    if (alternative.bottom <= anchor.top || alternative.top >= anchor.bottom) {
+      const auto offset = (std::max)(work.left, (std::min)(alternative.left, work.right - width)) - alternative.left;
+      OffsetRect(&alternative, offset, 0);
+    } else {
+      const auto offset = (std::max)(work.top, (std::min)(alternative.top, work.bottom - height)) - alternative.top;
+      OffsetRect(&alternative, 0, offset);
+    }
+    if (alternative.left >= work.left && alternative.top >= work.top && alternative.right <= work.right &&
+        alternative.bottom <= work.bottom && !IntersectRect(&intersection, &alternative, &anchor)) return alternative;
+  }
+  return {};  // No unobscured location: omit the hint instead of covering input.
 }
 }  // namespace correction

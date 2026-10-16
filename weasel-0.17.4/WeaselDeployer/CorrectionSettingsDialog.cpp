@@ -13,6 +13,7 @@
 #include "Resource.h"
 #include "CorrectionPreferences.h"
 #include "CorrectionSettingsDialog.h"
+#include "CorrectionHintPreview.h"
 
 namespace {
 using namespace correction;
@@ -49,6 +50,14 @@ std::wstring Text(HWND window, int id) {
   return text;
 }
 void SetNumber(HWND dialog, int id, unsigned value) { SetDlgItemInt(dialog, id, value, FALSE); }
+bool ReadNumber(HWND dialog, int id, unsigned& value) {
+  const auto text = Text(dialog, id);
+  if (text.empty() || text.size() > 10 || std::any_of(text.begin(), text.end(),
+      [](wchar_t c) { return c < L'0' || c > L'9'; })) return false;
+  BOOL converted = FALSE;
+  value = GetDlgItemInt(dialog, id, &converted, FALSE);
+  return converted != FALSE;
+}
 void Cancel(DialogState& state, HWND dialog) {
   ++state.version;
   if (state.job && !state.job->done.load()) state.job->cancelled.store(true);
@@ -62,13 +71,14 @@ void ReadProfile(HWND dialog, DialogState& state) {
   const auto model = Text(dialog, IDC_CORRECTION_MODEL);
   const bool identityChanged = endpoint != profile.endpoint || model != profile.model;
   profile.endpoint = endpoint; profile.model = model;
-  profile.timeoutSeconds = GetDlgItemInt(dialog, IDC_CORRECTION_TIMEOUT, nullptr, FALSE);
+  unsigned timeout = 0;
+  profile.timeoutSeconds = ReadNumber(dialog, IDC_CORRECTION_TIMEOUT, timeout) ? timeout : 0;
   const auto selection = SendDlgItemMessageW(dialog, IDC_CORRECTION_SENSITIVITY, CB_GETCURSEL, 0, 0);
   profile.sensitivity = selection >= 0 ? static_cast<unsigned>(selection) : 0;
   profile.useCustomThreshold = IsDlgButtonChecked(dialog, IDC_CORRECTION_CUSTOM_SCORE) == BST_CHECKED;
-  BOOL scoreValid = FALSE;
-  const unsigned score = GetDlgItemInt(dialog, IDC_CORRECTION_SCORE, &scoreValid, FALSE);
-  profile.minimumScore = scoreValid ? score / 100.0 : -1;
+  unsigned score = 0;
+  const bool scoreValid = ReadNumber(dialog, IDC_CORRECTION_SCORE, score);
+  profile.minimumScore = scoreValid && score <= 100 ? score / 100.0 : profile.useCustomThreshold ? -1 : .90;
   profile.jsonMode = IsDlgButtonChecked(dialog, IDC_CORRECTION_JSON_MODE) == BST_CHECKED;
   if (identityChanged) CheckDlgButton(dialog, IDC_CORRECTION_CONSENT, BST_UNCHECKED);
   // An old model's raw threshold must not silently transfer to a new model.
@@ -119,7 +129,31 @@ void RefreshSuggestions(HWND dialog, DialogState& state) {
   ShowSuggestion(dialog, state);
 }
 struct TermDialogState { DialogState& owner; UserLexicon working; bool modeless = false; };
-struct AutomaticDialogState { DialogState& owner; AutomaticOptions working; bool modeless = false; };
+struct AutomaticDialogState {
+  DialogState& owner; AutomaticOptions working; bool modeless = false;
+  CorrectionHintPreview preview;
+};
+bool ReadAutomaticOptions(HWND dialog, AutomaticDialogState& state, AutomaticOptions& options, bool explain) {
+  options = state.working;
+  options.enabled = IsDlgButtonChecked(dialog, IDC_AUTO_ENABLED) == BST_CHECKED;
+  options.tab = IsDlgButtonChecked(dialog, IDC_AUTO_TAB) == BST_CHECKED;
+  options.side = static_cast<unsigned>(SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_GETCURSEL, 0, 0));
+  struct Field { int id; unsigned low, high; unsigned* output; };
+  for (auto field : {Field{IDC_AUTO_GAP, 0, 48, &options.gap}, {IDC_AUTO_WIDTH, 180, 640, &options.width},
+       {IDC_AUTO_FONT, 10, 24, &options.font}, {IDC_AUTO_DEBOUNCE, 100, 2000, &options.debounce}}) {
+    unsigned value = 0;
+    if (!ReadNumber(dialog, field.id, value) || value < field.low || value > field.high) {
+      if (explain) {
+        SetDlgItemTextW(dialog, IDC_AUTO_STATE, state.owner.Text(L"请填写标注范围内的数字。", L"Enter a number in the shown range."));
+        if (!state.owner.testing) SetFocus(GetDlgItem(dialog, field.id));
+        SendDlgItemMessageW(dialog, field.id, EM_SETSEL, 0, -1);
+      }
+      return false;
+    }
+    *field.output = value;
+  }
+  return ValidAutomaticOptions(options);
+}
 INT_PTR CALLBACK AutomaticDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM l) {
   auto* state = reinterpret_cast<AutomaticDialogState*>(GetWindowLongPtrW(dialog, DWLP_USER));
   if (message == WM_INITDIALOG) {
@@ -140,22 +174,30 @@ INT_PTR CALLBACK AutomaticDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM
     return TRUE;
   }
   if (!state) return FALSE;
+  if (message == WM_DESTROY) { state->preview.Close(); return TRUE; }
+  if (message == WM_ACTIVATE && LOWORD(w) == WA_INACTIVE) { state->preview.Hide(); return FALSE; }
+  if (message == WM_MOVE && state->preview.Window()) {
+    AutomaticOptions options;
+    if (ReadAutomaticOptions(dialog, *state, options, false)) state->preview.Show(dialog, options, state->owner.chinese, !state->owner.testing);
+    return TRUE;
+  }
   auto close = [&](int result) { if (state->modeless) DestroyWindow(dialog); else EndDialog(dialog, result); };
   if (message == WM_CLOSE) { close(IDCANCEL); return TRUE; }
   if (message != WM_COMMAND) return FALSE;
+  if (LOWORD(w) == IDC_AUTO_PREVIEW || (state->preview.Window() &&
+      (HIWORD(w) == EN_CHANGE || HIWORD(w) == CBN_SELCHANGE || LOWORD(w) == IDC_AUTO_TAB))) {
+    AutomaticOptions options;
+    if (ReadAutomaticOptions(dialog, *state, options, LOWORD(w) == IDC_AUTO_PREVIEW)) {
+      if (!state->preview.Show(dialog, options, state->owner.chinese, !state->owner.testing))
+        SetDlgItemTextW(dialog, IDC_AUTO_STATE, state->owner.Text(L"预览空间不足，请减小宽度或字号。", L"Preview needs more room. Reduce width/font."));
+      else SetDlgItemTextW(dialog, IDC_AUTO_STATE, L"");
+    } else state->preview.Hide();
+    return TRUE;
+  }
   if (LOWORD(w) == IDCANCEL) { close(IDCANCEL); return TRUE; }
   if (LOWORD(w) == IDOK) {
-    auto options = state->working;
-    options.enabled = IsDlgButtonChecked(dialog, IDC_AUTO_ENABLED) == BST_CHECKED;
-    options.tab = IsDlgButtonChecked(dialog, IDC_AUTO_TAB) == BST_CHECKED;
-    options.side = static_cast<unsigned>(SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_GETCURSEL, 0, 0));
-    options.gap = GetDlgItemInt(dialog, IDC_AUTO_GAP, nullptr, FALSE);
-    options.width = GetDlgItemInt(dialog, IDC_AUTO_WIDTH, nullptr, FALSE);
-    options.font = GetDlgItemInt(dialog, IDC_AUTO_FONT, nullptr, FALSE);
-    options.debounce = GetDlgItemInt(dialog, IDC_AUTO_DEBOUNCE, nullptr, FALSE);
-    if (!ValidAutomaticOptions(options)) {
-      SetDlgItemTextW(dialog, IDC_AUTO_STATE, state->owner.Text(L"参数超出范围，请按标注范围填写。", L"Use the ranges shown beside each field.")); return TRUE;
-    }
+    AutomaticOptions options;
+    if (!ReadAutomaticOptions(dialog, *state, options, true)) return TRUE;
     state->owner.preferences.automatic = options;
     close(IDOK); return TRUE;
   }
@@ -565,16 +607,35 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
     check(autoDialog != nullptr, "automatic layout dialog created");
     if (autoDialog) {
       check(IsDlgButtonChecked(autoDialog, IDC_AUTO_ENABLED) == BST_UNCHECKED &&
-          SendDlgItemMessageW(autoDialog, IDC_AUTO_SIDE, CB_GETCOUNT, 0, 0) == 3,
+          SendDlgItemMessageW(autoDialog, IDC_AUTO_SIDE, CB_GETCOUNT, 0, 0) == 3 &&
+          SendDlgItemMessageW(autoDialog, IDC_AUTO_SIDE, CB_GETCURSEL, 0, 0) == 0,
           "automatic opt-in defaults and layout choices");
       if (language == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)) SaveDialogPreview(autoDialog, "CorrectionAutomaticPreview.bmp");
+      check(GetDlgItem(autoDialog, IDC_AUTO_PREVIEW) != nullptr, "offline preview control present");
+      SendMessageW(autoDialog, WM_COMMAND, IDC_AUTO_PREVIEW, 0);
+      check(automatic.preview.Window() && !IsWindowVisible(automatic.preview.Window()), "preview renders without model or focus in hidden test");
+      RECT initialPreview{}; GetWindowRect(automatic.preview.Window(), &initialPreview);
+      SetDlgItemInt(autoDialog, IDC_AUTO_FONT, 24, FALSE);
+      RECT largePreview{}; GetWindowRect(automatic.preview.Window(), &largePreview);
+      check(largePreview.bottom - largePreview.top > initialPreview.bottom - initialPreview.top,
+          "preview responds to font changes");
+      if (language == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)) SaveDialogPreview(automatic.preview.Window(), "CorrectionHintPreview.bmp");
+      SetDlgItemInt(autoDialog, IDC_AUTO_FONT, 14, FALSE);
+      SetDlgItemTextW(autoDialog, IDC_AUTO_GAP, L"");
+      SendMessageW(autoDialog, WM_COMMAND, IDOK, 0);
+      check(IsWindow(autoDialog) && !state.preferences.automatic.enabled && !IsWindowVisible(automatic.preview.Window()),
+          "empty numeric parameter is rejected and pauses preview");
+      SetDlgItemInt(autoDialog, IDC_AUTO_GAP, 8, FALSE);
+      SetDlgItemTextW(autoDialog, IDC_AUTO_WIDTH, L"320x");
+      SendMessageW(autoDialog, WM_COMMAND, IDOK, 0);
+      check(IsWindow(autoDialog) && !state.preferences.automatic.enabled, "numeric paste suffix is rejected without saving");
       SetDlgItemInt(autoDialog, IDC_AUTO_WIDTH, 1, FALSE);
       SendMessageW(autoDialog, WM_COMMAND, IDOK, 0);
       check(IsWindow(autoDialog) && !state.preferences.automatic.enabled, "invalid layout cannot be accepted");
       SetDlgItemInt(autoDialog, IDC_AUTO_WIDTH, 400, FALSE);
       CheckDlgButton(autoDialog, IDC_AUTO_ENABLED, BST_CHECKED);
       SendMessageW(autoDialog, WM_COMMAND, IDCANCEL, 0);
-      check(!state.preferences.automatic.enabled, "layout cancel leaves options unchanged");
+      check(!state.preferences.automatic.enabled && !automatic.preview.Window(), "layout cancel leaves options unchanged and closes preview");
       autoDialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_CORRECTION_AUTOMATIC), dialog,
           AutomaticDialogProc, reinterpret_cast<LPARAM>(&automatic));
       if (autoDialog) {
@@ -665,6 +726,14 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
     check(IsDlgButtonChecked(dialog, IDC_CORRECTION_CONSENT) == BST_UNCHECKED &&
         IsDlgButtonChecked(dialog, IDC_CORRECTION_CUSTOM_SCORE) == BST_UNCHECKED,
         "endpoint change resets consent and threshold");
+    CheckDlgButton(dialog, IDC_CORRECTION_CUSTOM_SCORE, BST_CHECKED);
+    SetDlgItemTextW(dialog, IDC_CORRECTION_SCORE, L"0.9");
+    ReadProfile(dialog, state);
+    check(state.Profile().minimumScore < 0, "decimal score cannot silently become a zero threshold");
+    CheckDlgButton(dialog, IDC_CORRECTION_CUSTOM_SCORE, BST_UNCHECKED);
+    ReadProfile(dialog, state);
+    check(!state.Profile().useCustomThreshold && state.Profile().minimumScore == .90,
+        "invalid inactive score draft cannot block using the default threshold");
     SendMessageW(dialog, WM_COMMAND, IDC_CORRECTION_DEFAULTS, 0);
     check(state.preferences.mode == Mode::Off && !IsWindowEnabled(GetDlgItem(dialog, IDC_CORRECTION_CHECK)), "defaults disable checks");
     SendMessageW(dialog, WM_COMMAND, IDCANCEL, 0);

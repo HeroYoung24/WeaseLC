@@ -14,6 +14,7 @@ CRITICAL_SECTION g_cs;
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticState=_WeaselProbeAutomaticState@12")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticPoll=_WeaselProbeAutomaticPoll@4")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticExpire=_WeaselProbeAutomaticExpire@4")
+#pragma comment(linker, "/EXPORT:WeaselProbeAutomaticEnvironment=_WeaselProbeAutomaticEnvironment@12")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticKey=_WeaselProbeAutomaticKey@24")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticPreedit=_WeaselProbeAutomaticPreedit@16")
 // WINAPI exports are decorated on x86. Give the diagnostic the same stable

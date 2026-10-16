@@ -3,8 +3,57 @@
 #include <CorrectionAutomatic.h>
 #include "../../WeaselDeployer/CorrectionPreferences.h"
 #include <functional>
+#include <fstream>
+#include <CorrectionHintView.h>
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
+static bool SaveOwnedHint(HWND window, const wchar_t* filename) {
+  RECT rect{}; if (!GetClientRect(window, &rect) || IsRectEmpty(&rect)) return false;
+  const int width = rect.right, height = rect.bottom;
+  HDC reference = GetDC(window), dc = CreateCompatibleDC(reference);
+  BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  info.bmiHeader.biWidth = width; info.bmiHeader.biHeight = -height;
+  info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32;
+  void* pixels = nullptr;
+  HBITMAP bitmap = CreateDIBSection(reference, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+  bool saved = false;
+  if (dc && bitmap) {
+    const auto previous = SelectObject(dc, bitmap);
+    SendMessageW(window, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(dc), PRF_CLIENT | PRF_ERASEBKGND);
+    BITMAPFILEHEADER header{}; header.bfType = 0x4d42;
+    header.bfOffBits = sizeof(header) + sizeof(info.bmiHeader); header.bfSize = header.bfOffBits + width * height * 4;
+    std::ofstream out(filename, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    out.write(reinterpret_cast<const char*>(&info.bmiHeader), sizeof(info.bmiHeader));
+    out.write(static_cast<const char*>(pixels), width * height * 4); saved = out.good();
+    SelectObject(dc, previous);
+  }
+  if (bitmap) DeleteObject(bitmap);
+  if (dc) DeleteDC(dc);
+  if (reference) ReleaseDC(window, reference);
+  return saved;
+}
+// Invoked only as the isolated child's existing diagnostic argument. This
+// worker accepts a compiled synthetic corpus and never opens a model service.
+static int RunAutomaticFixtureWorker() {
+  AutomaticRequest request; DWORD read = 0;
+  if (!ReadFile(GetStdHandle(STD_INPUT_HANDLE), &request, sizeof(request), &read, nullptr) ||
+      read != sizeof(request) || !ValidAutomaticText(request.text, request.units, 1024)) return 2;
+  const std::wstring text(request.text, request.units);
+  if (text == L"模拟进程退出。") return 5;
+  AutomaticReply reply; reply.count = 1; auto& item = reply.items[0]; item.score = .95;
+  if (text == L"这里有错子。" || text == L"模拟慢响应。这里有错子。") {
+    item.start = static_cast<unsigned>(text.size() - 3); item.originalUnits = item.replacementUnits = 2;
+    wcscpy_s(item.original, L"错子"); wcscpy_s(item.replacement, L"错字");
+  } else if (text == L"模拟慢响应。" || text == L"模拟坏响应。") {
+    item.originalUnits = item.replacementUnits = 2;
+    wcscpy_s(item.original, L"模拟"); wcscpy_s(item.replacement, L"示例");
+    if (text == L"模拟慢响应。") Sleep(1000);
+    else reply.magic = 0;
+  } else return 3;
+  DWORD written = 0;
+  return WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), &reply, sizeof(reply), &written, nullptr) && written == sizeof(reply) ? 0 : 4;
+}
 static LONG CALLBACK AutomaticException(EXCEPTION_POINTERS* exception) {
   if (exception->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) return EXCEPTION_CONTINUE_SEARCH;
   std::cerr << "Synthetic host access violation at " << exception->ExceptionRecord->ExceptionAddress
@@ -53,17 +102,19 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
   using Inject = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, const AutomaticReply*);
   using Status = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, DWORD*, HWND*);
   using Key = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, ITfContext*, WPARAM, LPARAM, DWORD, BOOL*);
+  using Environment = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, BOOL, DWORD*);
   auto configure = reinterpret_cast<Configure>(GetProcAddress(module, "WeaselProbeAutomaticConfigure"));
   auto inject = reinterpret_cast<Inject>(GetProcAddress(module, "WeaselProbeAutomaticInject"));
   auto status = reinterpret_cast<Status>(GetProcAddress(module, "WeaselProbeAutomaticState"));
   auto key = reinterpret_cast<Key>(GetProcAddress(module, "WeaselProbeAutomaticKey"));
   auto poll = reinterpret_cast<Invalidate>(GetProcAddress(module, "WeaselProbeAutomaticPoll"));
   auto expire = reinterpret_cast<Invalidate>(GetProcAddress(module, "WeaselProbeAutomaticExpire"));
+  auto environment = reinterpret_cast<Environment>(GetProcAddress(module, "WeaselProbeAutomaticEnvironment"));
   auto apply = reinterpret_cast<Apply>(GetProcAddress(module, "WeaselProbeApplySyntheticResponse"));
   auto preedit = reinterpret_cast<Apply>(GetProcAddress(module, "WeaselProbeAutomaticPreedit"));
   auto invalidate = reinterpret_cast<Invalidate>(GetProcAddress(module, "WeaselProbeInvalidateEditSessions"));
   auto get = reinterpret_cast<HRESULT(WINAPI*)(REFCLSID,REFIID,void**)>(GetProcAddress(module, "DllGetClassObject"));
-  if (!configure || !inject || !status || !key || !poll || !expire || !apply || !preedit || !invalidate || !get) return false;
+  if (!configure || !inject || !status || !key || !poll || !expire || !environment || !apply || !preedit || !invalidate || !get) return false;
   const CLSID clsid{0xb749b45e,0x7dce,0x4496,{0x84,0x14,0x9e,0xe1,0x09,0x70,0x26,0x0a}};
   ComPtr<IClassFactory> factory;
   ComPtr<ITfTextInputProcessorEx> service;
@@ -118,6 +169,10 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     check(current.first && current.second && IsWindowVisible(current.second), "nonactivating hint visible");
     check(current.second && (GetWindowLongPtrW(current.second, GWL_EXSTYLE) & WS_EX_NOACTIVATE) &&
         GetForegroundWindow() == foreground, "hint does not take foreground focus");
+    check((GetWindowLongPtrW(current.second, GWL_EXSTYLE) & (WS_EX_LAYERED | WS_EX_TRANSPARENT)) ==
+        (WS_EX_LAYERED | WS_EX_TRANSPARENT) && SendMessageW(current.second, WM_MOUSEACTIVATE, 0, 0) == MA_NOACTIVATE,
+        "nonactivating layered hint lets mouse clicks through");
+    if (!local) check(SaveOwnedHint(current.second, L"output/CorrectionHintSample.bmp"), "own hint preview rendered without desktop capture");
     ComPtr<ITfKeyEventSink> keys; service.As(&keys);
     BOOL eaten = FALSE;
     keys->OnTestKeyDown(context.Get(), VK_TAB, 0, &eaten);
@@ -190,6 +245,8 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     expire(service.Get());
     check(noKey() && !state().first, "expired hint cannot accept Tab before timer dispatch");
 
+#include "InterruptionChecks.inc"
+
     // Move caret under a real write cookie, then verify no delayed replacement.
     preferences.timing = 1; configureNow();
     Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
@@ -223,6 +280,31 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     invalidate(service.Get()); document->Pop(TF_POPF_ALL);
   }
   const RECT work{-1920, 0, 0, 1080};
+  if (!local) {
+    ComPtr<ITfTextInputProcessorEx> temporary;
+    ComPtr<ITfKeyEventSink> temporaryKeys;
+    ComPtr<MemoryTextStore> host; host.Attach(new MemoryTextStore());
+    ComPtr<ITfDocumentMgr> document; ComPtr<ITfContext> context; TfEditCookie cookie = 0;
+    const bool made = factory->CreateInstance(nullptr, IID_ITfTextInputProcessorEx,
+        reinterpret_cast<void**>(temporary.GetAddressOf())) == S_OK &&
+        manager->CreateDocumentMgr(&document) == S_OK && document->CreateContext(client, 0,
+            static_cast<ITextStoreACP*>(host.Get()), &context, &cookie) == S_OK && document->Push(context.Get()) == S_OK;
+    check(made, "reentrant release fixture uses a separate owned service/document");
+    if (made) {
+      preferences.automatic.enabled = true; preferences.automatic.tab = true; preferences.timing = 1;
+      configure(temporary.Get(), &preferences, client, L""); temporary.As(&temporaryKeys);
+      Commit(apply, temporary.Get(), context.Get(), client, L"这里有错子。"); inject(temporary.Get(), &reply);
+      DWORD ready = 0; HWND hint = nullptr; status(temporary.Get(), &ready, &hint);
+      auto* raw = temporaryKeys.Get();
+      host->onGetSelection = [&]() { temporaryKeys.Reset(); temporary.Reset(); };
+      BOOL consumed = FALSE;
+      raw->OnKeyDown(context.Get(), VK_TAB, 0, &consumed);
+      check(consumed && host->text == L"这里有错字。" && !temporary && !temporaryKeys,
+          "key callback survives host releasing external service references during edit");
+      check(!IsWindow(hint), "last-reference callback destroys its hint and leaves no timer owner");
+      document->Pop(TF_POPF_ALL);
+    }
+  }
   for (unsigned side = 0; side < 3; ++side) {
     const auto placed = PlaceAutomaticHint(RECT{-10, 1060, 0, 1080}, work, SIZE{500, 120}, side, 8);
     check(placed.left >= work.left && placed.top >= work.top && placed.right <= work.right && placed.bottom <= work.bottom,

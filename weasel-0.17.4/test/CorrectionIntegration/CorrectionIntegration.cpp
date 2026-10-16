@@ -251,6 +251,7 @@ static bool Run(HMODULE module, bool live, bool local, bool holdout, const std::
 #include "AutomaticChecks.inc"
 
 int wmain(int argc, wchar_t** argv) {
+  if (argc == 2 && !wcscmp(argv[1], L"/correction-worker-selftest")) return RunAutomaticFixtureWorker();
   const bool automatic = argc == 3 && !wcscmp(argv[2], L"--automatic");
   const bool automaticLocal = argc == 4 && !wcscmp(argv[2], L"--automatic-local");
   if (argc != 2 && argc != 5 && argc != 6 && !automatic && !automaticLocal) return 2;

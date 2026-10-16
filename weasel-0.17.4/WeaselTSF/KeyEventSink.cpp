@@ -63,6 +63,7 @@ void WeaselTSF::_ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten) {
 }
 
 STDAPI WeaselTSF::OnSetFocus(BOOL fForeground) {
+  com_ptr<WeaselTSF> keepAlive = this;
   if (fForeground)
     m_client.FocusIn();
   else {
@@ -88,6 +89,7 @@ STDAPI WeaselTSF::OnTestKeyDown(ITfContext* pContext,
                                 WPARAM wParam,
                                 LPARAM lParam,
                                 BOOL* pfEaten) {
+  com_ptr<WeaselTSF> keepAlive = this;
   if (_automatic->Key(pContext, wParam, lParam, true, false, pfEaten)) {
     _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
   }
@@ -107,6 +109,7 @@ STDAPI WeaselTSF::OnKeyDown(ITfContext* pContext,
                             WPARAM wParam,
                             LPARAM lParam,
                             BOOL* pfEaten) {
+  com_ptr<WeaselTSF> keepAlive = this;
   if (_automatic->Key(pContext, wParam, lParam, false, false, pfEaten)) {
     _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
   }
@@ -125,6 +128,7 @@ STDAPI WeaselTSF::OnTestKeyUp(ITfContext* pContext,
                               WPARAM wParam,
                               LPARAM lParam,
                               BOOL* pfEaten) {
+  com_ptr<WeaselTSF> keepAlive = this;
   if (_automatic->Key(pContext, wParam, lParam, true, true, pfEaten)) {
     _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
   }
@@ -144,6 +148,7 @@ STDAPI WeaselTSF::OnKeyUp(ITfContext* pContext,
                           WPARAM wParam,
                           LPARAM lParam,
                           BOOL* pfEaten) {
+  com_ptr<WeaselTSF> keepAlive = this;
   if (_automatic->Key(pContext, wParam, lParam, false, true, pfEaten)) {
     _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
   }
