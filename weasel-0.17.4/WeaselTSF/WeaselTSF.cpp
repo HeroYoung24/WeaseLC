@@ -255,7 +255,7 @@ ExitError:
 
 STDMETHODIMP WeaselTSF::OnSetThreadFocus() {
   std::wstring _ToggleImeOnOpenClose{};
-  RegGetStringValue(HKEY_CURRENT_USER, L"Software\\Rime\\weasel",
+  RegGetStringValue(HKEY_CURRENT_USER, WEASEL_PRODUCT_REG_KEY,
                     L"ToggleImeOnOpenClose", _ToggleImeOnOpenClose);
   _isToOpenClose = (_ToggleImeOnOpenClose == L"yes");
   if (m_client.Echo()) {
@@ -325,9 +325,12 @@ static unsigned int retry = 0;
 bool WeaselTSF::_EnsureServerConnected() {
   if (!m_client.Echo()) {
     _Reconnect();
+#ifdef WEASELC_LOCAL_TEST_BUILD
+    return m_client.Echo() != 0;
+#endif
     retry++;
     if (retry >= 6) {
-      HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerExclusiveMutex");
+      HANDLE hMutex = CreateMutex(NULL, TRUE, WEASEL_DEPLOYER_EXCLUSIVE_MUTEX);
       if (!m_client.Echo() && GetLastError() != ERROR_ALREADY_EXISTS) {
         std::wstring dir = _GetRootDir();
         ShellExecuteW(NULL, L"open", (dir + L"\\start_service.bat").c_str(),

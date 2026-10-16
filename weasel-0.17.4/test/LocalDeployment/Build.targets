@@ -1,0 +1,25 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)output\LocalTest\$(Platform)\</OutDir>
+    <IntDir>$(SolutionDir)msbuild\LocalTest\$(Platform)\$(ProjectName)\</IntDir>
+    <TargetPath>$(OutDir)$(TargetName)$(TargetExt)</TargetPath>
+    <TargetDir>$(OutDir)</TargetDir>
+    <TLogLocation>$(IntDir)$(ProjectName).tlog\</TLogLocation>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>WEASELC_LOCAL_TEST_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName).pch</PrecompiledHeaderOutputFile>
+      <ProgramDataBaseFileName>$(IntDir)vc.pdb</ProgramDataBaseFileName>
+    </ClCompile>
+    <Link>
+      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
+      <ImportLibrary>$(OutDir)$(TargetName).lib</ImportLibrary>
+      <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
+    </Link>
+    <Lib><OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile></Lib>
+  </ItemDefinitionGroup>
+  <Target Name="ValidateLocalTestBuild" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(WEASEL_CORRECTION_PROBE_BUILD)'=='1' Or '$(Configuration)'!='Release' Or ('$(Platform)'!='x64' And '$(Platform)'!='Win32')" Text="Local deployment requires a non-probe Release x64/Win32 build." />
+  </Target>
+</Project>

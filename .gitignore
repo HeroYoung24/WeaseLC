@@ -14,3 +14,7 @@
 !.env.example
 *.pem
 *.key
+
+# Local side-by-side deployment payloads and machine-specific validation state.
+/weasel-0.17.4/output/LocalTest/
+/weasel-0.17.4/output/local-*.json

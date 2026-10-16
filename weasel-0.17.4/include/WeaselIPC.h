@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "LocalTestIdentity.h"
 #include <WeaselIPCData.h>
 #include <WeaselUtility.h>
 #include <windows.h>
@@ -6,8 +7,8 @@
 #include <memory>
 #include <KeyEvent.h>
 
-#define WEASEL_IPC_WINDOW L"WeaselIPCWindow_1.0"
-#define WEASEL_IPC_PIPE_NAME L"WeaselNamedPipe"
+#define WEASEL_IPC_WINDOW WEASEL_WINDOW_CLASS
+#define WEASEL_IPC_PIPE_NAME WEASEL_PIPE_NAME
 
 #define WEASEL_IPC_METADATA_SIZE 1024
 #define WEASEL_IPC_BUFFER_SIZE (4 * 1024)

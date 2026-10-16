@@ -7,7 +7,10 @@ LONG g_cRefDll = -1;
 
 CRITICAL_SECTION g_cs;
 
-#ifdef WEASEL_CORRECTION_PROBE_BUILD
+#if defined(WEASELC_LOCAL_TEST_BUILD)
+static const GUID c_clsidTextService = WEASELC_TEST_CLSID;
+static const GUID c_guidProfile = WEASELC_TEST_PROFILE;
+#elif defined(WEASEL_CORRECTION_PROBE_BUILD)
 #ifdef _M_IX86
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticConfigure=_WeaselProbeAutomaticConfigure@16")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticInject=_WeaselProbeAutomaticInject@8")

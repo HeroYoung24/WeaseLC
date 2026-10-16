@@ -114,7 +114,7 @@ int Configurator::Run(bool installing) {
 }
 
 int Configurator::UpdateWorkspace(bool report_errors) {
-  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
+  HANDLE hMutex = CreateMutex(NULL, TRUE, WEASEL_DEPLOYER_MUTEX);
   if (!hMutex) {
     LOG(ERROR) << "Error creating WeaselDeployerMutex.";
     return 1;
@@ -156,7 +156,7 @@ int Configurator::UpdateWorkspace(bool report_errors) {
 }
 
 int Configurator::DictManagement() {
-  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
+  HANDLE hMutex = CreateMutex(NULL, TRUE, WEASEL_DEPLOYER_MUTEX);
   if (!hMutex) {
     LOG(ERROR) << "Error creating WeaselDeployerMutex.";
     return 1;
@@ -196,7 +196,7 @@ int Configurator::DictManagement() {
 }
 
 int Configurator::SyncUserData() {
-  HANDLE hMutex = CreateMutex(NULL, TRUE, L"WeaselDeployerMutex");
+  HANDLE hMutex = CreateMutex(NULL, TRUE, WEASEL_DEPLOYER_MUTEX);
   if (!hMutex) {
     LOG(ERROR) << "Error creating WeaselDeployerMutex.";
     return 1;

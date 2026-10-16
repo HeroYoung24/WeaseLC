@@ -1,0 +1,18 @@
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32"><Configuration>Release</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals"><ProjectGuid>{6106B9B9-F5E4-4AC4-A171-6782329676A5}</ProjectGuid><WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion></PropertyGroup>
+  <Import Project="..\..\weasel.props" />
+  <Import Project="$(VCTargetsPath)Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v143</PlatformToolset><UseDebugLibraries>false</UseDebugLibraries><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <Import Project="$(VCTargetsPath)Microsoft.Cpp.props" />
+  <PropertyGroup><OutDir>$(ProjectDir)..\..\output\LocalTest\$(Platform)\</OutDir><IntDir>$(ProjectDir)..\..\msbuild\LocalTest\$(Platform)\BackendCheck\</IntDir></PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><LanguageStandard>stdcpp17</LanguageStandard><AdditionalIncludeDirectories>$(ProjectDir)..\..\include;$(BOOST_ROOT)</AdditionalIncludeDirectories><PreprocessorDefinitions>WEASELC_LOCAL_TEST_BUILD;WIN32;UNICODE;_UNICODE;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions><RuntimeLibrary>MultiThreaded</RuntimeLibrary></ClCompile>
+    <Link><SubSystem>Console</SubSystem><AdditionalLibraryDirectories>$(OutDir);$(BOOST_ROOT)\stage\lib</AdditionalLibraryDirectories><AdditionalDependencies>WeaselIPC.lib;advapi32.lib;user32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="BackendCheck.cpp" /></ItemGroup>
+  <Import Project="$(VCTargetsPath)Microsoft.Cpp.targets" />
+</Project>

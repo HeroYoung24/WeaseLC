@@ -1,4 +1,5 @@
 #pragma once
+#include "LocalTestIdentity.h"
 #include <windows.h>
 #include <string>
 #include <algorithm>
@@ -46,7 +47,7 @@ inline std::wstring CorrectionWorkerPath(const std::wstring& module,
 inline std::wstring InstalledCorrectionRoot() {
   for (REGSAM view : {KEY_WOW64_32KEY, KEY_WOW64_64KEY}) {
     HKEY key = nullptr;
-    const auto opened = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Rime\\Weasel", 0, KEY_QUERY_VALUE | view, &key);
+    const auto opened = RegOpenKeyExW(HKEY_LOCAL_MACHINE, WEASEL_PRODUCT_REG_KEY, 0, KEY_QUERY_VALUE | view, &key);
     if (opened == ERROR_FILE_NOT_FOUND || opened == ERROR_PATH_NOT_FOUND) continue;
     if (opened != ERROR_SUCCESS) return {};
     WCHAR root[32768]{}; DWORD size = sizeof(root), type = 0;

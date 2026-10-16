@@ -1,9 +1,10 @@
 #pragma once
+#include "LocalTestIdentity.h"
 
 #include <windows.h>
 
 namespace correction {
-constexpr wchar_t kRegistryKey[] = L"Software\\Rime\\Weasel\\Correction";
+constexpr wchar_t kRegistryKey[] = WEASEL_CORRECTION_REG_KEY;
 constexpr LONG kProbeCharactersEachSide = 64;
 
 enum class ProbeStatus : DWORD {

@@ -6,7 +6,7 @@
 
 #define CLSID_STRLEN 38  // strlen("{xxxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxx}")
 
-#ifdef WEASEL_CORRECTION_PROBE_BUILD
+#if defined(WEASEL_CORRECTION_PROBE_BUILD) || defined(WEASELC_LOCAL_TEST_BUILD)
 static const char c_szInfoKeyPrefix[] = "Software\\Classes\\CLSID\\";
 static const HKEY kRegistrationHive = HKEY_LOCAL_MACHINE;
 #else
@@ -68,6 +68,12 @@ HRESULT RegisterProfiles() {
   BOOL hantEnable = (profile == L"hant");
   // fallback hans enable
   hansEnable = hansEnable || (!hantEnable && !hansEnable);
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  // Registration alone must not enable this build for every Windows user.
+  // The explicit local-test launcher adds only the current user's profile.
+  hansEnable = FALSE;
+  hantEnable = FALSE;
+#endif
 
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   const std::wstring text_service_desc = L"Weasel Context Probe";
@@ -94,7 +100,7 @@ HRESULT RegisterProfiles() {
         hkl, 0, enable, 0);
   };
 
-#ifdef WEASEL_CORRECTION_PROBE_BUILD
+#if defined(WEASEL_CORRECTION_PROBE_BUILD) || defined(WEASELC_LOCAL_TEST_BUILD)
   const HKL hkl_hans = NULL;
   const HKL hkl_hant = NULL;
 #else
@@ -151,7 +157,10 @@ const GUID SupportCategories0[] = {
     GUID_TFCAT_CATEGORY_OF_TIP, GUID_TFCAT_TIP_KEYBOARD,
     // GUID_TFCAT_TIP_SPEECH,
     // GUID_TFCAT_TIP_HANDWRITING,
-    GUID_TFCAT_TIPCAP_SECUREMODE, GUID_TFCAT_TIPCAP_UIELEMENTENABLED,
+#ifndef WEASELC_LOCAL_TEST_BUILD
+    GUID_TFCAT_TIPCAP_SECUREMODE,
+#endif
+    GUID_TFCAT_TIPCAP_UIELEMENTENABLED,
     GUID_TFCAT_TIPCAP_INPUTMODECOMPARTMENT, GUID_TFCAT_TIPCAP_COMLESS,
     GUID_TFCAT_TIPCAP_WOW16, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
     GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, GUID_TFCAT_PROP_AUDIODATA,

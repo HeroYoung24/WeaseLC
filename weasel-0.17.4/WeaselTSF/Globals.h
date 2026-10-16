@@ -17,7 +17,11 @@
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 #define TEXTSERVICE_DESC_A "Weasel Context Probe"
 #else
+#ifdef WEASELC_LOCAL_TEST_BUILD
+#define TEXTSERVICE_DESC_A "WeaseLC Local Test"
+#else
 #define TEXTSERVICE_DESC_A WEASEL_CODE_NAME
+#endif
 #endif
 #define TEXTSERVICE_MODEL "Apartment"
 

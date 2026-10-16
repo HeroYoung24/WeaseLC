@@ -322,4 +322,5 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <Import Project="$(SolutionDir)test\LocalDeployment\Build.targets" Condition="'$(WEASELC_LOCAL_TEST_BUILD)'=='1'" />
 </Project>

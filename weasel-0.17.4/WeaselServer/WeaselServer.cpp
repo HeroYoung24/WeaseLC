@@ -120,7 +120,9 @@ int WINAPI _tWinMain(HINSTANCE hInstance,
   int nRet = 0;
   try {
     WeaselServerApp app;
+#ifndef WEASELC_LOCAL_TEST_BUILD
     RegisterApplicationRestart(NULL, 0);
+#endif
     nRet = app.Run();
   } catch (...) {
     // bad luck...
