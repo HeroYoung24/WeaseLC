@@ -9,6 +9,9 @@ static BOOL prevfEaten = FALSE;
 static int keyCountToSimulate = 0;
 
 void WeaselTSF::_ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten) {
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  if (_probeKeySink) { _probeKeySink(wParam, lParam, pfEaten, _probeKeySinkContext); return; }
+#endif
   // when _IsKeyboardDisabled don't eat the key,
   // when keyboard closable and keyboard closed, don't eat the key
   if ((_isToOpenClose && !_IsKeyboardOpen()) || _IsKeyboardDisabled()) {
@@ -169,6 +172,16 @@ STDAPI WeaselTSF::OnPreservedKey(ITfContext* pContext,
   *pfEaten = FALSE;
   return S_OK;
 }
+
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeSetKeySink(
+    ITfTextInputProcessorEx* service, void(WINAPI* sink)(WPARAM, LPARAM, BOOL*, void*), void* state) {
+  if (!service) return E_POINTER;
+  auto* owner = static_cast<WeaselTSF*>(service);
+  owner->ProbeSetKeySink(sink, state);
+  return S_OK;
+}
+#endif
 
 BOOL WeaselTSF::_InitKeyEventSink() {
   com_ptr<ITfKeystrokeMgr> pKeystrokeMgr;

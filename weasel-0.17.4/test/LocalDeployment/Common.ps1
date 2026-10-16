@@ -50,6 +50,16 @@ function Remove-TestRegistration {
     if(Test-Path -LiteralPath $dll){$code=Invoke-Program (Join-Path $env:windir ($item[0]+'\regsvr32.exe')) ('/u /s "'+$dll+'"');Write-Output "Unregister $($item[1]): $code"}
   }
   Set-TestMachineRoot $true
+  # UnregisterProfile can leave the per-user Enable override behind after the
+  # machine profile has disappeared. This exact identity belongs to this test.
+  foreach($view in @([Microsoft.Win32.RegistryView]::Registry32,[Microsoft.Win32.RegistryView]::Registry64)){
+    $machine=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,$view)
+    try{foreach($name in @("Software\Classes\CLSID\$script:TestClsid","Software\Microsoft\CTF\TIP\$script:TestClsid")){
+      $key=$machine.OpenSubKey($name);if($key){$key.Dispose();throw 'Machine test registration remains; per-user cleanup refused.'}
+    }}finally{$machine.Dispose()}
+    $user=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,$view)
+    try{$user.DeleteSubKeyTree("Software\Microsoft\CTF\TIP\$script:TestClsid",$false)}finally{$user.Dispose()}
+  }
   # The second architecture may find profiles already removed by the first.
   # Verify actual absence, not just regsvr32's exit status.
   $remaining=@(Get-TestRegistration | Where-Object {$_ -notmatch '^CurrentUser .*Software\\Rime\\WeaseLC-LocalTest$'})

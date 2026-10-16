@@ -153,6 +153,7 @@ class StartCompositionContext final : public CompositionContext,
   bool nullInsertRange = false;
   bool rejectComposition = false;
   unsigned insertions = 0, starts = 0;
+  TestComposition* nextComposition = nullptr;
   STDMETHODIMP QueryInterface(REFIID iid, void** object) override {
     if (!object) return E_POINTER;
     *object = nullptr;
@@ -182,7 +183,7 @@ class StartCompositionContext final : public CompositionContext,
     if (!composition) return E_POINTER;
     *composition = nullptr; ++starts;
     if (startResult == S_OK && !rejectComposition) {
-      *composition = &composition_; composition_.AddRef();
+      *composition = nextComposition ? nextComposition : &composition_; (*composition)->AddRef();
     }
     return startResult;
   }
@@ -598,6 +599,69 @@ static bool TestTextEdits(HMODULE module, REFCLSID clsid) {
   return failures == 0;
 }
 
+
+static void WINAPI CountSyntheticKey(WPARAM, LPARAM, BOOL* eaten, void* state) {
+  ++*static_cast<unsigned*>(state); *eaten = TRUE;
+}
+static bool TestInterruptedInput(HMODULE module, REFCLSID clsid) {
+  using Exercise = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, ITfContext*, ITfContextView*, ITfComposition*, TfEditCookie, DWORD, BOOL);
+  using Bound = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, ITfContext*, HRESULT(WINAPI*)(ITfContext*, TfEditCookie), ITfEditSession**);
+  using Child = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, ITfContext*, ITfComposition*, DWORD, BOOL, ITfEditSession**);
+  using SetKeys = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, void(WINAPI*)(WPARAM, LPARAM, BOOL*, void*), void*);
+  auto exercise = reinterpret_cast<Exercise>(GetProcAddress(module, "WeaselProbeExerciseComposition"));
+  auto bound = reinterpret_cast<Bound>(GetProcAddress(module, "WeaselProbeCreateBoundEditSession"));
+  auto child = reinterpret_cast<Child>(GetProcAddress(module, "WeaselProbeCreateCompositionSession"));
+  auto setKeys = reinterpret_cast<SetKeys>(GetProcAddress(module, "WeaselProbeSetKeySink"));
+  auto get = reinterpret_cast<HRESULT(WINAPI*)(REFCLSID, REFIID, void**)>(GetProcAddress(module,"DllGetClassObject"));
+  if (!exercise || !bound || !child || !setKeys || !get) return false;
+  unsigned checks = 0, failed = 0;
+  auto check = [&](bool valid, const char* name) { ++checks; if (!valid) ++failed; std::cout << (valid ? "PASS " : "FAIL ") << name << '\n'; };
+  for (unsigned mode = 0; mode != 3; ++mode) {
+    ComPtr<IClassFactory> factory; ComPtr<ITfTextInputProcessorEx> service;
+    if (get(clsid, IID_IClassFactory, reinterpret_cast<void**>(factory.GetAddressOf())) != S_OK || factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf())) != S_OK) return false;
+    CompositionRange range, newRange; TestComposition oldComposition(range), newComposition(newRange);
+    StartCompositionContext context(range, oldComposition); context.defer = true;
+    ComPtr<ITfEditSession> oldWork;
+    bound(service.Get(), &context, ObserveBoundContext, &oldWork);
+    exercise(service.Get(), &context, nullptr, &oldComposition, 1, 7, FALSE);
+    if (mode == 0) { ComPtr<ITfThreadFocusSink> focus; service.As(&focus); focus->OnKillThreadFocus(); }
+    if (mode == 1) service->Deactivate();
+    if (mode == 2) exercise(service.Get(), &context, nullptr, &oldComposition, 1, 6, FALSE);
+    check(exercise(service.Get(), &context, nullptr, nullptr, 1, 5, FALSE) == S_OK, "interruption detaches stale frontend composition immediately");
+    check(oldWork->DoEditSession(1) == TF_E_DISCONNECTED, "interruption invalidates old queued text writes");
+    context.nextComposition = &newComposition;
+    ComPtr<ITfEditSession> next; child(service.Get(), &context, nullptr, 3, TRUE, &next);
+    check(next && next->DoEditSession(1) == S_OK, "next input can start a fresh composition without switching IME");
+    if (context.deferredSession) check(context.Drain() == S_OK && oldComposition.ends == 1 && range.textWrites == 0,
+        "deferred interruption cleanup survives invalidation without erasing host text");
+    else check(oldComposition.ends == 0, "host termination does not recursively end an already terminated composition");
+    check(exercise(service.Get(), &context, nullptr, &newComposition, 1, 5, FALSE) == S_OK && newComposition.ends == 0,
+        "old cleanup preserves the next composition");
+    exercise(service.Get(), &context, nullptr, nullptr, 1, 7, FALSE);
+  }
+  {
+    ComPtr<IClassFactory> factory; ComPtr<ITfTextInputProcessorEx> service; ComPtr<ITfKeyEventSink> keys;
+    get(clsid,IID_IClassFactory,reinterpret_cast<void**>(factory.GetAddressOf()));
+    factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf())); service.As(&keys);
+    CompositionRange aRange,bRange; CompositionContext a(aRange),b(bRange);
+    unsigned calls=0; setKeys(service.Get(), CountSyntheticKey, &calls); BOOL eaten=FALSE;
+    keys->OnTestKeyDown(&a,'A',1,&eaten); keys->OnTestKeyDown(&a,'A',1,&eaten); keys->OnKeyDown(&a,'A',1,&eaten);
+    check(calls==1, "duplicate query and matching key-down dispatch exactly once with no correction hint");
+    keys->OnKeyUp(&a,'A',1,&eaten); calls=0;
+    keys->OnTestKeyDown(&a,'A',1,&eaten); keys->OnTestKeyDown(&a,VK_BACK,1,&eaten);
+    check(calls==2, "orphaned query cannot swallow the next Backspace");
+    keys->OnKeyUp(&a,VK_BACK,1,&eaten); calls=0;
+    keys->OnTestKeyDown(&a,'A',1,&eaten); keys->OnKeyDown(&a,'B',1,&eaten);
+    check(calls==2, "unmatched key-down is processed instead of swallowed");
+    keys->OnKeyUp(&a,'B',1,&eaten); calls=0;
+    keys->OnTestKeyDown(&a,'A',1,&eaten); keys->OnTestKeyDown(&b,'A',1,&eaten);
+    check(calls==2, "query from another context cannot suppress new input");
+    setKeys(service.Get(), nullptr, nullptr);
+  }
+  std::cout << "Interrupted input checks = " << checks << ", failures = " << failed << '\n';
+  return failed==0;
+}
+
 static int RunCompositionChecks(const WCHAR* dll, REFCLSID clsid) {
   HMODULE module = LoadLibraryW(dll);
   if (!module) return 1;
@@ -605,6 +669,7 @@ static int RunCompositionChecks(const WCHAR* dll, REFCLSID clsid) {
   valid = TestCompositionResults(module, clsid) && valid;
   valid = TestBoundEditSessions(module, clsid) && valid;
   valid = TestTextEdits(module, clsid) && valid;
+  valid = TestInterruptedInput(module, clsid) && valid;
   auto canUnload = reinterpret_cast<HRESULT(WINAPI*)()>(GetProcAddress(module, "DllCanUnloadNow"));
   if (canUnload && canUnload() == S_OK && FreeLibrary(module)) {
     HMODULE resident = nullptr;

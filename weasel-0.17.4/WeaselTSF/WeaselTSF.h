@@ -137,6 +137,9 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   void ProbeCaptureCommit(ITfContext*, TfEditCookie, const std::wstring&);
   void ProbeCancelCapture();
+  void ProbeSetKeySink(void(WINAPI* sink)(WPARAM, LPARAM, BOOL*, void*), void* state) {
+    _probeKeySink = sink; _probeKeySinkContext = state;
+  }
 #endif
   BOOL _IsComposing();
   void _SetComposition(com_ptr<ITfComposition> pComposition,
@@ -235,6 +238,11 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   DWORD _dwTextEditSinkCookie, _dwTextLayoutSinkCookie;
   BYTE _lpbKeyState[256];
   BOOL _fTestKeyDownPending, _fTestKeyUpPending;
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  using ProbeKeySink = void(WINAPI*)(WPARAM, LPARAM, BOOL*, void*);
+  ProbeKeySink _probeKeySink = nullptr;
+  void* _probeKeySinkContext = nullptr;
+#endif
 
   com_ptr<ITfContext> _pEditSessionContext;
   ULONGLONG _editGeneration = 0;
