@@ -1,5 +1,7 @@
 # 本机独立测试
 
+2026-10-18 实测：用户确认新版本基本输入和鼠标中断恢复正常，手动本地模型纠错通过，自动提示仍缺失（上下文探测两次 FocusChanged），Tab 未验收。测试已回退；一个新 DLL 因 ChatGPT/Explorer 占用待删除。完整结果、产物哈希和下次入口见 [本机实测记录](../../docs/LOCAL_ACCEPTANCE_2026-10-18.md)。
+
 适用本次用户明确授权的日常电脑测试。先读 [风险与验收范围](../../docs/LOCAL_DEPLOYMENT_RISK.md)。虚拟机包仍用于干净客体，不直接用于本机覆盖安装。
 
 1. MSBuild Release x64 与 Win32：`weasel.sln /t:WeaselTSF,WeaselServer,WeaselDeployer /p:WEASELC_LOCAL_TEST_BUILD=1 /p:WEASEL_CORRECTION_PROBE_BUILD=0`；另构建 Release x64 `test\LocalDeployment\ProfileCheck.vcxproj`。两个宏不可同时启用。默认普通构建未改变。
@@ -12,3 +14,5 @@
 `BackendCheck.vcxproj` 的两架构只向独立管道发送固定合成 `nihao ` 并比对提交 `你好`；不激活 TSF、不注入键盘。类工厂检查使用原 `ProbeActivation --class-factory/--load-only`，DLL 为独立正式代码构建，且无探测导出。
 
 当前状态：已安装及演练注册回退，后端合成转换通过；修复 Profile 机器可用属性后，用户确认列表可见、中文输入和搜狗正常。自动纠错/多应用/Tab 与鼠标边界仍待本机验收。以后重启用 `Start.cmd` 启动独立后端，无自启动。
+
+上段为早期部署状态，当前以顶部实测记录为准。启用工具的写入动作以 API HRESULT 返回并通知设置变化；最终安装状态由独立新进程读取确认，最多三次有界验证，不用写入进程的缓存枚举作成功门槛。子进程 stdout/stderr 进入部署转录日志，函数返回值仍是单个退出码。

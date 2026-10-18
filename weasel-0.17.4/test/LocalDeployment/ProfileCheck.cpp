@@ -27,6 +27,7 @@ int wmain(int argc, wchar_t** argv) {
   }
   if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return 3;
   int code = 0;
+  HRESULT mutationResult = S_OK;
   {
     const CLSID clsid = WEASELC_TEST_CLSID;
     const GUID profile = WEASELC_TEST_PROFILE;
@@ -46,6 +47,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (enable || disable) {
       hr = profiles->EnableLanguageProfile(clsid, 0x0804, profile, enable);
+      mutationResult = hr;
       std::cout << "EnableLanguageProfile HRESULT=0x" << std::hex << hr << '\n';
       if (FAILED(hr)) code = 5;
     }
@@ -73,7 +75,7 @@ int wmain(int argc, wchar_t** argv) {
     std::cout << "GetProfile HRESULT=0x" << std::hex << hr << " flags=0x" << value.dwFlags << " caps=0x" << value.dwCaps << '\n';
     if (FAILED(hr)) code = 7;
     else if (expectDisabled ? (value.dwFlags & TF_IPP_FLAG_ENABLED) : !(value.dwFlags & TF_IPP_FLAG_ENABLED)) code = 8;
-    if ((enable || disable || machineEnable || machineDisable) && code == 0) {
+    if (enable || disable) {
       DWORD_PTR result = 0;
       const auto sent = SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0,
           reinterpret_cast<LPARAM>(L"intl"), SMTO_ABORTIFHUNG, 1000, &result);
@@ -81,5 +83,7 @@ int wmain(int argc, wchar_t** argv) {
     }
   }
   CoUninitialize();
-  return code;
+  // Write APIs can leave this process's profile enumeration stale. Report the
+  // write result here; installation verifies visibility in a fresh process.
+  return (enable || disable) ? (FAILED(mutationResult) ? 5 : 0) : code;
 }

@@ -11,8 +11,16 @@ function Test-Admin {
 function Invoke-Program([string]$File,[string]$Arguments) {
   $info=New-Object Diagnostics.ProcessStartInfo
   $info.FileName=$File;$info.Arguments=$Arguments;$info.UseShellExecute=$false;$info.CreateNoWindow=$true
+  $info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
   $process=[Diagnostics.Process]::Start($info)
-  try{if(!$process.WaitForExit(30000)){$process.Kill();$process.WaitForExit();throw "Timed out: $File"};return $process.ExitCode}finally{$process.Dispose()}
+  try{
+    $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
+    if(!$process.WaitForExit(30000)){$process.Kill();$process.WaitForExit();throw "Timed out: $File"}
+    $out=$stdout.GetAwaiter().GetResult();$err=$stderr.GetAwaiter().GetResult()
+    # Keep diagnostics in the transcript, not in this function's integer result.
+    if($out){Write-Host $out.TrimEnd()};if($err){Write-Host $err.TrimEnd()}
+    return $process.ExitCode
+  }finally{$process.Dispose()}
 }
 function Get-TestRegistration {
   $result=@()
@@ -39,8 +47,16 @@ function Enable-InstalledTestProfile {
   $checker=Join-Path $PSScriptRoot '..\..\output\LocalTest\x64\ProfileCheck.exe'
   if(!(Test-Path -LiteralPath $checker)){throw 'Build the x64 ProfileCheck before installation.'}
   if((Invoke-Program $checker '--enable-installed') -ne 0){throw 'Could not enable the independent installed profile.'}
+  # A previous uninstall may have explicitly disabled this user's profile.
+  # Machine availability alone cannot override that per-user preference.
+  if((Invoke-Program $checker '--enable') -ne 0){throw 'Could not enable the independent profile for this user.'}
   # Never use the writing process's cached GetProfile as the persistence gate.
-  if((Invoke-Program $checker '') -ne 0){throw 'Fresh-process verification of installed profile failed.'}
+  $verified=$false
+  for($attempt=0;$attempt -lt 3;$attempt++){
+    if((Invoke-Program $checker '') -eq 0){$verified=$true;break}
+    Start-Sleep -Milliseconds 200
+  }
+  if(!$verified){throw 'Fresh-process verification of installed profile failed.'}
 }
 function Remove-TestRegistration {
   Set-TestInputList $true
