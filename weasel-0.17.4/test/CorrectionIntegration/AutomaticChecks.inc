@@ -132,9 +132,11 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
   auto& item = reply.items[0]; item.start = 3; item.originalUnits = 2; item.replacementUnits = 2; item.score = .95;
   wcscpy_s(item.original, L"错子"); wcscpy_s(item.replacement, L"错字");
   const HWND foreground = GetForegroundWindow();
-  for (unsigned field = 0; field < (local ? 1U : 3U); ++field) {
+  const InputScope fieldScopes[] = {IS_TEXT, IS_TEXT, IS_PASSWORD, IS_DEFAULT, IS_PRIVATE,
+      IS_NUMERIC_PIN, IS_ALPHANUMERIC_PIN, IS_ALPHANUMERIC_PIN_SET};
+  for (unsigned field = 0; field < (local ? 1U : _countof(fieldScopes)); ++field) {
     ComPtr<MemoryTextStore> store;
-    store.Attach(new MemoryTextStore(field == 2 ? IS_PASSWORD : IS_TEXT, field != 1));
+    store.Attach(new MemoryTextStore(fieldScopes[field], field != 1));
     ComPtr<ITfDocumentMgr> document; ComPtr<ITfContext> context;
     TfEditCookie cookie = 0;
     if (manager->CreateDocumentMgr(&document) != S_OK || document->CreateContext(client, 0,
@@ -153,7 +155,8 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     check(configureNow(), "automatic configuration bound to test client only");
     check(Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"), "production commit with automatic capture");
     if (field) {
-      check(inject(service.Get(), &reply) == S_FALSE && noKey(), "unknown/password field never shows or consumes Tab");
+      check(inject(service.Get(), &reply) == S_FALSE && noKey() && store->text == L"这里有错子。",
+          "missing/default/private/password/PIN field never shows, consumes Tab or changes text");
       invalidate(service.Get()); document->Pop(TF_POPF_ALL); continue;
     }
     if (local) {

@@ -1,9 +1,10 @@
 #include "stdafx.h"
-#include "WeaselTSF.h"
-#include <CorrectionProbe.h>
 #include <initguid.h>
 #include <inputscope.h>
+#include "WeaselTSF.h"
+#include <CorrectionProbe.h>
 #include <CorrectionCapture.h>
+#include <CorrectionScope.h>
 
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 namespace correction {
@@ -28,58 +29,13 @@ WeaselProbeGetCapturedResult(correction::ProbeResult* result) {
 
 namespace {
 bool IsOrdinaryTextScope(ITfContext* context, TfEditCookie cookie,
-                         ITfRange* selected, correction::ProbeStatus& status) {
-  com_ptr<ITfContextView> view;
-  HWND window = nullptr;
-  if (context->GetActiveView(&view) == S_OK && view &&
-      view->GetWnd(&window) == S_OK && window &&
-      (GetWindowLongPtrW(window, GWL_STYLE) & ES_PASSWORD)) {
-    status = correction::ProbeStatus::ProtectedField;
-    return false;
-  }
-
-  com_ptr<ITfReadOnlyProperty> property;
-  if (context->GetAppProperty(GUID_PROP_INPUTSCOPE, &property) != S_OK ||
-      !property) {
-    status = correction::ProbeStatus::ScopeUnavailable;
-    return false;
-  }
-  VARIANT value;
-  VariantInit(&value);
-  const HRESULT read_property = property->GetValue(cookie, selected, &value);
-  com_ptr<ITfInputScope> input_scope;
-  if (read_property == S_OK && value.vt == VT_UNKNOWN && value.punkVal)
-    value.punkVal->QueryInterface(
-        IID_ITfInputScope, reinterpret_cast<void**>(&input_scope));
-  VariantClear(&value);
-  if (!input_scope) {
-    status = correction::ProbeStatus::ScopeUnavailable;
-    return false;
-  }
-
-  InputScope* scopes = nullptr;
-  UINT count = 0;
-  if (input_scope->GetInputScopes(&scopes, &count) != S_OK || !scopes ||
-      count == 0) {
-    CoTaskMemFree(scopes);
-    status = correction::ProbeStatus::ScopeUnavailable;
-    return false;
-  }
-  bool ordinary = true;
-  for (UINT i = 0; i < count; ++i) {
-    if (scopes[i] == IS_PASSWORD || scopes[i] == IS_NUMERIC_PASSWORD ||
-        scopes[i] == IS_PRIVATE) {
-      status = correction::ProbeStatus::ProtectedField;
-      ordinary = false;
-      break;
-    }
-    if (scopes[i] != IS_TEXT) {
-      status = correction::ProbeStatus::ScopeUnavailable;
-      ordinary = false;
-    }
-  }
-  CoTaskMemFree(scopes);
-  return ordinary;
+                         ITfRange* selected, correction::ProbeStatus& status,
+                         correction::ScopeDiagnostic* details = nullptr) {
+  const auto result = correction::InspectInputScope(context, cookie, selected);
+  if (details) *details = result;
+  status = result ? correction::ProbeStatus::Readable : correction::ProtectedScope(result)
+      ? correction::ProbeStatus::ProtectedField : correction::ProbeStatus::ScopeUnavailable;
+  return static_cast<bool>(result);
 }
 
 bool ReadSide(ITfRange* selected, TfEditCookie cookie, bool before,
@@ -135,9 +91,9 @@ correction::ProbeResult ProbeContext(ITfContext* context,
 }  // namespace
 
 bool WeaselTSF::_CorrectionSafeScope(ITfContext* context, TfEditCookie cookie, ITfRange* range,
-                                    correction::ProbeStatus* reason) {
+                                    correction::ProbeStatus* reason, correction::ScopeDiagnostic* details) {
   correction::ProbeStatus status = correction::ProbeStatus::ScopeUnavailable;
-  const bool safe = context && range && IsOrdinaryTextScope(context, cookie, range, status);
+  const bool safe = context && range && IsOrdinaryTextScope(context, cookie, range, status, details);
   if (reason) *reason = safe ? correction::ProbeStatus::Readable : status;
   return safe;
 }

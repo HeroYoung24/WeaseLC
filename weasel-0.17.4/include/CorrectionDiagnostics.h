@@ -1,6 +1,7 @@
 #pragma once
 #include "CorrectionProbe.h"
 #include "CorrectionFocus.h"
+#include "CorrectionScope.h"
 
 namespace correction {
 enum class AutomaticStage : DWORD {
@@ -18,6 +19,23 @@ struct AutomaticDiagnostic {
 };
 // Separate key: diagnostic updates must not invalidate SettingsTime's root key.
 inline constexpr wchar_t kDiagnosticKey[] = WEASEL_CORRECTION_REG_KEY L"\\Diagnostics";
+inline ScopeDiagnostic LoadScopeDiagnostic(const wchar_t* path = kDiagnosticKey) {
+  ScopeDiagnostic result;
+  DWORD bytes = sizeof(result);
+  if (RegGetValueW(HKEY_CURRENT_USER, path, L"LastScope", RRF_RT_REG_BINARY,
+      nullptr, &result, &bytes) != ERROR_SUCCESS || bytes != sizeof(result) || result.version != 1 ||
+      result.stage > ScopeStage::ProtectedScope || result.variantType > 0xffff) return {};
+  return result;
+}
+inline void SaveScopeDiagnostic(const ScopeDiagnostic& result, const wchar_t* path = kDiagnosticKey) {
+  const auto previous = LoadScopeDiagnostic(path);
+  if (previous.stage == result.stage && previous.error == result.error &&
+      previous.scope == result.scope && previous.variantType == result.variantType) return;
+  HKEY key = nullptr;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, path, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
+  RegSetValueExW(key, L"LastScope", 0, REG_BINARY, reinterpret_cast<const BYTE*>(&result), sizeof(result));
+  RegCloseKey(key);
+}
 inline void SaveAutomaticDiagnostic(AutomaticDiagnostic result, const wchar_t* path = kDiagnosticKey) {
   HKEY key = nullptr;
   if (RegCreateKeyExW(HKEY_CURRENT_USER, path, 0, nullptr, 0,

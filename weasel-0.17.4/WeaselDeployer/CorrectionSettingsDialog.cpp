@@ -373,6 +373,9 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
       probeText += correction::AutomaticStageText(diagnostic.stage, state->chinese);
       if (diagnostic.stage == correction::AutomaticStage::FocusBlocked)
         probeText += std::wstring(L" · ") + correction::FocusStageText(diagnostic.focus, state->chinese);
+      if (diagnostic.stage == correction::AutomaticStage::ScopeUnavailable ||
+          diagnostic.stage == correction::AutomaticStage::ProtectedField)
+        probeText += std::wstring(L" · ") + correction::ScopeStageText(correction::LoadScopeDiagnostic().stage, state->chinese);
     }
     SetDlgItemTextW(dialog, IDC_CORRECTION_PROBE_STATUS, probeText.c_str());
     SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,

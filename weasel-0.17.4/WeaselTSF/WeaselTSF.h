@@ -25,7 +25,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   WeaselTSF();
   ~WeaselTSF();
   AutomaticCorrection& Automatic() { return *_automatic; }
-  bool _CorrectionSafeScope(ITfContext*, TfEditCookie, ITfRange*, correction::ProbeStatus* reason = nullptr);
+  bool _CorrectionSafeScope(ITfContext*, TfEditCookie, ITfRange*, correction::ProbeStatus* reason = nullptr, correction::ScopeDiagnostic* details = nullptr);
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   HRESULT ProbeGetCandidate(IUnknown** candidate);
   HRESULT ProbeExerciseLanguageBar(ITfThreadMgr* manager);

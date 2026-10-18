@@ -138,6 +138,24 @@ static bool TestCorrectionFocus(HMODULE module, REFCLSID clsid) {
   if(parent) RegQueryInfoKeyW(parent,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,&before);
   Sleep(20);sample.stage=AutomaticStage::WorkerStarted;SaveAutomaticDiagnostic(sample,childKey.c_str());
   if(parent){RegQueryInfoKeyW(parent,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,&after);RegCloseKey(parent);}
+  ScopeDiagnostic scope;scope.stage=ScopeStage::UnsupportedScope;scope.scope=IS_DEFAULT;scope.variantType=VT_UNKNOWN;
+  SaveScopeDiagnostic(scope,childKey.c_str());
+  const auto loadedScope=LoadScopeDiagnostic(childKey.c_str());
+  check(sizeof(ScopeDiagnostic)==20 && loadedScope.stage==ScopeStage::UnsupportedScope && loadedScope.scope==IS_DEFAULT,
+      "fixed-size scope metadata round trips without text");
+  HKEY diagnostics=nullptr;
+  RegOpenKeyExW(HKEY_CURRENT_USER,childKey.c_str(),0,KEY_SET_VALUE,&diagnostics);
+  auto corrupt=scope;corrupt.version=2;
+  if(diagnostics) RegSetValueExW(diagnostics,L"LastScope",0,REG_BINARY,reinterpret_cast<const BYTE*>(&corrupt),sizeof(corrupt));
+  check(LoadScopeDiagnostic(childKey.c_str()).stage==ScopeStage::NotRun,"unknown scope diagnostic version rejected");
+  corrupt=scope;corrupt.stage=static_cast<ScopeStage>(999);
+  if(diagnostics) RegSetValueExW(diagnostics,L"LastScope",0,REG_BINARY,reinterpret_cast<const BYTE*>(&corrupt),sizeof(corrupt));
+  check(LoadScopeDiagnostic(childKey.c_str()).stage==ScopeStage::NotRun,"invalid scope diagnostic enum rejected");
+  if(diagnostics) { RegSetValueExW(diagnostics,L"LastScope",0,REG_BINARY,reinterpret_cast<const BYTE*>(&scope),sizeof(scope)-1);RegCloseKey(diagnostics); }
+  check(LoadScopeDiagnostic(childKey.c_str()).stage==ScopeStage::NotRun,"truncated scope diagnostic rejected");
+  SaveScopeDiagnostic(scope,childKey.c_str());
+  HKEY settings=nullptr;RegOpenKeyExW(HKEY_CURRENT_USER,key.c_str(),0,KEY_QUERY_VALUE,&settings);
+  if(settings){RegQueryInfoKeyW(settings,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,&after);RegCloseKey(settings);}
   const auto loaded=LoadAutomaticDiagnostic(childKey.c_str());
   check(loaded.stage==AutomaticStage::WorkerStarted && CompareFileTime(&before,&after)==0,"diagnostic writes cannot invalidate settings timestamp");
   check(sizeof(AutomaticDiagnostic)==24 && (loaded.time.dwLowDateTime || loaded.time.dwHighDateTime),"diagnostic contains only enums HRESULT and timestamp");

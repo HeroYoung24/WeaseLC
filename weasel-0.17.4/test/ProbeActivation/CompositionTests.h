@@ -1,5 +1,7 @@
 #pragma once
 #include <functional>
+#include <initguid.h>
+#include "../../include/CorrectionScope.h"
 
 // Stack-owned mocks retain an owner reference. They report every borrowed COM
 // reference so a leaked GetRange/GetSelection output cannot hide in TSF caches.
@@ -788,6 +790,7 @@ static bool TestInterruptedInput(HMODULE module, REFCLSID clsid) {
 }
 
 #include "FocusChecks.h"
+#include "ScopeChecks.h"
 
 static int RunCompositionChecks(const WCHAR* dll, REFCLSID clsid) {
   HMODULE module = LoadLibraryW(dll);
@@ -798,6 +801,7 @@ static int RunCompositionChecks(const WCHAR* dll, REFCLSID clsid) {
   valid = TestTextEdits(module, clsid) && valid;
   valid = TestInterruptedInput(module, clsid) && valid;
   valid = TestCorrectionFocus(module, clsid) && valid;
+  valid = TestCorrectionScope() && valid;
   auto canUnload = reinterpret_cast<HRESULT(WINAPI*)()>(GetProcAddress(module, "DllCanUnloadNow"));
   if (canUnload && canUnload() == S_OK && FreeLibrary(module)) {
     HMODULE resident = nullptr;

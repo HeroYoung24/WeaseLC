@@ -208,7 +208,12 @@ bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
     Report(correction::AutomaticStage::ReadOnly); return false;
   }
   correction::ProbeStatus scope = correction::ProbeStatus::ScopeUnavailable;
-  if (!owner_->_CorrectionSafeScope(context, cookie, target, &scope)) {
+  correction::ScopeDiagnostic details;
+  if (!owner_->_CorrectionSafeScope(context, cookie, target, &scope, &details)) {
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+    if (!testing_)
+#endif
+      correction::SaveScopeDiagnostic(details);
     Report(scope == correction::ProbeStatus::ProtectedField ? correction::AutomaticStage::ProtectedField :
         correction::AutomaticStage::ScopeUnavailable); return false;
   }
