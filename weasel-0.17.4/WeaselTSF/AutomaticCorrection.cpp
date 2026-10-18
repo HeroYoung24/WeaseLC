@@ -67,15 +67,17 @@ bool AutomaticCorrection::Focused(ITfContext* target) const {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   if (testing_) return testFocused_ && target != nullptr;
 #endif
-  if (!target || !owner_->_pThreadMgr || Client() == TF_CLIENTID_NULL) return false;
-  com_ptr<ITfDocumentMgr> document;
-  com_ptr<ITfContext> focused;
-  com_ptr<ITfContextView> view;
-  HWND host = nullptr;
-  return owner_->_pThreadMgr->GetFocus(&document) == S_OK && document &&
-      document->GetTop(&focused) == S_OK && focused == target &&
-      target->GetActiveView(&view) == S_OK && view && view->GetWnd(&host) == S_OK && host &&
-      GetAncestor(host, GA_ROOT) == GetAncestor(GetForegroundWindow(), GA_ROOT);
+  const auto result = correction::CheckContextFocus(owner_->_pThreadMgr, target, true, GetForegroundWindow());
+  if (!result) Report(correction::AutomaticStage::FocusBlocked, result);
+  return static_cast<bool>(result) && Client() != TF_CLIENTID_NULL;
+}
+void AutomaticCorrection::Report(correction::AutomaticStage stage, correction::FocusResult focus) const {
+  if (diagnostic_.stage == stage && diagnostic_.focus == focus.stage && diagnostic_.error == focus.error) return;
+  diagnostic_.stage = stage; diagnostic_.focus = focus.stage; diagnostic_.error = focus.error;
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  if (testing_) return;
+#endif
+  correction::SaveAutomaticDiagnostic(diagnostic_);
 }
 void AutomaticCorrection::Hide() { if (window_) ShowWindow(window_, SW_HIDE); }
 void AutomaticCorrection::StopWorker() {
@@ -148,7 +150,7 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   // insertion point. Never pull earlier document contents into the model.
   std::wstring accumulated;
   com_ptr<ITfRange> previous;
-  if (context_ == context && range_ && committed && SettingsCurrent() &&
+  if (correction::SameIdentity(context_, context) && range_ && committed && SettingsCurrent() &&
       GetTickCount64() - started_ < kLifetime && text_.size() + text.size() <= 1024) {
     const auto revision = revision_;
     const auto old = text_;
@@ -166,21 +168,23 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   if (!preferences_.automatic.enabled || preferences_.mode != correction::Mode::Local ||
       !correction::ValidAutomaticOptions(preferences_.automatic) || !context || !committed ||
       !correction::ValidAutomaticText(text.c_str(), static_cast<unsigned>(text.size()), 1024)) return;
+  Report(correction::AutomaticStage::Captured);
   context_ = context;
   if (previous && !accumulated.empty()) {
     range_ = previous;
-    if (range_->ShiftEndToRange(cookie, committed, TF_ANCHOR_END) != S_OK) { Cancel(); return; }
+    if (range_->ShiftEndToRange(cookie, committed, TF_ANCHOR_END) != S_OK) { Report(correction::AutomaticStage::RangeMismatch); Cancel(); return; }
     accumulated += text;
   } else {
     accumulated = text;
-    if (committed->Clone(&range_) != S_OK) { Cancel(); return; }
+    if (committed->Clone(&range_) != S_OK) { Report(correction::AutomaticStage::RangeMismatch); Cancel(); return; }
   }
   if (!range_ ||
-      range_->SetGravity(cookie, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD) != S_OK) { Cancel(); return; }
+      range_->SetGravity(cookie, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD) != S_OK) { Report(correction::AutomaticStage::RangeMismatch); Cancel(); return; }
   text_ = std::move(accumulated);
   started_ = GetTickCount64();
   SettingsTime(settingsWrite_);
-  if (!Validate(cookie, context) || !EnsureWindow()) { Cancel(); return; }
+  if (!Validate(cookie, context)) { Cancel(); return; }
+  if (!EnsureWindow()) { Report(correction::AutomaticStage::LayoutUnavailable); Cancel(); return; }
   RecordInput(context, cookie);
   if (!context_) return;
   nextSettings_ = started_ + 500;
@@ -188,42 +192,57 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   SetTimer(window_, 1, 40, nullptr);
 } catch (...) { Cancel(); }
 bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
-  if (!context_ || context != context_ || !range_ || GetTickCount64() - started_ >= kLifetime ||
-      !Focused() || !SettingsCurrent()) return false;
+  if (!context_ || !correction::SameIdentity(context, context_) || !range_) {
+    Report(correction::AutomaticStage::RangeMismatch); return false;
+  }
+  if (GetTickCount64() - started_ >= kLifetime) { Report(correction::AutomaticStage::Expired); return false; }
+  if (!Focused()) return false;
+  if (!SettingsCurrent()) { Report(correction::AutomaticStage::SettingsChanged); return false; }
   const auto revision = revision_;
   const auto text = text_;
   com_ptr<ITfRange> target = range_;
   com_ptr<ITfContext> held = context_;
   TF_STATUS status{};
-  if (context->GetStatus(&status) != S_OK || (status.dwDynamicFlags & TF_SD_READONLY)) return false;
-  if (!owner_->_CorrectionSafeScope(context, cookie, target) || revision != revision_ ||
-      !ReadExact(target, cookie, text) || revision != revision_) return false;
+  if (context->GetStatus(&status) != S_OK) { Report(correction::AutomaticStage::StatusUnavailable); return false; }
+  if (status.dwDynamicFlags & TF_SD_READONLY) {
+    Report(correction::AutomaticStage::ReadOnly); return false;
+  }
+  correction::ProbeStatus scope = correction::ProbeStatus::ScopeUnavailable;
+  if (!owner_->_CorrectionSafeScope(context, cookie, target, &scope)) {
+    Report(scope == correction::ProbeStatus::ProtectedField ? correction::AutomaticStage::ProtectedField :
+        correction::AutomaticStage::ScopeUnavailable); return false;
+  }
+  if (revision != revision_ || !ReadExact(target, cookie, text) || revision != revision_) {
+    Report(correction::AutomaticStage::TextChanged); return false;
+  }
   TF_SELECTION selection{}; ULONG count = 0;
   const HRESULT hr = context->GetSelection(cookie, TF_DEFAULT_SELECTION, 1, &selection, &count);
   com_ptr<ITfRange> selected; selected.Attach(selection.range);
   BOOL empty = FALSE;
   if (hr != S_OK || count != 1 || !selected || selection.style.fInterimChar ||
-      selected->IsEmpty(cookie, &empty) != S_OK || !empty || revision != revision_) return false;
+      selected->IsEmpty(cookie, &empty) != S_OK || !empty || revision != revision_) {
+    Report(correction::AutomaticStage::SelectionUnavailable); return false;
+  }
   if (expectedSelection_ && (!Same(expectedSelection_, selected, cookie, TF_ANCHOR_START, TF_ANCHOR_START) ||
       !Same(expectedSelection_, selected, cookie, TF_ANCHOR_END, TF_ANCHOR_END) ||
-      expectedComposing_ != !!owner_->_IsComposing())) return false;
+      expectedComposing_ != !!owner_->_IsComposing())) { Report(correction::AutomaticStage::SelectionMoved); return false; }
   if (owner_->_IsComposing()) {
     com_ptr<ITfRange> composition;
     com_ptr<ITfComposition> live = owner_->_pComposition;
-    if (owner_->_pCompositionContext != context || !live || live->GetRange(&composition) != S_OK ||
-        !composition || revision != revision_ || !Same(target, composition, cookie, TF_ANCHOR_END, TF_ANCHOR_START)) return false;
+    if (!correction::SameIdentity(owner_->_pCompositionContext, context) || !live || live->GetRange(&composition) != S_OK ||
+        !composition || revision != revision_ || !Same(target, composition, cookie, TF_ANCHOR_END, TF_ANCHOR_START)) { Report(correction::AutomaticStage::RangeMismatch); return false; }
     LONG start = -1, end = 1;
     if (composition->CompareStart(cookie, selected, TF_ANCHOR_START, &start) != S_OK || start > 0 ||
-        composition->CompareEnd(cookie, selected, TF_ANCHOR_END, &end) != S_OK || end < 0) return false;
-    if (expectedSelection_ && !ReadExact(composition, cookie, expectedPreedit_)) return false;
-  } else if (!Same(target, selected, cookie, TF_ANCHOR_END, TF_ANCHOR_END)) return false;
+        composition->CompareEnd(cookie, selected, TF_ANCHOR_END, &end) != S_OK || end < 0) { Report(correction::AutomaticStage::SelectionMoved); return false; }
+    if (expectedSelection_ && !ReadExact(composition, cookie, expectedPreedit_)) { Report(correction::AutomaticStage::TextChanged); return false; }
+  } else if (!Same(target, selected, cookie, TF_ANCHOR_END, TF_ANCHOR_END)) { Report(correction::AutomaticStage::SelectionMoved); return false; }
   return revision == revision_;
 }
 void AutomaticCorrection::Observe(ITfContext* context, TfEditCookie cookie) try {
   if (context_ && !Validate(cookie, context)) Cancel();
 } catch (...) { Cancel(); }
 void AutomaticCorrection::RecordInput(ITfContext* context, TfEditCookie cookie) try {
-  if (!context_ || context_ != context) return;
+  if (!context_ || !correction::SameIdentity(context_, context)) return;
   const auto revision = revision_;
   com_ptr<ITfContext> held = context_;
   TF_SELECTION selection{}; ULONG count = 0;
@@ -231,7 +250,7 @@ void AutomaticCorrection::RecordInput(ITfContext* context, TfEditCookie cookie) 
   com_ptr<ITfRange> selected; selected.Attach(selection.range);
   BOOL empty = FALSE;
   if (hr != S_OK || count != 1 || !selected || selected->IsEmpty(cookie, &empty) != S_OK || !empty ||
-      selected->SetGravity(cookie, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD) != S_OK) { Cancel(); return; }
+      selected->SetGravity(cookie, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD) != S_OK) { Report(correction::AutomaticStage::RangeMismatch); Cancel(); return; }
   std::wstring preedit;
   const bool composing = !!owner_->_IsComposing();
   if (composing) {
@@ -266,7 +285,7 @@ void AutomaticCorrection::ReadPosition(ITfContext* context, TfEditCookie cookie)
   } else Hide();
 }
 void AutomaticCorrection::LayoutChanged(ITfContext* context, bool destroyed) {
-  if (!context_ || context_ != context) return;
+  if (!context_ || !correction::SameIdentity(context_, context)) return;
   if (destroyed) { Cancel(); return; }
   positionValid_ = false; Hide(); nextValidation_ = 0;
 }
@@ -336,7 +355,7 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
   return S_OK;
 }
 bool AutomaticCorrection::Request(bool apply, ITfContext* context) {
-  if (requesting_ || !context_ || context_ != context) return false;
+  if (requesting_ || !context_ || !correction::SameIdentity(context_, context)) return false;
   com_ptr<AutomaticEdit> session;
   requesting_ = true;
   struct Guard { bool& flag; ~Guard() { flag = false; } } guard{requesting_};
@@ -344,6 +363,7 @@ bool AutomaticCorrection::Request(bool apply, ITfContext* context) {
   HRESULT edit = E_FAIL;
   const HRESULT hr = context->RequestEditSession(Client(), session,
       TF_ES_SYNC | (apply ? TF_ES_READWRITE : TF_ES_READ), &edit);
+  if (FAILED(hr)) Report(correction::AutomaticStage::RequestDenied, {correction::FocusStage::Ready, hr});
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   if (testing_ && apply && !session->applied) fprintf(stderr, "Automatic write request/edit: %08lx/%08lx\n", hr, edit);
 #endif
@@ -357,8 +377,12 @@ void AutomaticCorrection::Position(const RECT& caret) {
 }
 void AutomaticCorrection::Refresh() {
   if (ready_ && GetTickCount64() - started_ >= kLifetime) { Cancel(); return; }
-  if (!ready_ || !window_ || !positionValid_ || !Focused() ||
-      (!preferences_.timing && !owner_->_IsComposing())) { Hide(); return; }
+  if (!ready_ || !window_) { Hide(); return; }
+  if (!positionValid_) { Report(correction::AutomaticStage::LayoutUnavailable); Hide(); return; }
+  if (!Focused()) { Hide(); return; }
+  if (!preferences_.timing && !owner_->_IsComposing()) {
+    Report(correction::AutomaticStage::WaitingComposition); Hide(); return;
+  }
   RECT anchor = caret_;
   if (owner_->_IsComposing()) {
     RECT candidate{};
@@ -366,7 +390,7 @@ void AutomaticCorrection::Refresh() {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
     else if (!testing_)
 #endif
-      { Hide(); return; }  // Respect apps that own the candidate UI themselves.
+      { Report(correction::AutomaticStage::CandidateUnavailable); Hide(); return; }  // Respect apps that own the candidate UI themselves.
   }
   if (anchor.bottom <= anchor.top) { Hide(); return; }
   MONITORINFO monitor{sizeof(monitor)};
@@ -391,6 +415,7 @@ void AutomaticCorrection::Refresh() {
   RECT previous{}; GetWindowRect(window_, &previous);
   if (EqualRect(&previous, &placed) && IsWindowVisible(window_)) return;
   InvalidateRect(window_, nullptr, TRUE);
+  Report(correction::AutomaticStage::Shown);
   SetWindowPos(window_, HWND_TOPMOST, placed.left, placed.top, placed.right - placed.left,
       placed.bottom - placed.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
@@ -422,7 +447,7 @@ bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, boo
     *eaten = TRUE; return true;
   }
   if (!Request(true, context)) { Cancel(); return false; }
-  downTab_ = true; *eaten = TRUE; return true;
+  downTab_ = true; *eaten = TRUE; Report(correction::AutomaticStage::TabApplied); return true;
 } catch (...) { Cancel(); return false; }
 bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
   if (reply.magic != 0x31524357 || reply.version != 1 || reply.count > 8) return false;
@@ -529,7 +554,7 @@ void AutomaticCorrection::Poll() {
   struct Guard { bool& flag; ~Guard() { flag = false; } } guard{polling_};
   const auto now = GetTickCount64();
   if (!Focused()) { ResetKeys(); Cancel(); return; }
-  if (now - started_ >= kLifetime) { Cancel(); return; }
+  if (now - started_ >= kLifetime) { Report(correction::AutomaticStage::Expired); Cancel(); return; }
   if (now >= nextValidation_) {
     if (!Request(false, context_)) { Cancel(); return; }
     nextValidation_ = now + 120;
@@ -542,21 +567,29 @@ void AutomaticCorrection::Poll() {
     nextSettings_ = now + 500;
   }
   if (!ready_ && !process_ && now - started_ >= preferences_.automatic.debounce) {
-    if (!Request(false, context_) || !StartWorker()) { Cancel(); return; }
+    if (!Request(false, context_)) { Cancel(); return; }
+    if (!StartWorker()) { Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
+    Report(correction::AutomaticStage::WorkerStarted);
   }
   if (process_) {
     DWORD available = 0;
-    if (!PeekNamedPipe(output_, nullptr, 0, nullptr, &available, nullptr)) { Cancel(); return; }
+    if (!PeekNamedPipe(output_, nullptr, 0, nullptr, &available, nullptr)) { Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
     if (available < sizeof(correction::AutomaticReply) && WaitForSingleObject(process_, 0) == WAIT_OBJECT_0) {
       // The process may have written/exited between the first peek and wait.
-      if (!PeekNamedPipe(output_, nullptr, 0, nullptr, &available, nullptr) || available < sizeof(correction::AutomaticReply)) { Cancel(); return; }
+      if (!PeekNamedPipe(output_, nullptr, 0, nullptr, &available, nullptr) || available < sizeof(correction::AutomaticReply)) { Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
     }
-    if (available > sizeof(correction::AutomaticReply)) { Cancel(); return; }
+    if (available > sizeof(correction::AutomaticReply)) { Report(correction::AutomaticStage::InvalidReply); Cancel(); return; }
     if (available == sizeof(correction::AutomaticReply)) {
       correction::AutomaticReply reply; DWORD read = 0;
       const bool received = ReadFile(output_, &reply, sizeof(reply), &read, nullptr) && read == sizeof(reply);
       StopWorker();
-      if (!received || !AcceptReply(reply) || !Request(false, context_)) {
+      if (!received || !reply.count || !AcceptReply(reply)) {
+        Report(received && reply.magic == 0x31524357 && reply.version == 1 && !reply.count ?
+            correction::AutomaticStage::NoSuggestion : correction::AutomaticStage::InvalidReply);
+        SecureZeroMemory(&reply, sizeof(reply)); Cancel(); return;
+      }
+      Report(correction::AutomaticStage::Ready);
+      if (!Request(false, context_)) {
         SecureZeroMemory(&reply, sizeof(reply)); Cancel(); return;
       }
       SecureZeroMemory(&reply, sizeof(reply));

@@ -619,10 +619,10 @@ void WeaselTSF::_InvalidateEditSessions() {
 }
 
 void WeaselTSF::_BindEditContext(ITfContext* context) {
-  if (_pEditSessionContext != context) {
+  if (!correction::SameIdentity(_pEditSessionContext, context)) {
     // Retire the old document's composition using its own context. Detach it
     // now so a new document cannot reuse the old range while cleanup is queued.
-    if (_pComposition && _pCompositionContext && _pCompositionContext != context) {
+    if (_pComposition && _pCompositionContext && !correction::SameIdentity(_pCompositionContext, context)) {
       _RetireComposition();
     } else _InvalidateEditSessions();
     _pEditSessionContext = context;

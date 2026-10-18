@@ -8,6 +8,7 @@
 #include <thread>
 #include <vector>
 #include <CorrectionProbe.h>
+#include <CorrectionDiagnostics.h>
 #include <CorrectionReview.h>
 #include <CorrectionLexicon.h>
 #include "Resource.h"
@@ -365,7 +366,14 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
         L"No context available.", L"Focus changed; probe cancelled.", L"Unknown field; skipped.", L"Protected field; skipped.",
         L"Selection unavailable.", L"Host context read failed or was denied."};
     const auto probeIndex = static_cast<unsigned>(probe.status);
-    const std::wstring probeText = state->chinese ? zh[probeIndex] : en[probeIndex];
+    std::wstring probeText = state->chinese ? zh[probeIndex] : en[probeIndex];
+    const auto diagnostic = correction::LoadAutomaticDiagnostic();
+    if (diagnostic.stage != correction::AutomaticStage::NotRun) {
+      probeText = state->Text(L"上次自动检查：", L"Last automatic check: ");
+      probeText += correction::AutomaticStageText(diagnostic.stage, state->chinese);
+      if (diagnostic.stage == correction::AutomaticStage::FocusBlocked)
+        probeText += std::wstring(L" · ") + correction::FocusStageText(diagnostic.focus, state->chinese);
+    }
     SetDlgItemTextW(dialog, IDC_CORRECTION_PROBE_STATUS, probeText.c_str());
     SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,
         state->demo ? state->Text(L"离线演示：点击“检查文本”查看模拟建议；不调用模型，不保存设置。",

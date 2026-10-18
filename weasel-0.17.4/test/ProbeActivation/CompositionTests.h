@@ -100,6 +100,7 @@ class CompositionContext : public ITfContext {
   TfEditCookie lastSelectionCookie = 0;
   unsigned requests = 0;
   CompositionRange* selectionRange = nullptr;
+  ITfContextView* activeView = nullptr;
   ComPtr<ITfEditSession> deferredSession;
   HRESULT Drain() {
     ComPtr<ITfEditSession> session = deferredSession;
@@ -139,7 +140,11 @@ class CompositionContext : public ITfContext {
   }
   STDMETHODIMP GetStart(TfEditCookie, ITfRange**) override { return E_NOTIMPL; }
   STDMETHODIMP GetEnd(TfEditCookie, ITfRange**) override { return E_NOTIMPL; }
-  STDMETHODIMP GetActiveView(ITfContextView**) override { return E_NOTIMPL; }
+  STDMETHODIMP GetActiveView(ITfContextView** view) override {
+    if (!view) return E_POINTER;
+    *view = activeView; if (*view) (*view)->AddRef();
+    return activeView ? S_OK : E_NOTIMPL;
+  }
   STDMETHODIMP EnumViews(IEnumTfContextViews**) override { return E_NOTIMPL; }
   STDMETHODIMP GetStatus(TF_STATUS*) override { return E_NOTIMPL; }
   STDMETHODIMP GetAppProperty(REFGUID, ITfReadOnlyProperty**) override { return E_NOTIMPL; }
@@ -782,6 +787,8 @@ static bool TestInterruptedInput(HMODULE module, REFCLSID clsid) {
   return failed==0;
 }
 
+#include "FocusChecks.h"
+
 static int RunCompositionChecks(const WCHAR* dll, REFCLSID clsid) {
   HMODULE module = LoadLibraryW(dll);
   if (!module) return 1;
@@ -790,6 +797,7 @@ static int RunCompositionChecks(const WCHAR* dll, REFCLSID clsid) {
   valid = TestBoundEditSessions(module, clsid) && valid;
   valid = TestTextEdits(module, clsid) && valid;
   valid = TestInterruptedInput(module, clsid) && valid;
+  valid = TestCorrectionFocus(module, clsid) && valid;
   auto canUnload = reinterpret_cast<HRESULT(WINAPI*)()>(GetProcAddress(module, "DllCanUnloadNow"));
   if (canUnload && canUnload() == S_OK && FreeLibrary(module)) {
     HMODULE resident = nullptr;

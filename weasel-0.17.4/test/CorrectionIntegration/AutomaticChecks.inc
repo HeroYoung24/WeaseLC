@@ -6,6 +6,7 @@
 #include <fstream>
 #include <CorrectionHintView.h>
 #include <dbghelp.h>
+#include "ContextAlias.h"
 #pragma comment(lib, "dbghelp.lib")
 static bool SaveOwnedHint(HWND window, const wchar_t* filename) {
   RECT rect{}; if (!GetClientRect(window, &rect) || IsRectEmpty(&rect)) return false;
@@ -270,6 +271,26 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     check(inject(service.Get(), &nonfinite) == S_FALSE, "nonfinite worker score rejected");
     invalidate(service.Get());
     check(inject(service.Get(), &reply) == S_FALSE && noKey(), "late reply after lifecycle cancellation rejected");
+    check(store->UserSelect(static_cast<LONG>(store->text.size()),static_cast<LONG>(store->text.size()))==S_OK,
+        "alias acceptance fixture starts at document end");
+    ComPtr<ITfContext> contextAlias; contextAlias.Attach(new OwnedContextAlias(context.Get()));
+    ComPtr<IUnknown> nativeIdentity, aliasIdentity;
+    context.As(&nativeIdentity); contextAlias.As(&aliasIdentity);
+    check(contextAlias.Get()!=context.Get() && nativeIdentity==aliasIdentity,
+        "real TSF context exposes distinct interface address with identical IUnknown");
+    configureNow(); const auto beforeAlias=store->text;
+    check(Commit(apply,service.Get(),context.Get(),client,L"这里有错子。") &&
+        edit([&](TfEditCookie ec){return preedit(service.Get(),context.Get(),ec,L"ni");}) && inject(service.Get(),&reply)==S_OK,
+        "native context captures a valid correction before alias key delivery");
+    check(key(service.Get(),contextAlias.Get(),VK_TAB,0,1,&eaten)==S_OK && eaten && store->text==beforeAlias+L"这里有错子。ni",
+        "alias Tab query recognizes same document without writing");
+    check(key(service.Get(),contextAlias.Get(),VK_TAB,0,0,&eaten)==S_OK && eaten && store->text==beforeAlias+L"这里有错字。ni",
+        "alias Tab acceptance corrects text while preserving active preedit");
+    key(service.Get(),contextAlias.Get(),VK_TAB,0,2,&eaten);
+    check(Commit(apply,service.Get(),context.Get(),client,L"你好") && store->text==beforeAlias+L"这里有错字。你好",
+        "native context can commit after correction through its alias");
+    contextAlias.Reset();nativeIdentity.Reset();aliasIdentity.Reset();
+
     preferences.automatic.tab = false; configureNow();
     Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
     check(state().first && noKey(), "Tab setting disables shortcut without hiding suggestion");

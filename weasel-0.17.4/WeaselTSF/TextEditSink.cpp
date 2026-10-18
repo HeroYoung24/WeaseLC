@@ -134,9 +134,12 @@ correction::ProbeResult ProbeContext(ITfContext* context,
 }
 }  // namespace
 
-bool WeaselTSF::_CorrectionSafeScope(ITfContext* context, TfEditCookie cookie, ITfRange* range) {
+bool WeaselTSF::_CorrectionSafeScope(ITfContext* context, TfEditCookie cookie, ITfRange* range,
+                                    correction::ProbeStatus* reason) {
   correction::ProbeStatus status = correction::ProbeStatus::ScopeUnavailable;
-  return context && range && IsOrdinaryTextScope(context, cookie, range, status);
+  const bool safe = context && range && IsOrdinaryTextScope(context, cookie, range, status);
+  if (reason) *reason = safe ? correction::ProbeStatus::Readable : status;
+  return safe;
 }
 
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
@@ -208,7 +211,7 @@ STDAPI WeaselTSF::OnEndEdit(ITfContext* pContext,
   /* did the selection change? */
   if (pEditRecord->GetSelectionStatus(&fSelectionChanged) == S_OK &&
       fSelectionChanged) {
-    if (_IsComposing() && _pCompositionContext == pContext) {
+    if (_IsComposing() && correction::SameIdentity(_pCompositionContext, pContext)) {
       /* if the caret moves out of composition range, stop the composition */
       TF_SELECTION tfSelection = {};
       ULONG cFetched;
@@ -238,14 +241,10 @@ STDAPI WeaselTSF::OnEndEdit(ITfContext* pContext,
     pEnumTextChanges->Release();
   }
   if (_correctionProbePending && text_changed &&
-      pContext == _correctionProbeContext) {
+      correction::SameIdentity(pContext, _correctionProbeContext)) {
     _correctionProbePending = false;
     _correctionProbeContext = nullptr;
-    com_ptr<ITfDocumentMgr> focusedDocument;
-    com_ptr<ITfContext> focusedContext;
-    if (_pThreadMgr && _pThreadMgr->GetFocus(&focusedDocument) == S_OK &&
-        focusedDocument && focusedDocument->GetTop(&focusedContext) == S_OK &&
-        focusedContext == pContext)
+    if (correction::CheckContextFocus(_pThreadMgr, pContext))
       correction::SaveProbeResult(ProbeContext(pContext, ecReadOnly));
     else
       correction::SaveProbeResult({1, correction::ProbeStatus::FocusChanged});

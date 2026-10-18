@@ -401,10 +401,10 @@ void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
           document->GetTop(&context) == S_OK && context;
       // Explicit user action can arrive before the focus notification. Bind
       // to the current document rather than retaining a previous document.
-      if (focused && (context != _pTextEditSinkContext ||
+      if (focused && (!correction::SameIdentity(context, _pTextEditSinkContext) ||
                       _dwTextEditSinkCookie == TF_INVALID_COOKIE))
         _InitTextEditSink(document);
-      if (focused && context == _pTextEditSinkContext &&
+      if (focused && correction::SameIdentity(context, _pTextEditSinkContext) &&
           _dwTextEditSinkCookie != TF_INVALID_COOKIE) {
         _correctionProbeContext = context;
         _correctionProbePending = true;

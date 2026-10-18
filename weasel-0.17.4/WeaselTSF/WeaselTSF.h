@@ -1,4 +1,5 @@
 #pragma once
+#include <CorrectionFocus.h>
 
 #include "Globals.h"
 #include <WeaselIPC.h>
@@ -24,7 +25,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   WeaselTSF();
   ~WeaselTSF();
   AutomaticCorrection& Automatic() { return *_automatic; }
-  bool _CorrectionSafeScope(ITfContext*, TfEditCookie, ITfRange*);
+  bool _CorrectionSafeScope(ITfContext*, TfEditCookie, ITfRange*, correction::ProbeStatus* reason = nullptr);
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   HRESULT ProbeGetCandidate(IUnknown** candidate);
   HRESULT ProbeExerciseLanguageBar(ITfThreadMgr* manager);
@@ -248,7 +249,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
     LPARAM flags = 0;
     LONG time = 0;
     bool Matches(ITfContext* target, WPARAM value, LPARAM message) const {
-      return context && context == target && key == value && flags == message &&
+      return context && correction::SameIdentity(context, target) && key == value && flags == message &&
           time == GetMessageTime();
     }
     void Set(ITfContext* target, WPARAM value, LPARAM message) {

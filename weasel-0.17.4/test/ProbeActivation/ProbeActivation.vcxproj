@@ -49,6 +49,7 @@
     <ClInclude Include="RegistrationTests.h" />
     <ClInclude Include="ClassFactoryTests.h" />
     <ClInclude Include="CompositionTests.h" />
+    <ClInclude Include="FocusChecks.h" />
     <ClInclude Include="LocalProfile.h" />
     <ClInclude Include="MemoryTextStore.h" />
     <ClInclude Include="ContextProbeTests.h" />

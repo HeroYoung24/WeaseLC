@@ -1,5 +1,6 @@
 #pragma once
 #include <CorrectionAutomatic.h>
+#include <CorrectionDiagnostics.h>
 #include "../WeaselDeployer/CorrectionPreferences.h"
 
 class WeaselTSF;
@@ -29,6 +30,7 @@ class AutomaticCorrection {
   void ExpireTest() { started_ = GetTickCount64() - 10000; }
   void FocusTest(bool focused) { testFocused_ = focused; }
   DWORD ProcessTest() const { return process_ ? GetProcessId(process_) : 0; }
+  correction::AutomaticDiagnostic DiagnosticTest() const { return diagnostic_; }
 #endif
  private:
   static LRESULT CALLBACK WindowProc(HWND, UINT, WPARAM, LPARAM);
@@ -42,6 +44,8 @@ class AutomaticCorrection {
   TfClientId Client() const;
   bool SettingsCurrent() const;
   void ReadPosition(ITfContext*, TfEditCookie);
+  void Report(correction::AutomaticStage, correction::FocusResult = {}) const;
+  mutable correction::AutomaticDiagnostic diagnostic_;
 
   WeaselTSF* owner_;  // non-owning; the service destroys this before releasing DLL
   com_ptr<ITfContext> context_;

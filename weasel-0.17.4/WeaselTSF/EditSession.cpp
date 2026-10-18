@@ -16,12 +16,9 @@ HRESULT WeaselTSF::_ApplyServerResponse(TfEditCookie ec, ITfContext* target,
   const ULONGLONG generation = _editGeneration;
   if (!_pThreadMgr || _tfClientId == TF_CLIENTID_NULL || !target)
     return TF_E_DISCONNECTED;
-  if (_pComposition && _pCompositionContext && _pCompositionContext != target)
+  if (_pComposition && _pCompositionContext && !correction::SameIdentity(_pCompositionContext, target))
     return TF_E_DISCONNECTED;
-  com_ptr<ITfDocumentMgr> focusedDocument;
-  com_ptr<ITfContext> focusedContext;
-  if (_pThreadMgr->GetFocus(&focusedDocument) != S_OK || !focusedDocument ||
-      focusedDocument->GetTop(&focusedContext) != S_OK || focusedContext != target)
+  if (!correction::CheckContextFocus(_pThreadMgr, target))
     return TF_E_DISCONNECTED;
   // Keep the captured context alive if callbacks change service state.
   com_ptr<ITfContext> editContext = target;
