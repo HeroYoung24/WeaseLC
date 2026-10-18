@@ -131,7 +131,7 @@ STDAPI CEndCompositionEditSession::DoEditSession(TfEditCookie ec) {
     }
   }
   // Attempt termination even if clearing fails, preserving the first error.
-  const HRESULT endResult = _pComposition->EndComposition(ec);
+  const HRESULT endResult = _pTextService->_EndTrackedComposition(ec, _pComposition);
   if (SUCCEEDED(endResult))
     _pTextService->_FinalizeComposition(_pComposition);
   return FAILED(clearResult) ? clearResult : endResult;
@@ -146,6 +146,47 @@ void WeaselTSF::_EndComposition(com_ptr<ITfContext> pContext, BOOL clear) {
     RequestCompositionEditSession(pContext, _tfClientId, pEditSession,
                                  TF_ES_ASYNCDONTCARE | TF_ES_READWRITE);
     pEditSession->Release();
+  }
+}
+
+// Retirement is independent of the generation for text edits. The service is
+// detached before this is queued; it must never erase text or end a newer range.
+class CRetireCompositionEditSession : public CEditSession {
+ public:
+  CRetireCompositionEditSession(com_ptr<WeaselTSF> service,
+      com_ptr<ITfContext> context, com_ptr<ITfComposition> composition)
+      : CEditSession(service, context), _composition(composition) {}
+  STDMETHODIMP DoEditSession(TfEditCookie cookie) override {
+    return _composition->EndComposition(cookie);
+  }
+ private:
+  com_ptr<ITfComposition> _composition;
+};
+
+HRESULT WeaselTSF::_EndTrackedComposition(TfEditCookie cookie, ITfComposition* composition) {
+  if (!composition) return E_INVALIDARG;
+  const auto previous = _endingComposition;
+  _endingComposition = composition;
+  const HRESULT result = composition->EndComposition(cookie);
+  _endingComposition = previous;
+  return result;
+}
+
+void WeaselTSF::_RetireComposition(bool hostTerminated) {
+  com_ptr<ITfComposition> previous = _pComposition;
+  com_ptr<ITfContext> context = _pCompositionContext;
+  _FinalizeComposition();
+  _InvalidateEditSessions();
+  m_client.ClearComposition();
+  _status.composing = FALSE;
+  _committed = TRUE;
+  _cand->EndUI();
+  _cand->Destroy();
+  if (previous && context && !hostTerminated) {
+    com_ptr<CRetireCompositionEditSession> cleanup;
+    cleanup.Attach(new CRetireCompositionEditSession(this, context, previous));
+    RequestCompositionEditSession(context, _tfClientId, cleanup,
+                                   TF_ES_ASYNCDONTCARE | TF_ES_READWRITE);
   }
 }
 
@@ -454,53 +495,59 @@ HRESULT WeaselTSF::_ApplyCompositionResponse(TfEditCookie cookie, ITfContext* co
                                             const ServerResponse& response) {
   if (!context) return E_INVALIDARG;
   const auto generation = _GetEditGeneration();
-  auto current = [&]() { return _IsEditSessionCurrent(generation); };
-  auto start = [&]() {
-    _cand->StartUI();
-    CStartCompositionEditSession session(this, context,
-        _fCUASWorkaroundEnabled && !response.config.inline_preedit, response.config.inline_preedit);
-    const auto result = session.DoEditSession(cookie);
-    if (FAILED(result)) _cand->EndUI();
-    return result;
-  };
-  auto end = [&](BOOL clear) {
-    CEndCompositionEditSession session(this, context, _pComposition, clear);
-    const auto result = session.DoEditSession(cookie);
-    if (!_IsComposing()) _cand->EndUI();
-    return result;
-  };
-  _committed = FALSE;
-  if (!response.commit.empty()) {
-    HRESULT hr = _IsComposing() ? S_OK : start();
-    if (FAILED(hr)) return hr;
-    if (!current()) return TF_E_DISCONNECTED;
-    CInsertTextEditSession insert(this, context, _pComposition, response.commit);
-    hr = insert.DoEditSession(cookie);
-    if (FAILED(hr)) return hr;
-    com_ptr<ITfRange> committedRange;
-    if (_pComposition) _pComposition->GetRange(&committedRange);
-    _committed = TRUE;
-    if (!current()) return TF_E_DISCONNECTED;
-    hr = end(FALSE);
-    if (FAILED(hr)) return hr;
-    if (!current()) return TF_E_DISCONNECTED;
-    _automatic->Capture(context, cookie, committedRange, response.commit);
+  const HRESULT result = [&]() -> HRESULT {
+    auto current = [&]() { return _IsEditSessionCurrent(generation); };
+    auto start = [&]() {
+      _cand->StartUI();
+      CStartCompositionEditSession session(this, context,
+          _fCUASWorkaroundEnabled && !response.config.inline_preedit, response.config.inline_preedit);
+      const auto result = session.DoEditSession(cookie);
+      if (FAILED(result)) _cand->EndUI();
+      return result;
+    };
+    auto end = [&](BOOL clear) {
+      CEndCompositionEditSession session(this, context, _pComposition, clear);
+      const auto result = session.DoEditSession(cookie);
+      if (!_IsComposing()) _cand->EndUI();
+      return result;
+    };
+    _committed = FALSE;
+    if (!response.commit.empty()) {
+      HRESULT hr = _IsComposing() ? S_OK : start();
+      if (FAILED(hr)) return hr;
+      if (!current()) return TF_E_DISCONNECTED;
+      CInsertTextEditSession insert(this, context, _pComposition, response.commit);
+      hr = insert.DoEditSession(cookie);
+      if (FAILED(hr)) return hr;
+      com_ptr<ITfRange> committedRange;
+      if (_pComposition) _pComposition->GetRange(&committedRange);
+      _committed = TRUE;
+      if (!current()) return TF_E_DISCONNECTED;
+      hr = end(FALSE);
+      if (FAILED(hr)) return hr;
+      if (!current()) return TF_E_DISCONNECTED;
+      _automatic->Capture(context, cookie, committedRange, response.commit);
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
-    ProbeCaptureCommit(context, cookie, response.commit);
+      ProbeCaptureCommit(context, cookie, response.commit);
 #endif
-  }
-  if (!current()) return TF_E_DISCONNECTED;
-  HRESULT hr = S_OK;
-  if (response.status.composing && !_IsComposing()) hr = start();
-  else if (!response.status.composing && _IsComposing()) hr = end(TRUE);
-  if (FAILED(hr)) return hr;
-  if (!current()) return TF_E_DISCONNECTED;
-  if (_IsComposing() && response.config.inline_preedit) {
-    CInlinePreeditEditSession inlineSession(this, context, _pComposition, response.context);
-    hr = inlineSession.DoEditSession(cookie);
-  }
-  if (SUCCEEDED(hr) && current()) _automatic->RecordInput(context, cookie);
-  return hr;
+    }
+    if (!current()) return TF_E_DISCONNECTED;
+    HRESULT hr = S_OK;
+    if (response.status.composing && !_IsComposing()) hr = start();
+    else if (!response.status.composing && _IsComposing()) hr = end(TRUE);
+    if (FAILED(hr)) return hr;
+    if (!current()) return TF_E_DISCONNECTED;
+    if (_IsComposing() && response.config.inline_preedit) {
+      CInlinePreeditEditSession inlineSession(this, context, _pComposition, response.context);
+      hr = inlineSession.DoEditSession(cookie);
+    }
+    if (SUCCEEDED(hr) && current()) _automatic->RecordInput(context, cookie);
+    return hr;
+  }();
+  // Do not leave Rime consuming keys for a composition the host cannot update.
+  // A reentrant lifecycle change already owns recovery for its generation.
+  if (FAILED(result) && _IsEditSessionCurrent(generation)) _RetireComposition();
+  return result;
 }
 
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
@@ -549,10 +596,12 @@ void WeaselTSF::_UpdateComposition(com_ptr<ITfContext> pContext) {
   com_ptr<CServerResponseEditSession> session;
   session.Attach(new CServerResponseEditSession(this, pContext, response));
 
+  const auto generation = _GetEditGeneration();
   const HRESULT hr = RequestCompositionEditSession(pContext,
       _tfClientId, session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE);
   _async_edit = !!(hr == TF_S_ASYNC);
   if (SUCCEEDED(hr)) _UpdateCompositionWindow(pContext);
+  else if (_IsEditSessionCurrent(generation)) _RetireComposition();
 }
 
 /* Composition State */
@@ -566,19 +615,16 @@ void WeaselTSF::_InvalidateEditSessions() {
 #endif
   _pEditSessionContext = nullptr;
   _async_edit = FALSE;
-  _fTestKeyDownPending = _fTestKeyUpPending = FALSE;
+  _pendingKeyDown.Reset(); _pendingKeyUp.Reset();
 }
 
 void WeaselTSF::_BindEditContext(ITfContext* context) {
   if (_pEditSessionContext != context) {
-    _InvalidateEditSessions();
     // Retire the old document's composition using its own context. Detach it
     // now so a new document cannot reuse the old range while cleanup is queued.
     if (_pComposition && _pCompositionContext && _pCompositionContext != context) {
-      com_ptr<ITfComposition> previous = _pComposition;
-      _EndComposition(_pCompositionContext, TRUE);
-      _FinalizeComposition(previous);
-    }
+      _RetireComposition();
+    } else _InvalidateEditSessions();
     _pEditSessionContext = context;
   }
 }
@@ -586,22 +632,27 @@ void WeaselTSF::_BindEditContext(ITfContext* context) {
 STDAPI WeaselTSF::OnCompositionTerminated(TfEditCookie ecWrite,
                                           ITfComposition* pComposition) {
   // A delayed termination notification must not abort a newer composition.
-  if (!pComposition || !_IsCurrentComposition(pComposition)) return S_OK;
+  com_ptr<WeaselTSF> keepAlive = this;
+  if (!pComposition || !_IsCurrentComposition(pComposition) ||
+      pComposition == _endingComposition) return S_OK;
   // NOTE:
   // This will be called when an edit session ended up with an empty composition
   // string, Even if it is closed normally. Silly M$.
 
-  _AbortComposition();
+  _RetireComposition(true);
   return S_OK;
 }
 
 void WeaselTSF::_AbortComposition(bool clear) {
-  m_client.ClearComposition();
-  if (_IsComposing()) {
-    _EndComposition(_pEditSessionContext, clear);
+  // Explicit candidate cancellation may clear under an immediately granted
+  // lock only. If the host refuses it, preserve text during deferred retirement.
+  if (clear && _pComposition && _pCompositionContext) {
+    com_ptr<CEndCompositionEditSession> cancel;
+    cancel.Attach(new CEndCompositionEditSession(this, _pCompositionContext, _pComposition, TRUE));
+    RequestCompositionEditSession(_pCompositionContext, _tfClientId, cancel,
+                                   TF_ES_SYNC | TF_ES_READWRITE);
   }
-  _committed = TRUE;
-  _cand->Destroy();
+  _RetireComposition();
 }
 
 void WeaselTSF::_FinalizeComposition(ITfComposition* expected) {

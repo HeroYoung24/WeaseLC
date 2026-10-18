@@ -199,6 +199,8 @@ static BOOL IsRangeCovered(TfEditCookie ec,
 STDAPI WeaselTSF::OnEndEdit(ITfContext* pContext,
                             TfEditCookie ecReadOnly,
                             ITfEditRecord* pEditRecord) {
+  com_ptr<WeaselTSF> keepAlive = this;
+  if (!pContext || !pEditRecord) return E_INVALIDARG;
   BOOL fSelectionChanged;
   IEnumTfRanges* pEnumTextChanges;
   ITfRange* pRange;
@@ -206,7 +208,7 @@ STDAPI WeaselTSF::OnEndEdit(ITfContext* pContext,
   /* did the selection change? */
   if (pEditRecord->GetSelectionStatus(&fSelectionChanged) == S_OK &&
       fSelectionChanged) {
-    if (_IsComposing()) {
+    if (_IsComposing() && _pCompositionContext == pContext) {
       /* if the caret moves out of composition range, stop the composition */
       TF_SELECTION tfSelection = {};
       ULONG cFetched;
@@ -214,11 +216,10 @@ STDAPI WeaselTSF::OnEndEdit(ITfContext* pContext,
       if (pContext->GetSelection(ecReadOnly, TF_DEFAULT_SELECTION, 1,
                                  &tfSelection, &cFetched) == S_OK &&
           cFetched == 1 && tfSelection.range) {
-        ITfRange* pRangeComposition;
-        if (_pComposition->GetRange(&pRangeComposition) == S_OK) {
+        com_ptr<ITfRange> pRangeComposition;
+        if (_pComposition->GetRange(&pRangeComposition) == S_OK && pRangeComposition) {
           if (!IsRangeCovered(ecReadOnly, tfSelection.range, pRangeComposition))
-            _EndComposition(pContext, true);
-          pRangeComposition->Release();
+            _RetireComposition();
         }
         tfSelection.range->Release();
       }

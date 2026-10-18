@@ -11,6 +11,41 @@
       MSG message;
       while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&message); DispatchMessageW(&message); }
     };
+    for (unsigned scenario = 0; scenario != 4; ++scenario) {
+      const bool hasHint = (scenario & 1) != 0;
+      check(store->UserSelect(static_cast<LONG>(store->text.size()), static_cast<LONG>(store->text.size())) == S_OK,
+          "outside-preedit fixture begins at document end");
+      check(fresh(true, hasHint), "outside-preedit fixture ready with or without model hint");
+      ComPtr<ITfSource> source; context.As(&source);
+      ComPtr<ITfTextEditSink> sink; service.As(&sink);
+      DWORD subscription = TF_INVALID_COOKIE;
+      const bool subscribed = source && source->AdviseSink(IID_ITfTextEditSink, sink.Get(), &subscription) == S_OK;
+      check(subscribed, "outside-preedit fixture subscribes only its owned text store");
+      const auto intact = store->text;
+      const LONG end = static_cast<LONG>(intact.size());
+      const LONG start = end - 6;
+      const LONG selectionEnd = scenario < 2 ? start : end - 3;
+      check(store->UserSelect(start, selectionEnd) == S_OK, "caret or drag selection leaves active preedit");
+      pump();
+      check(store->text == intact, "outside selection preserves all host text");
+      check(!state().first && noKey(), "outside selection releases correction shortcut");
+      check(edit([&](TfEditCookie) {
+        ComPtr<ITfContextComposition> compositions;
+        ComPtr<IEnumITfCompositionView> enumerator;
+        ComPtr<ITfCompositionView> remaining;
+        ULONG fetched = 0;
+        if (context.As(&compositions) != S_OK || compositions->EnumCompositions(&enumerator) != S_OK || !enumerator)
+          return E_FAIL;
+        return enumerator->Next(1, &remaining, &fetched) == S_FALSE && fetched == 0 ? S_OK : E_FAIL;
+      }), "mouse retirement ends the host composition, not only frontend tracking");
+      if (subscribed) source->UnadviseSink(subscription);
+      const auto expected = intact.substr(0, start) + L"你好" + intact.substr(selectionEnd);
+      check(edit([&](TfEditCookie ec) { return preedit(service.Get(), context.Get(), ec, L"ni"); }) &&
+          Commit(apply, service.Get(), context.Get(), client, L"你好") && store->text == expected,
+          "next composition starts and commits at new selection without switching IME");
+      check(store->UserSelect(static_cast<LONG>(store->text.size()), static_cast<LONG>(store->text.size())) == S_OK,
+          "outside-preedit fixture restores append position for later tests");
+    }
     {
       check(fresh(true), "interruption fixture starts with live preedit");
       ComPtr<ITfSource> source; context.As(&source);

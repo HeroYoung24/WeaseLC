@@ -1,5 +1,7 @@
 # 真实 TSF 文本写入与模型回路
 
+2026-10-18：`--automatic` 扩展至每架构 139 项，包括有/无提示时鼠标移出预编辑或拖选跨边界，枚举确认宿主旧组合结束，并验证新位置可继续输入与提交；仍不激活 TIP。未激活测试服务绑定自有宿主客户端 ID，确保延迟清理实际执行。详见 [吞键修复与测试](../../docs/INTERRUPTED_INPUT_FIX_2026-10-18.md)。
+
 自动提示新增 `--automatic`（双架构各 46 项）和 `--automatic-local <WeaselDeployer.exe 绝对路径>`（双架构各 16 项）模式：在独立宿主验证提示、真实键盘事件接收器的 Tab 接受、保留预编辑、拒绝/过期写回和独立模型进程。具体行为、限制及命令见 [自动提示说明](../../docs/AUTOMATIC_CORRECTION.md)。这些模式也不激活或注册 TIP，不采集实际输入。
 
 `CorrectionIntegration.vcxproj` 支持 Release x64/Win32。只加载匹配的探测 DLL，以 `TF_TMAE_NOACTIVATETIP` 创建自己的 TSF 宿主；不注册、激活或安装任何输入法，不与现有 WeaselServer 建立会话。

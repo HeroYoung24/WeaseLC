@@ -84,7 +84,9 @@ class CServerResponseEditSession : public CEditSession {
     // Test-owned callback substitutes only the body, after the production gate.
     if (_observer) return _observer(_pContext, cookie);
 #endif
-    return _response ? _pTextService->_ApplyServerResponse(cookie, _pContext, *_response) : E_UNEXPECTED;
+    const HRESULT result = _response ? _pTextService->_ApplyServerResponse(cookie, _pContext, *_response) : E_UNEXPECTED;
+    if (FAILED(result) && _IsCurrent()) _pTextService->_RetireComposition();
+    return result;
   }
  private:
 #ifdef WEASEL_CORRECTION_PROBE_BUILD

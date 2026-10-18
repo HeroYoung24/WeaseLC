@@ -137,6 +137,9 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   void ProbeCaptureCommit(ITfContext*, TfEditCookie, const std::wstring&);
   void ProbeCancelCapture();
+  void ProbeSetEditClient(TfClientId client) {
+    if (!_pThreadMgr) _tfClientId = client;
+  }
   void ProbeSetKeySink(void(WINAPI* sink)(WPARAM, LPARAM, BOOL*, void*), void* state) {
     _probeKeySink = sink; _probeKeySinkContext = state;
   }
@@ -151,6 +154,8 @@ class WeaselTSF : public ITfTextInputProcessorEx,
     return _pComposition == composition;
   }
   void _AbortComposition(bool clear = true);
+  void _RetireComposition(bool hostTerminated = false);
+  HRESULT _EndTrackedComposition(TfEditCookie cookie, ITfComposition* composition);
 
   /* Language bar */
   HWND _GetFocusedContextWindow();
@@ -237,7 +242,22 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   bool _correctionProbePending = false;
   DWORD _dwTextEditSinkCookie, _dwTextLayoutSinkCookie;
   BYTE _lpbKeyState[256];
-  BOOL _fTestKeyDownPending, _fTestKeyUpPending;
+  struct PendingKey {
+    com_ptr<ITfContext> context;
+    WPARAM key = 0;
+    LPARAM flags = 0;
+    LONG time = 0;
+    bool Matches(ITfContext* target, WPARAM value, LPARAM message) const {
+      return context && context == target && key == value && flags == message &&
+          time == GetMessageTime();
+    }
+    void Set(ITfContext* target, WPARAM value, LPARAM message) {
+      context = target; key = value; flags = message; time = GetMessageTime();
+    }
+    void Reset() { context = nullptr; }
+  };
+  PendingKey _pendingKeyDown, _pendingKeyUp;
+  HRESULT _HandleKey(ITfContext*, WPARAM, LPARAM, BOOL*, bool test, bool up);
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   using ProbeKeySink = void(WINAPI*)(WPARAM, LPARAM, BOOL*, void*);
   ProbeKeySink _probeKeySink = nullptr;
@@ -254,6 +274,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 
   com_ptr<ITfComposition> _pComposition;
   com_ptr<ITfContext> _pCompositionContext;
+  ITfComposition* _endingComposition = nullptr;  // borrowed during synchronous End
 
   com_ptr<CLangBarItemButton> _pLangBarButton;
   com_ptr<ITfLangBarItemMgr> _pLangBarItemMgr;

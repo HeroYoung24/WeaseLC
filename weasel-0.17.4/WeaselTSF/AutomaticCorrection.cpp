@@ -586,7 +586,11 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticConfigure(
     ITfTextInputProcessorEx* service, const correction::Preferences* preferences,
     TfClientId client, const WCHAR* worker) {
   if (!service || !preferences || client == TF_CLIENTID_NULL) return E_INVALIDARG;
-  static_cast<WeaselTSF*>(service)->Automatic().ConfigureTest(*preferences, client, worker ? worker : L"");
+  auto* owner = static_cast<WeaselTSF*>(service);
+  // The unactivated service must use the diagnostic host's client for its own
+  // deferred composition cleanup too, not just for automatic-correction locks.
+  owner->ProbeSetEditClient(client);
+  owner->Automatic().ConfigureTest(*preferences, client, worker ? worker : L"");
   return S_OK;
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticInject(

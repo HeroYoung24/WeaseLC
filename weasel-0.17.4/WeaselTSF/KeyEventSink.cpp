@@ -67,103 +67,58 @@ void WeaselTSF::_ProcessKeyEvent(WPARAM wParam, LPARAM lParam, BOOL* pfEaten) {
 
 STDAPI WeaselTSF::OnSetFocus(BOOL fForeground) {
   com_ptr<WeaselTSF> keepAlive = this;
-  if (fForeground)
-    m_client.FocusIn();
+  if (fForeground) {
+    if (_pThreadMgr) m_client.FocusIn();
+  }
   else {
-    m_client.FocusOut();
-    _AbortComposition();
-    _InvalidateEditSessions();
+    if (_pThreadMgr) m_client.FocusOut();
+    _RetireComposition();
   }
 
   return S_OK;
 }
 
-/* Some apps sends strange OnTestKeyDown/OnKeyDown combinations:
- *  Some sends OnKeyDown() only. (QQ2012)
- *  Some sends multiple OnTestKeyDown() for a single key event. (MS WORD 2010
- * x64)
- *
- * We assume every key event will eventually cause a OnKeyDown() call.
- * We use _fTestKeyDownPending to omit multiple OnTestKeyDown() calls,
- *  and for OnKeyDown() to check if the key has already been sent to the server.
- */
-
-STDAPI WeaselTSF::OnTestKeyDown(ITfContext* pContext,
-                                WPARAM wParam,
-                                LPARAM lParam,
-                                BOOL* pfEaten) {
+// Query and actual callbacks may be duplicated, omitted or interleaved. Reuse
+// a processed query only for this exact key message and context.
+HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
+                               BOOL* eaten, bool test, bool up) {
   com_ptr<WeaselTSF> keepAlive = this;
-  if (_automatic->Key(pContext, wParam, lParam, true, false, pfEaten)) {
-    _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
-  }
-  _fTestKeyUpPending = FALSE;
-  if (_fTestKeyDownPending) {
-    *pfEaten = TRUE;
+  if (!eaten) return E_POINTER;
+  *eaten = FALSE;
+  if (_automatic->Key(context, key, flags, test, up, eaten)) {
+    _pendingKeyDown.Reset(); _pendingKeyUp.Reset();
     return S_OK;
   }
-  _ProcessKeyEvent(wParam, lParam, pfEaten);
-  _UpdateComposition(pContext);
-  if (*pfEaten)
-    _fTestKeyDownPending = TRUE;
-  return S_OK;
-}
-
-STDAPI WeaselTSF::OnKeyDown(ITfContext* pContext,
-                            WPARAM wParam,
-                            LPARAM lParam,
-                            BOOL* pfEaten) {
-  com_ptr<WeaselTSF> keepAlive = this;
-  if (_automatic->Key(pContext, wParam, lParam, false, false, pfEaten)) {
-    _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
-  }
-  _fTestKeyUpPending = FALSE;
-  if (_fTestKeyDownPending) {
-    _fTestKeyDownPending = FALSE;
-    *pfEaten = TRUE;
-  } else {
-    _ProcessKeyEvent(wParam, lParam, pfEaten);
-    _UpdateComposition(pContext);
-  }
-  return S_OK;
-}
-
-STDAPI WeaselTSF::OnTestKeyUp(ITfContext* pContext,
-                              WPARAM wParam,
-                              LPARAM lParam,
-                              BOOL* pfEaten) {
-  com_ptr<WeaselTSF> keepAlive = this;
-  if (_automatic->Key(pContext, wParam, lParam, true, true, pfEaten)) {
-    _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
-  }
-  _fTestKeyDownPending = FALSE;
-  if (_fTestKeyUpPending) {
-    *pfEaten = TRUE;
+  auto& pending = up ? _pendingKeyUp : _pendingKeyDown;
+  (up ? _pendingKeyDown : _pendingKeyUp).Reset();
+  if (pending.Matches(context, key, flags)) {
+    if (!test) pending.Reset();
+    *eaten = TRUE;
     return S_OK;
   }
-  _ProcessKeyEvent(wParam, lParam, pfEaten);
-  _UpdateComposition(pContext);
-  if (*pfEaten)
-    _fTestKeyUpPending = TRUE;
+  pending.Reset();
+  // A new document must retire the old Rime composition before dispatching
+  // this key, rather than clearing the just-processed response afterwards.
+  _BindEditContext(context);
+  const auto generation = _GetEditGeneration();
+  _ProcessKeyEvent(key, flags, eaten);
+  _UpdateComposition(context);
+  if (test && *eaten && _IsEditSessionCurrent(generation))
+    pending.Set(context, key, flags);
   return S_OK;
 }
 
-STDAPI WeaselTSF::OnKeyUp(ITfContext* pContext,
-                          WPARAM wParam,
-                          LPARAM lParam,
-                          BOOL* pfEaten) {
-  com_ptr<WeaselTSF> keepAlive = this;
-  if (_automatic->Key(pContext, wParam, lParam, false, true, pfEaten)) {
-    _fTestKeyDownPending = _fTestKeyUpPending = FALSE; return S_OK;
-  }
-  _fTestKeyDownPending = FALSE;
-  if (_fTestKeyUpPending) {
-    _fTestKeyUpPending = FALSE;
-    *pfEaten = TRUE;
-  } else {
-    _ProcessKeyEvent(wParam, lParam, pfEaten);
-    _UpdateComposition(pContext);  // Each fresh response is now consumed once.
-  }
-  return S_OK;
+STDAPI WeaselTSF::OnTestKeyDown(ITfContext* context, WPARAM key, LPARAM flags, BOOL* eaten) {
+  return _HandleKey(context, key, flags, eaten, true, false);
+}
+STDAPI WeaselTSF::OnKeyDown(ITfContext* context, WPARAM key, LPARAM flags, BOOL* eaten) {
+  return _HandleKey(context, key, flags, eaten, false, false);
+}
+STDAPI WeaselTSF::OnTestKeyUp(ITfContext* context, WPARAM key, LPARAM flags, BOOL* eaten) {
+  return _HandleKey(context, key, flags, eaten, true, true);
+}
+STDAPI WeaselTSF::OnKeyUp(ITfContext* context, WPARAM key, LPARAM flags, BOOL* eaten) {
+  return _HandleKey(context, key, flags, eaten, false, true);
 }
 
 STDAPI WeaselTSF::OnPreservedKey(ITfContext* pContext,

@@ -274,8 +274,7 @@ HRESULT WeaselTSF::_HandleCompartment(REFGUID guidCompartment) {
       BOOL isOpen = _IsKeyboardOpen();
       // clear composition when close keyboard
       if (!isOpen && _pEditSessionContext) {
-        m_client.ClearComposition();
-        _EndComposition(_pEditSessionContext, true);
+        _AbortComposition(true);
       }
       _EnableLanguageBar(isOpen);
       _UpdateLanguageBar(_status);

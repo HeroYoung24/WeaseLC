@@ -21,6 +21,7 @@ class CompositionRange final : public ITfRange {
   HRESULT collapseResult = S_OK;
   unsigned textWrites = 0;
   unsigned collapses = 0;
+  LONG start = 0, end = 0;
   STDMETHODIMP SetText(TfEditCookie, DWORD, const WCHAR*, LONG) override {
     ++textWrites; return textResult;
   }
@@ -40,8 +41,16 @@ class CompositionRange final : public ITfRange {
   STDMETHODIMP IsEmpty(TfEditCookie, BOOL*) override { return E_NOTIMPL; }
   STDMETHODIMP IsEqualStart(TfEditCookie, ITfRange*, TfAnchor, BOOL*) override { return E_NOTIMPL; }
   STDMETHODIMP IsEqualEnd(TfEditCookie, ITfRange*, TfAnchor, BOOL*) override { return E_NOTIMPL; }
-  STDMETHODIMP CompareStart(TfEditCookie, ITfRange*, TfAnchor, LONG*) override { return E_NOTIMPL; }
-  STDMETHODIMP CompareEnd(TfEditCookie, ITfRange*, TfAnchor, LONG*) override { return E_NOTIMPL; }
+  STDMETHODIMP CompareStart(TfEditCookie, ITfRange* target, TfAnchor anchor, LONG* result) override {
+    auto* other = static_cast<CompositionRange*>(target);
+    const LONG position = anchor == TF_ANCHOR_START ? other->start : other->end;
+    *result = start < position ? -1 : start > position ? 1 : 0; return S_OK;
+  }
+  STDMETHODIMP CompareEnd(TfEditCookie, ITfRange* target, TfAnchor anchor, LONG* result) override {
+    auto* other = static_cast<CompositionRange*>(target);
+    const LONG position = anchor == TF_ANCHOR_START ? other->start : other->end;
+    *result = end < position ? -1 : end > position ? 1 : 0; return S_OK;
+  }
   STDMETHODIMP AdjustForInsert(TfEditCookie, ULONG, BOOL*) override { return E_NOTIMPL; }
   STDMETHODIMP GetGravity(TfGravity*, TfGravity*) override { return E_NOTIMPL; }
   STDMETHODIMP SetGravity(TfEditCookie, TfGravity, TfGravity) override { return E_NOTIMPL; }
@@ -90,6 +99,7 @@ class CompositionContext : public ITfContext {
   unsigned selectionSets = 0;
   TfEditCookie lastSelectionCookie = 0;
   unsigned requests = 0;
+  CompositionRange* selectionRange = nullptr;
   ComPtr<ITfEditSession> deferredSession;
   HRESULT Drain() {
     ComPtr<ITfEditSession> session = deferredSession;
@@ -102,7 +112,7 @@ class CompositionContext : public ITfContext {
     *selection = {}; *fetched = 0;
     if (selectionResult == S_OK && !emptySelection) {
       *fetched = 1;
-      if (!nullSelection) { selection->range = &range_; range_.AddRef(); }
+      if (!nullSelection) { selection->range = selectionRange ? selectionRange : &range_; selection->range->AddRef(); }
     }
     return selectionResult;
   }
@@ -210,6 +220,15 @@ class CompositionView final : public ITfContextView {
   STDMETHODIMP GetRangeFromPoint(TfEditCookie, const POINT*, DWORD, ITfRange**) override { return E_NOTIMPL; }
   STDMETHODIMP GetScreenExt(RECT*) override { return E_NOTIMPL; }
   STDMETHODIMP GetWnd(HWND*) override { return E_NOTIMPL; }
+};
+
+class SelectionEditRecord final : public ITfEditRecord {
+ public:
+  COMPOSITION_MOCK_UNKNOWN(ITfEditRecord);
+  STDMETHODIMP GetSelectionStatus(BOOL* changed) override { *changed = TRUE; return S_OK; }
+  STDMETHODIMP GetTextAndPropertyUpdates(DWORD, const GUID**, ULONG, IEnumTfRanges** ranges) override {
+    *ranges = nullptr; return E_NOTIMPL;
+  }
 };
 #undef COMPOSITION_MOCK_UNKNOWN
 
@@ -551,7 +570,7 @@ static bool TestBoundEditSessions(HMODULE module, REFCLSID clsid) {
     if (mode == 0) valid = a.Drain() == S_OK && valid;
     valid = exercise(service.Get(), &b, nullptr, mode == 1 ? &newComposition : nullptr,
         1, 5, FALSE) == S_OK && oldComposition.ends == (mode == 2 ? 0U : 1U) &&
-        oldRange.textWrites == (mode == 2 ? 0U : 1U) && newRange.textWrites == 0 && valid;
+        oldRange.textWrites == 0 && newRange.textWrites == 0 && valid;
     if (oldBinding) valid = oldBinding->DoEditSession(1) == TF_E_DISCONNECTED && valid;
     exercise(service.Get(), &b, nullptr, nullptr, 1, 7, FALSE);
     invalidate(service.Get()); oldBinding.Reset(); replacement.Reset();
@@ -657,6 +676,107 @@ static bool TestInterruptedInput(HMODULE module, REFCLSID clsid) {
     keys->OnTestKeyDown(&a,'A',1,&eaten); keys->OnTestKeyDown(&b,'A',1,&eaten);
     check(calls==2, "query from another context cannot suppress new input");
     setKeys(service.Get(), nullptr, nullptr);
+    service->Deactivate();
+  }
+  // Host mouse/selection events, with the real text-edit sink and no global
+  // keyboard or mouse injection. The cleanup may run after new composition.
+  for (unsigned mode = 0; mode != 6; ++mode) {
+    ComPtr<IClassFactory> factory; ComPtr<ITfTextInputProcessorEx> service;
+    get(clsid,IID_IClassFactory,reinterpret_cast<void**>(factory.GetAddressOf()));
+    factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf()));
+    CompositionRange range, caret, otherRange; range.start=2; range.end=5;
+    caret.start=caret.end=3;
+    if (mode==1) caret.start=caret.end=1;
+    if (mode==2 || mode==4) caret.start=caret.end=8;
+    if (mode==3) { caret.start=0; caret.end=7; }
+    TestComposition composition(range);
+    CompositionContext context(range), other(otherRange); context.selectionRange=&caret; context.defer=true;
+    if (mode==5) composition.nullRange=true;
+    ComPtr<ITfEditSession> work; bound(service.Get(),&context,ObserveBoundContext,&work);
+    exercise(service.Get(),&context,nullptr,&composition,1,7,FALSE);
+    ComPtr<ITfTextEditSink> sink; service.As(&sink); SelectionEditRecord record;
+    const bool retired=mode>=1 && mode<=3;
+    check(sink->OnEndEdit(mode==4 ? &other : &context,1,&record)==S_OK &&
+        exercise(service.Get(),&context,nullptr,retired ? nullptr : &composition,1,5,FALSE)==S_OK &&
+        work->DoEditSession(1)==(retired ? TF_E_DISCONNECTED : S_OK),
+        "mouse/selection checks retire only the active composition when selection leaves it");
+    if(context.deferredSession) check(context.Drain()==S_OK && composition.ends==1 && range.textWrites==0,
+        "mouse cleanup preserves existing text and ends the old host composition");
+    exercise(service.Get(),&context,nullptr,nullptr,1,7,FALSE);
+    service->Deactivate(); work.Reset();
+    check(context.references==1 && caret.references==1 && composition.references==1,
+        "mouse/selection retirement releases captured references");
+  }
+  {
+    ComPtr<IClassFactory> factory; ComPtr<ITfTextInputProcessorEx> service;
+    get(clsid,IID_IClassFactory,reinterpret_cast<void**>(factory.GetAddressOf()));
+    factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf()));
+    CompositionRange range; TestComposition composition(range); CompositionContext context(range);
+    ComPtr<ITfEditSession> work, ending;
+    bound(service.Get(),&context,ObserveBoundContext,&work);
+    exercise(service.Get(),&context,nullptr,&composition,1,7,FALSE);
+    composition.onEnd=[&]() { exercise(service.Get(),&context,nullptr,&composition,1,6,FALSE); };
+    child(service.Get(),&context,&composition,0,FALSE,&ending);
+    check(ending->DoEditSession(1)==S_OK && composition.ends==1 && range.textWrites==0 &&
+        work->DoEditSession(1)==S_OK && exercise(service.Get(),&context,nullptr,nullptr,1,5,FALSE)==S_OK,
+        "normal End with inline termination notification preserves current response generation");
+    service->Deactivate();
+  }
+  using Apply=HRESULT(WINAPI*)(ITfTextInputProcessorEx*,ITfContext*,TfEditCookie,const WCHAR*);
+  auto apply=reinterpret_cast<Apply>(GetProcAddress(module,"WeaselProbeApplySyntheticResponse"));
+  if(!apply) return false;
+  for(unsigned mode=0; mode!=6; ++mode) {
+    ComPtr<IClassFactory> factory; ComPtr<ITfTextInputProcessorEx> service;
+    get(clsid,IID_IClassFactory,reinterpret_cast<void**>(factory.GetAddressOf()));
+    factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf()));
+    CompositionRange range, newRange; TestComposition composition(range), nextComposition(newRange);
+    StartCompositionContext context(range,composition); context.defer=true;
+    HRESULT expected=TS_E_READONLY;
+    if(mode==0) range.textResult=expected;
+    if(mode==1) context.setSelectionResult=expected;
+    if(mode==2) range.collapseResult=expected;
+    if(mode==3) composition.endResult=expected;
+    if(mode==4) { context.rejectComposition=true; expected=E_FAIL; }
+    if(mode==5) { context.insertInterfaceResult=E_NOINTERFACE; expected=E_NOINTERFACE; }
+    ComPtr<ITfEditSession> work; bound(service.Get(),&context,ObserveBoundContext,&work);
+    check(apply(service.Get(),&context,1,L"你好")==expected &&
+        exercise(service.Get(),&context,nullptr,nullptr,1,5,FALSE)==S_OK && work->DoEditSession(1)==TF_E_DISCONNECTED,
+        "host start/write/selection/End failure detaches composition and invalidates old work");
+    range.textResult=range.collapseResult=context.setSelectionResult=S_OK;
+    context.rejectComposition=false; context.insertInterfaceResult=S_OK; context.nextComposition=&nextComposition;
+    ComPtr<ITfEditSession> next; child(service.Get(),&context,nullptr,3,TRUE,&next);
+    const unsigned writes=range.textWrites;
+    check(next->DoEditSession(1)==S_OK && (!context.deferredSession || context.Drain()==(mode==3 ? TS_E_READONLY : S_OK)) &&
+        range.textWrites==writes && nextComposition.ends==0 &&
+        exercise(service.Get(),&context,nullptr,&nextComposition,1,5,FALSE)==S_OK,
+        "input resumes after host failure even if old cleanup fails or arrives late");
+    exercise(service.Get(),&context,nullptr,nullptr,1,7,FALSE);
+    service->Deactivate(); work.Reset(); next.Reset();
+    check(context.references==1 && composition.references==1 && nextComposition.references==1,
+        "failure recovery releases old and new context/composition references");
+  }
+  for(unsigned mode=0; mode!=8; ++mode) {
+    ComPtr<IClassFactory> factory; ComPtr<ITfTextInputProcessorEx> service; ComPtr<ITfKeyEventSink> keys;
+    get(clsid,IID_IClassFactory,reinterpret_cast<void**>(factory.GetAddressOf()));
+    factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf())); service.As(&keys);
+    CompositionRange aRange,bRange; CompositionContext a(aRange),b(bRange);
+    unsigned calls=0; setKeys(service.Get(),CountSyntheticKey,&calls); BOOL eaten=FALSE;
+    if(mode==0) { keys->OnTestKeyUp(&a,'A',1,&eaten); keys->OnTestKeyUp(&a,'A',1,&eaten); keys->OnKeyUp(&a,'A',1,&eaten); }
+    if(mode==1) { keys->OnTestKeyUp(&a,'A',1,&eaten); keys->OnKeyUp(&a,'B',1,&eaten); }
+    if(mode==2) { keys->OnTestKeyUp(&a,'A',1,&eaten); keys->OnTestKeyUp(&b,'A',1,&eaten); }
+    if(mode==3) { keys->OnTestKeyDown(&a,'A',1,&eaten); keys->OnTestKeyDown(&a,'A',0x40000001,&eaten); }
+    if(mode==4) { keys->OnKeyDown(&a,'A',1,&eaten); keys->OnKeyUp(&a,'A',1,&eaten); }
+    if(mode==5 || mode==6) {
+      keys->OnTestKeyDown(&a,'A',1,&eaten);
+      if(mode==5) { ComPtr<ITfThreadFocusSink> focus; service.As(&focus); focus->OnKillThreadFocus(); }
+      else keys->OnSetFocus(FALSE);
+      keys->OnKeyDown(&a,'A',1,&eaten);
+    }
+    if(mode==7) { keys->OnTestKeyDown(&a,'A',1,&eaten); service->Deactivate(); keys->OnTestKeyDown(&a,'A',1,&eaten); }
+    check(calls==(mode==0 ? 1U : 2U) && eaten,
+        "release pairing, auto-repeat, actual-only events and lifecycle resets do not swallow input");
+    service->Deactivate(); setKeys(service.Get(),nullptr,nullptr);
+    check(a.references==1 && b.references==1,"pending key context references released on reset");
   }
   std::cout << "Interrupted input checks = " << checks << ", failures = " << failed << '\n';
   return failed==0;

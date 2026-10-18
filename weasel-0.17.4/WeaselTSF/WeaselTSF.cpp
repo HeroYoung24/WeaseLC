@@ -73,8 +73,6 @@ WeaselTSF::WeaselTSF() {
   _dwTextEditSinkCookie = TF_INVALID_COOKIE;
   _dwTextLayoutSinkCookie = TF_INVALID_COOKIE;
   _dwThreadFocusSinkCookie = TF_INVALID_COOKIE;
-  _fTestKeyDownPending = FALSE;
-  _fTestKeyUpPending = FALSE;
 
   _fCUASWorkaroundTested = _fCUASWorkaroundEnabled = FALSE;
 
@@ -152,7 +150,8 @@ STDAPI WeaselTSF::Activate(ITfThreadMgr* pThreadMgr, TfClientId tfClientId) {
 }
 
 STDAPI WeaselTSF::Deactivate() {
-  _InvalidateEditSessions();
+  com_ptr<WeaselTSF> keepAlive = this;
+  _RetireComposition();
   if (!_pThreadMgr)
     return S_OK;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
@@ -268,8 +267,8 @@ STDMETHODIMP WeaselTSF::OnSetThreadFocus() {
   return S_OK;
 }
 STDMETHODIMP WeaselTSF::OnKillThreadFocus() {
-  _AbortComposition();
-  _InvalidateEditSessions();
+  com_ptr<WeaselTSF> keepAlive = this;
+  _RetireComposition();
   return S_OK;
 }
 BOOL WeaselTSF::_InitThreadFocusSink() {
