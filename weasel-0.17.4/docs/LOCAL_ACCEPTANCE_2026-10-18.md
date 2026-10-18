@@ -59,9 +59,9 @@
 - [x] 用户两次执行现有上下文探测，第二次将“你好”上屏后等待五秒再回来；均记录 `LastProbe={version:1,status:4,before:0,after:0}`，即 **FocusChanged**，未读到或保存正文。
 - [x] 用户切回搜狗、关闭测试记事本；关闭测试自动纠错，停止本轮模型和专用后端，UAC 注销独立测试身份并删除设置、词库和专用日志目录。
 - [x] 最终独立 COM/TIP/产品根均为空，原版文件/COM/机器配置基线一致；原版及搜狗 PID、启动时间仍与本轮开始相同。
-- [ ] 删除 `C:\Program Files\WeaseLC-LocalTest\weaselx64.dll`：本轮末仍被 ChatGPT PID 21748、Explorer PID 21484 加载；完整模块枚举无读取失败。没有强杀宿主、远程卸载 DLL 或安排重启删除。此文件是本轮**新构建**，旧版文件在测试开始前已完整删除。
+- [x] 删除 `C:\Program Files\WeaseLC-LocalTest\weaselx64.dll`：用户重启后已完成，详见下节；此前本轮末仍被 ChatGPT PID 21748、Explorer PID 21484 加载；完整模块枚举无读取失败。没有强杀宿主、远程卸载 DLL 或安排重启删除。此文件是本轮**新构建**，旧版文件在测试开始前已完整删除。
 
-最终状态与占用者见 `output/LocalTest/final-state.json`；物理删除尚未完成，不能声称本机零残留。方便时重启 Windows，下一次先运行 `test/LocalDeployment/Purge.ps1` 完成精确清理，再考虑重新部署。保留本轮工作区新构建、诊断日志、源码及模型开发资产；它们没有系统注册或自启动。
+当时状态与占用者见 `output/LocalTest/final-state.json`；该快照记录的是重启前尚未完成物理删除的状态，现已完成清理，见本文末节。保留本轮工作区新构建、诊断日志、源码及模型开发资产；它们没有系统注册或自启动。
 
 ## 下一次定位自动提示的入口
 
@@ -70,3 +70,11 @@
 优先在离线宿主增加分阶段、不含正文的诊断：分别记录 `ITfThreadMgr::GetFocus`、`ITfDocumentMgr::GetTop` 的结果和上下文身份比较、OnEndEdit 触发阶段，再核对自动 Capture/Validate/Focused 的同类条件。随后区分范围不可确认、模型过滤和布局不可用等分支。不放宽密码/私密/未知范围的隐私门控，不在已加载 DLL 上原位覆盖更新。
 
 真实鼠标路径的吞键在本轮合成操作中未复现；尚未覆盖其他应用、长时间输入、所有组合取消策略或 Win32 应用 UI，因此不能标记为完整稳定性验收。
+
+## 重启后完成清理（2026-10-18）
+
+用户确认重启；系统启动时间为 17:02:34（Asia/Shanghai）。完整模块枚举未发现旧测试 DLL 占用者，无模块读取失败；测试注册已为空。通过 UAC 运行既有精确 `Purge.ps1`，删除剩余 `C:\Program Files\WeaseLC-LocalTest`，返回无错误、无残留。
+
+最终复查：测试安装目录、用户词库、专用日志目录及测试 COM/TIP/产品注册均为空；无相关测试进程、Windows 服务或 18963 模型监听。原版 DLL 哈希、COM 路径和机器配置与测试前及本次清理前基线一致。重启后原版 WeaselServer 和搜狗 Broker 正常存在；本轮没有结束它们。
+
+证据：`output/LocalTest/post-reboot-before-purge.json`、`purge-result.json`、`post-reboot-cleanup.json`。上轮未清理结果另存 `purge-before-reboot.json`。保留工作区构建、源码、日志和模型开发资产；本轮未重新部署，自动提示/Tab 的真实应用验收仍未完成。

@@ -54,7 +54,7 @@ x64、Win32 每架构均通过：
 
 ## 恢复与实测步骤
 
-1. 方便时重启 Windows，释放上轮被 ChatGPT/Explorer 加载的 `C:\Program Files\WeaseLC-LocalTest\weaselx64.dll`；先运行精确 Purge，确认原版基线和旧注册清理。不覆盖已加载 DLL。
+1. **已完成（2026-10-18）**：用户重启后完整模块枚举确认旧 DLL 无占用，已运行精确 Purge；测试部署目录/注册/设置/词库/日志均无残留，原版基线一致。证据见 `output/LocalTest/post-reboot-cleanup.json`。
 2. 从当前源码重建独立 LocalTest（不是直接注册普通版或探测 DLL），重新准备哈希清单并安装。
 3. 先复核中文、退格和鼠标中断恢复，再启动本地模型、开启自动提示，输入固定合成语料。
 4. 保持记事本在前台时读取 `Diagnostics\LastAutomatic` 的状态、焦点阶段和 HRESULT；记录发生在捕获、工作进程、等待下一组合还是显示阶段。不要只读取回到聊天后的宽泛 FocusChanged。
