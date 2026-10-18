@@ -16,9 +16,10 @@ int RunCorrectionWorker(bool syntheticTest) {
   try {
     auto preferences = syntheticTest ? Preferences{} : LoadPreferences();
     if (syntheticTest) {
-      // Diagnostic mode accepts exactly one compiled synthetic sample and never
+      // Diagnostic mode accepts only compiled synthetic samples and never
       // reads or writes the user's preferences/lexicon or launches a CLI.
-      if (std::wstring(input.text, input.units) != L"这里有错子。") return 4;
+      const std::wstring sample(input.text, input.units);
+      if (sample != L"这里有错子。" && sample != L"这里有错") return 4;
       preferences = Preferences{}; preferences.mode = Mode::Local;
       preferences.automatic.enabled = true;
       preferences.local.endpoint = L"http://127.0.0.1:18963/v1/chat/completions";
@@ -36,6 +37,9 @@ int RunCorrectionWorker(bool syntheticTest) {
       const std::atomic_bool cancelled{false};
       auto client = CreateModelClient(config.provider);
       auto result = client->Check(config, request, cancelled);
+      // This test must receive an actual valid no-change response, rather than
+      // confusing a transport/parse failure with the zero-suggestion contract.
+      if (syntheticTest && request.text == L"这里有错" && result.state != State::NoSuggestion) return 6;
       if (!syntheticTest && !LoadUserLexicon(lexicon)) return 5;
       FilterKeptTerms(lexicon, request, result);
       if (result.state == State::Suggestions) for (const auto& suggestion : result.suggestions) {

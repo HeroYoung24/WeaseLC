@@ -1,5 +1,7 @@
 # 本机独立测试
 
+> 后续审查已修复无建议后丢失上文，173 项自动回归及 24 项真实本地模型链路通过（每架构）；实机范围阻断仍待 LastScope 确认，参见 [最新审查和恢复步骤](../../docs/CONTEXT_REVIEW_AND_TESTS.md)。新包尚未安装，前轮 DLL 需释放后精确 Purge。
+
 2026-10-18 最新复测：重启后重建独立版，用户确认中文及中断恢复正常；自动提示仍缺失，前台诊断已定位 ScopeUnavailable（焦点 Ready），调用模型前被阻断。已补充细分范围诊断但尚未重新部署。测试已回退，DLL 被 ChatGPT/Explorer/Edge 加载待释放；详见 [最新范围复测](../../docs/AUTOMATIC_HINT_SCOPE_TEST_2026-10-18.md)。
 
 适用本次用户明确授权的日常电脑测试。先读 [风险与验收范围](../../docs/LOCAL_DEPLOYMENT_RISK.md)。虚拟机包仍用于干净客体，不直接用于本机覆盖安装。

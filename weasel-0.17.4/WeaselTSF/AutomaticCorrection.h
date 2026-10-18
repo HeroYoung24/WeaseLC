@@ -64,7 +64,7 @@ class AutomaticCorrection {
   UINT measuredDpi_ = 0;
   SIZE measuredSize_{};
   HANDLE process_ = nullptr, job_ = nullptr, output_ = nullptr;
-  bool ready_ = false, downTab_ = false;
+  bool ready_ = false, checked_ = false, downTab_ = false;
   bool polling_ = false, requesting_ = false;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   bool testing_ = false;

@@ -156,6 +156,60 @@
       while (!predicate() && GetTickCount64() - began < timeout) { poll(service.Get()); pump(); Sleep(10); }
       return predicate();
     };
+    // A completed zero-suggestion response must retain only this IME's bounded
+    // adjacent commits, otherwise pauses between words lose correction context.
+    fixtureConfigure(); const auto beforeNoSuggestion = store->text;
+    check(Commit(apply,service.Get(),context.Get(),client,L"这里有错"),"first fragment committed before zero-suggestion check");
+    bool zeroChildSeen=false;
+    const bool zeroFinished=await([&] {
+      environment(service.Get(),TRUE,&child);zeroChildSeen=zeroChildSeen||child!=0;
+      return zeroChildSeen && !child;
+    });
+    check(zeroFinished && !state().first && noKey(),"zero-suggestion reply finishes without displaying or consuming Tab");
+    bool restarted=false;const auto idleUntil=GetTickCount64()+350;
+    while(GetTickCount64()<idleUntil) { poll(service.Get());pump();environment(service.Get(),TRUE,&child);restarted=restarted||child!=0;Sleep(10); }
+    check(!restarted,"unchanged zero-suggestion text does not relaunch model worker");
+    check(Commit(apply,service.Get(),context.Get(),client,L"子。") && await([&]{return state().first;}),
+        "later fragment still sees earlier IME commit after no-suggestion response");
+    check(edit([&](TfEditCookie ec){return preedit(service.Get(),context.Get(),ec,L"ni");}),
+        "next composition starts after merged correction result");
+    eaten=FALSE;
+    if(state().first) { keys->OnTestKeyDown(context.Get(),VK_TAB,0,&eaten);keys->OnKeyDown(context.Get(),VK_TAB,0,&eaten); }
+    check(eaten && store->text==beforeNoSuggestion+L"这里有错字。ni",
+        "Tab corrects across paused commits while preserving new pinyin");
+    if(eaten) keys->OnKeyUp(context.Get(),VK_TAB,0,&eaten);
+    Commit(apply,service.Get(),context.Get(),client,L"你好");
+    check(store->text==beforeNoSuggestion+L"这里有错字。你好","normal commit remains usable after zero-suggestion context reuse");
+    fixtureConfigure();Commit(apply,service.Get(),context.Get(),client,L"模拟空坏响应。");
+    zeroChildSeen=false;
+    const bool invalidEmptyFinished=await([&] { environment(service.Get(),TRUE,&child);zeroChildSeen=zeroChildSeen||child!=0;return zeroChildSeen&&!child; });
+    check(invalidEmptyFinished && !state().first && noKey(),"invalid zero-count reply cannot be treated as a safe completed response");
+
+    for(unsigned interrupted=0;interrupted!=2;++interrupted) {
+      store->UserSelect(static_cast<LONG>(store->text.size()),static_cast<LONG>(store->text.size()));
+      fixtureConfigure();Commit(apply,service.Get(),context.Get(),client,L"这里有错");zeroChildSeen=false;
+      check(await([&]{environment(service.Get(),TRUE,&child);zeroChildSeen=zeroChildSeen||child!=0;return zeroChildSeen&&!child;}),
+          "completed no-suggestion context ready for interruption boundary");
+      if(interrupted) expire(service.Get());
+      else {
+        ComPtr<ITfSource> source;context.As(&source);
+        ComPtr<ITfTextEditSink> sink;service.As(&sink);
+        DWORD subscription=TF_INVALID_COOKIE;
+        const bool subscribed=source && source->AdviseSink(IID_ITfTextEditSink,sink.Get(),&subscription)==S_OK;
+        const auto end=static_cast<LONG>(store->text.size());
+        check(subscribed && store->UserSelect(end-1,end-1)==S_OK,"no-suggestion mouse fixture delivers real owned selection notifications");
+        pump();
+        if(subscribed)source->UnadviseSink(subscription);
+      }
+      poll(service.Get());
+      store->UserSelect(static_cast<LONG>(store->text.size()),static_cast<LONG>(store->text.size()));
+      const auto original=store->text;Commit(apply,service.Get(),context.Get(),client,L"子。");zeroChildSeen=false;
+      const bool newFinished=await([&]{environment(service.Get(),TRUE,&child);zeroChildSeen=zeroChildSeen||child!=0;return zeroChildSeen&&!child;});
+      check(newFinished && !state().first && noKey() && store->text==original+L"子。",
+          "mouse movement or expiry prevents reusing prior no-suggestion context");
+    }
+
+
     fixtureConfigure(); Commit(apply, service.Get(), context.Get(), client, L"模拟慢响应。");
     const bool startedChild = await([&]() { environment(service.Get(), TRUE, &child); return child != 0; });
     HANDLE oldChild = startedChild ? OpenProcess(SYNCHRONIZE, FALSE, child) : nullptr;

@@ -51,6 +51,10 @@ static int RunAutomaticFixtureWorker() {
     wcscpy_s(item.original, L"模拟"); wcscpy_s(item.replacement, L"示例");
     if (text == L"模拟慢响应。") Sleep(1000);
     else reply.magic = 0;
+  } else if (text == L"这里有错" || text == L"子。") {
+    reply.count = 0;
+  } else if (text == L"模拟空坏响应。") {
+    reply.count = 0; reply.magic = 0;
   } else return 3;
   DWORD written = 0;
   return WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), &reply, sizeof(reply), &written, nullptr) && written == sizeof(reply) ? 0 : 4;
@@ -192,7 +196,37 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     check(eaten, "accepted Tab test key-up consumed");
     keys->OnKeyUp(context.Get(), VK_TAB, 0, &eaten);
     check(eaten && noKey(), "key-up releases Tab; empty hint preserves normal Tab");
-    if (local) { invalidate(service.Get()); document->Pop(TF_POPF_ALL); continue; }
+    if (local) {
+      const auto beforePaused = store->text;
+      check(configureNow() && Commit(apply,service.Get(),context.Get(),client,L"这里有错"),
+          "real model receives the compiled first fragment only");
+      auto pumpUntil = [&](const std::function<bool()>& done) {
+        const auto deadline = GetTickCount64()+8000;
+        while(!done() && GetTickCount64()<deadline) {
+          poll(service.Get());MSG message;
+          while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
+          Sleep(10);
+        }
+        return done();
+      };
+      DWORD child=0;bool seen=false;
+      const bool completed=pumpUntil([&]{environment(service.Get(),TRUE,&child);seen=seen||child!=0;return seen&&!child;});
+      check(completed && !state().first && noKey(),"real model first fragment finishes with no visible suggestion");
+      bool restarted=false;const auto idle=GetTickCount64()+350;
+      while(GetTickCount64()<idle){poll(service.Get());environment(service.Get(),TRUE,&child);restarted=restarted||child!=0;Sleep(10);}
+      check(!restarted,"completed real no-change check does not repeat while idle");
+      check(Commit(apply,service.Get(),context.Get(),client,L"子。") && pumpUntil([&]{return state().first;}),
+          "real model checks merged context across a completed no-change response");
+      check(edit([&](TfEditCookie ec){return preedit(service.Get(),context.Get(),ec,L"ni");}),
+          "real model result coexists with the next active preedit");
+      eaten=FALSE;
+      if(state().first){keys->OnTestKeyDown(context.Get(),VK_TAB,0,&eaten);keys->OnKeyDown(context.Get(),VK_TAB,0,&eaten);}
+      check(eaten && store->text==beforePaused+L"这里有错字。ni","real model Tab corrects the prior fragment and preserves pinyin");
+      if(eaten)keys->OnKeyUp(context.Get(),VK_TAB,0,&eaten);
+      check(Commit(apply,service.Get(),context.Get(),client,L"你好") && store->text==beforePaused+L"这里有错字。你好",
+          "input still commits after the real model correction");
+      invalidate(service.Get()); document->Pop(TF_POPF_ALL); continue;
+    }
 
     const auto prefix = store->text;
     preferences.timing = 0;

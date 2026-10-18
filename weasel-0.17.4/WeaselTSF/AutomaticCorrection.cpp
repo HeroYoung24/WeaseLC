@@ -85,7 +85,7 @@ void AutomaticCorrection::StopWorker() {
   Close(job_); Close(process_); Close(output_);
 }
 void AutomaticCorrection::Cancel() {
-  ++revision_; ready_ = false;
+  ++revision_; ready_ = false; checked_ = false;
   StopWorker(); Hide();
   context_.Release(); range_.Release();
   expectedSelection_.Release(); expectedPreedit_.clear(); expectedComposing_ = false;
@@ -466,7 +466,14 @@ bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
         text_.compare(item.start, item.originalUnits, item.original, item.originalUnits) != 0 ||
         std::wstring(item.original, item.originalUnits) == std::wstring(item.replacement, item.replacementUnits)) return false;
   }
-  if (!reply.count) return false;
+  checked_ = true;
+  if (!reply.count) {
+    // No displayable suggestion is a completed check, not a document reset.
+    // Retain only our bounded, range-validated commits for the next word. A
+    // changed focus/text/selection, timeout or new settings still cancels them.
+    ready_ = false; item_ = {}; label_.clear(); Hide();
+    Report(correction::AutomaticStage::NoSuggestion); return true;
+  }
   item_ = reply.items[0];
   measuredDpi_ = 0; measuredSize_ = {};
   label_ = std::wstring(item_.original, item_.originalUnits) + L" → " + std::wstring(item_.replacement, item_.replacementUnits);
@@ -475,7 +482,7 @@ bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
       (chinese ? L"\n纠错建议（Tab 已关闭）" : L"\nCorrection (Tab disabled)");
   SetWindowTextW(window_, (std::wstring(correction::HintTitle(chinese)) + L": " + label_).c_str());
   InvalidateRect(window_, nullptr, TRUE);
-  ready_ = true; return true;
+  ready_ = true; Report(correction::AutomaticStage::Ready); return true;
 }
 bool AutomaticCorrection::StartWorker() {
   // Pipes remain below the 4 KiB capacity, so the one initial write cannot wait
@@ -571,7 +578,7 @@ void AutomaticCorrection::Poll() {
       if (!SettingsCurrent()) { Cancel(); return; }
     nextSettings_ = now + 500;
   }
-  if (!ready_ && !process_ && now - started_ >= preferences_.automatic.debounce) {
+  if (!checked_ && !ready_ && !process_ && now - started_ >= preferences_.automatic.debounce) {
     if (!Request(false, context_)) { Cancel(); return; }
     if (!StartWorker()) { Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
     Report(correction::AutomaticStage::WorkerStarted);
@@ -588,12 +595,10 @@ void AutomaticCorrection::Poll() {
       correction::AutomaticReply reply; DWORD read = 0;
       const bool received = ReadFile(output_, &reply, sizeof(reply), &read, nullptr) && read == sizeof(reply);
       StopWorker();
-      if (!received || !reply.count || !AcceptReply(reply)) {
-        Report(received && reply.magic == 0x31524357 && reply.version == 1 && !reply.count ?
-            correction::AutomaticStage::NoSuggestion : correction::AutomaticStage::InvalidReply);
+      if (!received || !AcceptReply(reply)) {
+        Report(correction::AutomaticStage::InvalidReply);
         SecureZeroMemory(&reply, sizeof(reply)); Cancel(); return;
       }
-      Report(correction::AutomaticStage::Ready);
       if (!Request(false, context_)) {
         SecureZeroMemory(&reply, sizeof(reply)); Cancel(); return;
       }
