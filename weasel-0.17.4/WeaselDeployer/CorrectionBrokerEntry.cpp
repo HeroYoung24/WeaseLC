@@ -10,9 +10,13 @@ int RunCorrectionBroker() {
   try {
     correction::CorrectionBroker broker;
     if (!broker.Start()) return 3;
-    BYTE signal = 0; DWORD bytes = 0;
     // No request text travels on stdin. Its EOF is owned by the input backend.
-    ReadFile(parent, &signal, 1, &bytes, nullptr);
-    broker.Stop(); return 0;
+    // Observe listener health too: a fatal accept failure must not leave a
+    // live-looking child with no endpoint. Restarting the backend recreates it.
+    DWORD available = 0;
+    while (broker.IsRunning() && PeekNamedPipe(parent, nullptr, 0, nullptr, &available, nullptr) && !available)
+      Sleep(50);
+    const bool healthy = broker.IsRunning();
+    broker.Stop(); return healthy ? 0 : 3;
   } catch (...) { return 4; }
 }

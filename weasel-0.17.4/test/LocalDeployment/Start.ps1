@@ -13,5 +13,5 @@ if(!(Test-Path -LiteralPath $user)){
 $code=Invoke-Program (Join-Path $script:TestRoot 'WeaselDeployer.exe') '/deploy'
 if($code -ne 0){throw "Schema deployment failed: $code"}
 $process=Start-Process -FilePath $server -WorkingDirectory $script:TestRoot -WindowStyle Hidden -PassThru
-Write-Output "Local-test backend PID $($process.Id). Automatic correction remains off until enabled explicitly."
+Write-Output "Local-test backend PID $($process.Id). Correction follows saved settings; new settings default to off."
 if($EnableInputMethod){Set-TestInputList $false;Write-Output 'Added WeaseLC 本机测试 to the current user input-method list. The default remains unchanged.'}

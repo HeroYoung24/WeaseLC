@@ -78,8 +78,11 @@ bool RemoteClient(const std::wstring& server, const std::wstring& output, const 
        << ",\"revision\":" << settings.settings.revision << ",\"count\":" << response.result.count << "}";
   return configured && checked && metadata && file.good();
 }
+#include "ListenerChecks.inc"
 int wmain(int argc, wchar_t** argv) {
-  if (argc == 3 && !wcscmp(argv[1], L"--process")) {
+  if (argc == 2 && !wcscmp(argv[1], L"--listener-lifecycle")) return RunListenerChecks();
+  if (argc == 3 && (!wcscmp(argv[1], L"--process") || !wcscmp(argv[1], L"--process-on"))) {
+    const bool enabled = !wcscmp(argv[1], L"--process-on");
     BrokerProcess child;
     bool valid = child.Start(argv[2]);
     HANDLE observed = nullptr;
@@ -88,16 +91,22 @@ int wmain(int argc, wchar_t** argv) {
     const auto deadline = GetTickCount64() + 5000;
     bool ready = false;
     while (valid && !ready && GetTickCount64() < deadline) {
-      ready = call.Exchange(argv[2], request, reply, 100) && reply.status == BrokerStatus::Unavailable;
+      ready = call.Exchange(argv[2], request, reply, 100) &&
+          (enabled ? reply.status == BrokerStatus::Ok && reply.settings.enabled : reply.status == BrokerStatus::Unavailable);
       if (!ready) Sleep(10);
     }
     valid = valid && ready && observed;
+    if (valid && enabled) {
+      const auto input = CheckRequestFor(reply);
+      valid = call.Exchange(argv[2], input, reply, 2000) && reply.status == BrokerStatus::Ok && reply.result.count == 1;
+    }
     child.Stop();
     DWORD code = 1;
     valid = valid && WaitForSingleObject(observed, 0) == WAIT_OBJECT_0 && GetExitCodeProcess(observed, &code) && code == 0;
     if (observed) CloseHandle(observed);
     valid = !call.Exchange(argv[2], request, reply) && valid;
-    std::cout << "Production broker child startup, missing-settings fail-closed, graceful EOF exit, endpoint removed = " << valid << '\n';
+    std::cout << "Production broker child startup, " << (enabled ? "enabled fixed inference" : "missing-settings fail-closed")
+        << ", graceful EOF exit, endpoint removed = " << valid << '\n';
     return valid ? 0 : 1;
   }
   if (argc == 6 && !wcscmp(argv[1], L"--client")) return RemoteClient(argv[2], argv[3], argv[4], !wcscmp(argv[5], L"on")) ? 0 : 1;

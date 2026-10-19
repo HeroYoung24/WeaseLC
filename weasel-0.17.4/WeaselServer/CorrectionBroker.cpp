@@ -56,6 +56,10 @@ struct CorrectionBroker::Impl {
   weasel::PipeAccessPolicy access;
   Handle stop;
   std::thread listener;
+  std::atomic_bool listening{false};
+#ifdef WEASELC_BROKER_TEST_HOOKS
+  std::function<void()> beforeConnect;
+#endif
   std::atomic<unsigned> checks{0};
   struct Worker { std::thread thread; std::atomic_bool done{false}; };
   std::vector<std::unique_ptr<Worker>> workers;
@@ -218,7 +222,19 @@ struct CorrectionBroker::Impl {
       Handle pipe(next.value); next.value = INVALID_HANDLE_VALUE;
       Handle event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
       if (!event.value) break;
+      // A client may close before ConnectNamedPipe, including a one-way
+      // metadata sender. Recycle that instance instead of retiring the listener.
+      auto recycle = [&]() {
+        DisconnectNamedPipe(pipe.value);
+        next.value = pipe.value; pipe.value = INVALID_HANDLE_VALUE;
+      };
+      auto disconnected = [](DWORD error) {
+        return error == ERROR_NO_DATA || error == ERROR_BROKEN_PIPE || error == ERROR_PIPE_NOT_CONNECTED;
+      };
       OVERLAPPED io{}; io.hEvent = event.value;
+#ifdef WEASELC_BROKER_TEST_HOOKS
+      if (beforeConnect) beforeConnect();
+#endif
       const BOOL connected = ConnectNamedPipe(pipe.value, &io);
       const DWORD error = connected ? ERROR_SUCCESS : GetLastError();
       if (error == ERROR_IO_PENDING) {
@@ -226,15 +242,26 @@ struct CorrectionBroker::Impl {
         const auto state = WaitForMultipleObjects(2, events, FALSE, INFINITE);
         DWORD bytes = 0;
         if (state != WAIT_OBJECT_0 + 1) { CancelIoEx(pipe.value, &io); GetOverlappedResult(pipe.value, &io, &bytes, TRUE); break; }
-        if (!GetOverlappedResult(pipe.value, &io, &bytes, FALSE)) break;
-      } else if (error != ERROR_SUCCESS && error != ERROR_PIPE_CONNECTED) break;
+        if (!GetOverlappedResult(pipe.value, &io, &bytes, FALSE)) {
+          if (disconnected(GetLastError())) { recycle(); continue; }
+          break;
+        }
+      } else if (error != ERROR_SUCCESS && error != ERROR_PIPE_CONNECTED) {
+        if (disconnected(error)) { recycle(); continue; }
+        break;
+      }
       for (auto it = workers.begin(); it != workers.end();) {
         if ((*it)->done.load()) { (*it)->thread.join(); it = workers.erase(it); } else ++it;
       }
+      // Sixteen workers plus this instance already use all seventeen slots.
+      // Reject the excess client and reuse its instance before creating another.
+      if (workers.size() >= 16) { recycle(); continue; }
       // Keep a listening instance alive before retiring a connected one.
       next.value = NewPipe(false);
-      if (next.value == INVALID_HANDLE_VALUE) break;
-      if (workers.size() >= 16) continue;
+      if (next.value == INVALID_HANDLE_VALUE) {
+        // Drop this request under resource pressure, preserving the endpoint.
+        recycle(); WaitForSingleObject(stop.value, 10); continue;
+      }
       auto worker = std::make_unique<Worker>(); auto* state = worker.get();
       workers.push_back(std::move(worker));
       const auto accepted = pipe.value;
@@ -248,18 +275,30 @@ struct CorrectionBroker::Impl {
     }
   }
 };
-CorrectionBroker::CorrectionBroker(std::wstring path, std::function<std::unique_ptr<IModelTransport>()> factory)
-    : impl_(std::make_unique<Impl>(std::move(path), std::move(factory))) {}
+CorrectionBroker::CorrectionBroker(std::wstring path, std::function<std::unique_ptr<IModelTransport>()> factory
+#ifdef WEASELC_BROKER_TEST_HOOKS
+    , std::function<void()> beforeConnect
+#endif
+    ) : impl_(std::make_unique<Impl>(std::move(path), std::move(factory))) {
+#ifdef WEASELC_BROKER_TEST_HOOKS
+  impl_->beforeConnect = std::move(beforeConnect);
+#endif
+}
 CorrectionBroker::~CorrectionBroker() { Stop(); }
 bool CorrectionBroker::Start() {
   if (impl_->listener.joinable() || !Unpackaged() || impl_->name.empty() || !impl_->stop.value) return false;
   ResetEvent(impl_->stop.value);
   HANDLE pipe = impl_->NewPipe(true);
   if (pipe == INVALID_HANDLE_VALUE) return false;
-  try { impl_->listener = std::thread([this, pipe]() { try { impl_->Listen(pipe); } catch (...) {} }); }
-  catch (...) { CloseHandle(pipe); return false; }
+  impl_->listening.store(true);
+  try { impl_->listener = std::thread([this, pipe]() {
+    try { impl_->Listen(pipe); } catch (...) {}
+    impl_->listening.store(false);
+  }); }
+  catch (...) { impl_->listening.store(false); CloseHandle(pipe); return false; }
   return true;
 }
+bool CorrectionBroker::IsRunning() const { return impl_ && impl_->listening.load(); }
 void CorrectionBroker::Stop() {
   if (!impl_ || !impl_->listener.joinable()) return;
   SetEvent(impl_->stop.value); impl_->listener.join();

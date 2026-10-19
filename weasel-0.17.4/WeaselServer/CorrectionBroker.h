@@ -9,9 +9,14 @@ namespace correction {
 class CorrectionBroker {
  public:
   explicit CorrectionBroker(std::wstring settingsPath = {},
-      std::function<std::unique_ptr<IModelTransport>()> transport = {});
+      std::function<std::unique_ptr<IModelTransport>()> transport = {}
+#ifdef WEASELC_BROKER_TEST_HOOKS
+      , std::function<void()> beforeConnect = {}
+#endif
+      );
   ~CorrectionBroker();
   bool Start();
+  bool IsRunning() const;
   void Stop();
  private:
   struct Impl;
