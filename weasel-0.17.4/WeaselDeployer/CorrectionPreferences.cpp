@@ -89,20 +89,31 @@ bool DecodePreferences(const std::string& encoded, Preferences& preferences) {
     return true;
   } catch (...) { return false; }
 }
-Preferences LoadPreferences() {
+Preferences ReadPreferences(const wchar_t* path, PreferencesRead* details) {
   Preferences preferences;
+  PreferencesRead result;
   DWORD size = 0;
-  if (RegGetValueW(HKEY_CURRENT_USER, kRegistryKey, L"SettingsV2", RRF_RT_REG_BINARY,
-      nullptr, nullptr, &size) == ERROR_SUCCESS && size && size <= 16384) {
+  auto status = RegGetValueW(HKEY_CURRENT_USER, path, L"SettingsV2", RRF_RT_REG_BINARY,
+      nullptr, nullptr, &size);
+  result.error = status; result.bytes = size;
+  if (status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND) result.stage = PreferencesStage::Missing;
+  else if (status != ERROR_SUCCESS) result.stage = PreferencesStage::QueryFailed;
+  else if (!size || size > 16384) { result.stage = PreferencesStage::InvalidSize; result.error = ERROR_INVALID_DATA; }
+  else {
     std::string encoded(size, '\0');
-    if (RegGetValueW(HKEY_CURRENT_USER, kRegistryKey, L"SettingsV2", RRF_RT_REG_BINARY,
-        nullptr, encoded.data(), &size) == ERROR_SUCCESS) {
+    status = RegGetValueW(HKEY_CURRENT_USER, path, L"SettingsV2", RRF_RT_REG_BINARY,
+        nullptr, encoded.data(), &size);
+    result.error = status; result.bytes = size;
+    if (status == ERROR_SUCCESS) {
       encoded.resize(size);
-      DecodePreferences(encoded, preferences);
-    }
+      if (DecodePreferences(encoded, preferences)) result.stage = PreferencesStage::Ready;
+      else { result.stage = PreferencesStage::DecodeFailed; result.error = ERROR_INVALID_DATA; }
+    } else result.stage = PreferencesStage::ReadFailed;
   }
+  if (details) *details = result;
   return preferences;
 }
+Preferences LoadPreferences(PreferencesRead* details) { return ReadPreferences(kRegistryKey, details); }
 bool SavePreferences(const Preferences& preferences) {
   try {
     const std::string encoded = EncodePreferences(preferences);

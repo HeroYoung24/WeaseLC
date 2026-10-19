@@ -20,7 +20,7 @@ $previous='';$events=0;$clock=[Diagnostics.Stopwatch]::StartNew()
 Write-Output "Metadata only; leave the test editor in front. Output: $output"
 while($clock.Elapsed.TotalSeconds -lt $Seconds){
   $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path)
-  $automatic=$null;$scope=$null;$capture=$null;$worker=$null
+  $automatic=$null;$scope=$null;$capture=$null;$worker=$null;$frontend=[ordered]@{}
   try{
     $a=Read-Metadata $key 'LastAutomatic' 24
     $s=Read-Metadata $key 'LastScope' 20
@@ -30,8 +30,13 @@ while($clock.Elapsed.TotalSeconds -lt $Seconds){
     if($s){$scope=[ordered]@{stage=[BitConverter]::ToUInt32($s,4);hresult=('0x{0:X8}' -f [BitConverter]::ToUInt32($s,8));inputScope=[BitConverter]::ToInt32($s,12);variantType=[BitConverter]::ToUInt32($s,16)}}
     if($c){$capture=[ordered]@{totalUnits=[BitConverter]::ToUInt32($c,4);addedUnits=[BitConverter]::ToUInt32($c,8);retainedUnits=[BitConverter]::ToUInt32($c,12);utc=Get-Time $c 16}}
     if($w){$worker=[ordered]@{stage=[BitConverter]::ToUInt32($w,4);units=[BitConverter]::ToUInt32($w,8);provider=[BitConverter]::ToUInt32($w,12);state=[BitConverter]::ToUInt32($w,16);nativeError=[BitConverter]::ToUInt32($w,20);httpStatus=[BitConverter]::ToUInt32($w,24);elapsedMs=[BitConverter]::ToUInt32($w,28);utc=Get-Time $w 32}}
+    foreach($name in @('LastKey','LastCommit','LastGate')){
+      $v=Read-Metadata $key $name 32
+      $frontend[$name]=$null
+      if($v){$frontend[$name]=[ordered]@{stage=[BitConverter]::ToUInt32($v,4);units=[BitConverter]::ToUInt32($v,8);flags=[BitConverter]::ToUInt32($v,12);hresult=('0x{0:X8}' -f [BitConverter]::ToUInt32($v,16));source=[BitConverter]::ToUInt32($v,20);utc=Get-Time $v 24}}
+    }
   }finally{if($key){$key.Dispose()}}
-  $state=[ordered]@{automatic=$automatic;scope=$scope;capture=$capture;worker=$worker}
+  $state=[ordered]@{automatic=$automatic;scope=$scope;capture=$capture;worker=$worker;frontend=$frontend}
   $signature=$state | ConvertTo-Json -Depth 5 -Compress
   if($signature -cne $previous){
     [ordered]@{observedUtc=[DateTime]::UtcNow.ToString('o');state=$state} | ConvertTo-Json -Depth 6 -Compress | Add-Content -LiteralPath $output -Encoding UTF8

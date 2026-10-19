@@ -190,7 +190,7 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     }
     if (field) {
       check(inject(service.Get(), &reply) == S_FALSE && noKey() && store->text == L"这里有错子。",
-          "missing/default/private/password/PIN field never shows, consumes Tab or changes text");
+          "missing/unsupported/private/password/PIN field never shows, consumes Tab or changes text");
       invalidate(service.Get()); document->Pop(TF_POPF_ALL); continue;
     }
     if (local) {
@@ -258,6 +258,23 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
       invalidate(service.Get()); document->Pop(TF_POPF_ALL); continue;
     }
 
+    preferences.timing = 0;
+    for (const std::wstring sentence : {L"这里有错子.", L"这里有错子"}) {
+      const auto beforeVariant = store->text;
+      auto corrected = sentence; corrected.replace(3, 2, L"错字");
+      check(configureNow() && Commit(apply, service.Get(), context.Get(), client, sentence) &&
+          inject(service.Get(), &reply) == S_OK && !IsWindowVisible(state().second),
+          "ASCII full stop or no punctuation still waits for the next composition");
+      check(edit([&](TfEditCookie ec) { return preedit(service.Get(), context.Get(), ec, L"ni"); }) &&
+          IsWindowVisible(state().second), "punctuation variant shows beside the next preedit");
+      keys->OnTestKeyDown(context.Get(), VK_TAB, 0, &eaten);
+      keys->OnKeyDown(context.Get(), VK_TAB, 0, &eaten);
+      check(eaten && store->text == beforeVariant + corrected + L"ni",
+          "Tab corrects punctuation variant and preserves pinyin");
+      keys->OnKeyUp(context.Get(), VK_TAB, 0, &eaten);
+      check(Commit(apply, service.Get(), context.Get(), client, L"你好") &&
+          store->text == beforeVariant + corrected + L"你好", "input continues after punctuation variant correction");
+    }
     const auto prefix = store->text;
     preferences.timing = 0;
     check(configureNow() && Commit(apply, service.Get(), context.Get(), client, L"这里有错子。") &&

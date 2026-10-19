@@ -9,6 +9,7 @@
 #include <CorrectionReview.h>
 #include <CorrectionLexicon.h>
 #include "../../WeaselDeployer/CorrectionPreferences.h"
+#include "../LocalDeployment/FixedAutomaticReply.h"
 #include <iostream>
 #include <limits>
 #include <thread>
@@ -64,6 +65,27 @@ int wmain(int argc, wchar_t** argv) {
     RegSetValueExW(key, L"KeptTermsV1", 0, REG_BINARY, malformed, sizeof(malformed));
     Check(!ReadUserLexiconValue(key, loaded) && loaded.terms == value.terms, "corrupt stored data fails without clearing memory");
     Check(WriteUserLexiconValue(key, UserLexicon{}) && ReadUserLexiconValue(key, loaded) && loaded.terms.empty(), "explicit clear persisted");
+    PreferencesRead read;
+    Check(ReadPreferences(path.c_str(), &read).mode == Mode::Off && read.stage == PreferencesStage::Missing,
+        "missing settings are diagnosed without enabling checks");
+    Preferences saved; saved.mode = Mode::Local; saved.automatic.enabled = true;
+    const auto settings = EncodePreferences(saved);
+    RegSetValueExA(key, "SettingsV2", 0, REG_BINARY, reinterpret_cast<const BYTE*>(settings.data()), static_cast<DWORD>(settings.size()));
+    const auto restored = ReadPreferences(path.c_str(), &read);
+    Check(read.stage == PreferencesStage::Ready && read.error == ERROR_SUCCESS &&
+        read.bytes == settings.size() && restored.mode == Mode::Local && restored.automatic.enabled,
+        "settings read diagnostics distinguish a valid enabled configuration");
+    RegSetValueExW(key, L"SettingsV2", 0, REG_BINARY, malformed, sizeof(malformed));
+    Check(ReadPreferences(path.c_str(), &read).mode == Mode::Off && read.stage == PreferencesStage::DecodeFailed,
+        "malformed settings are diagnosed separately from missing settings");
+    const std::string excessive(16385, 'x');
+    RegSetValueExW(key, L"SettingsV2", 0, REG_BINARY, reinterpret_cast<const BYTE*>(excessive.data()), static_cast<DWORD>(excessive.size()));
+    Check(ReadPreferences(path.c_str(), &read).mode == Mode::Off && read.stage == PreferencesStage::InvalidSize,
+        "oversized settings fail closed before decoding");
+    const DWORD wrongType = 1;
+    RegSetValueExW(key, L"SettingsV2", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&wrongType), sizeof(wrongType));
+    Check(ReadPreferences(path.c_str(), &read).mode == Mode::Off && read.stage == PreferencesStage::QueryFailed && read.error != 0,
+        "wrong settings value type retains the registry failure");
     RegCloseKey(key);
     Check(RegDeleteTreeW(HKEY_CURRENT_USER, path.c_str()) == ERROR_SUCCESS, "temporary storage removed");
     std::cout << "Scoped storage checks = " << checks << ", failures = " << failures << '\n';
@@ -108,6 +130,12 @@ int wmain(int argc, wchar_t** argv) {
     return failures ? 1 : 0;
   }
   if (argc != 1) return 2;
+  for (const auto& text : {L"这里有错子", L"这里有错子。", L"这里有错子."})
+    Check(FixedAutomaticVerdict(text) == FixedVerdict::Suggest, "fixed corpus supports word and both full stops");
+  for (const auto& text : {L"这", L"这里", L"这里有", L"这里有错"})
+    Check(FixedAutomaticVerdict(text) == FixedVerdict::NoChange, "fixed prefix preserves word-by-word context");
+  for (const auto& text : {L"", L" 这里有错子。", L"这里有错子..", L"这里有错字。", L"其他文字"})
+    Check(FixedAutomaticVerdict(text) == FixedVerdict::Reject, "fixed corpus remains restricted to compiled samples");
   RequestQueue queue(250, 1000);
   CheckRequest queued; queued.safeText = true; queued.text = L"合成";
   queued.session = 1; queued.version = 1;

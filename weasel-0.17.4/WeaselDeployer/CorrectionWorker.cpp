@@ -6,6 +6,7 @@
 #include "CorrectionWorker.h"
 
 #ifdef WEASELC_LOCAL_TEST_BUILD
+#include "../test/LocalDeployment/FixedAutomaticReply.h"
 namespace {
 // Only the independently named test build can replace HTTP with this compiled
 // transport. The production parser, thresholds, kept terms and reply pipe are
@@ -56,9 +57,8 @@ int RunCorrectionWorker(bool syntheticTest) {
 #ifdef WEASELC_LOCAL_TEST_BUILD
   // Accept compiled prefixes too: a person can commit the sentence in several
   // pieces and pause between them. Valid no-change keeps the owned context.
-  const std::wstring fixedTarget = L"这里有错子。";
-  if (fixed && (input.units > fixedTarget.size() ||
-      fixedTarget.compare(0, input.units, input.text, input.units) != 0)) {
+  const auto verdict = fixed ? FixedAutomaticVerdict(std::wstring(input.text, input.units)) : FixedVerdict::Reject;
+  if (fixed && verdict == FixedVerdict::Reject) {
     record(WorkerStage::Rejected); SecureZeroMemory(&input, sizeof(input)); return 4;
   }
 #endif
@@ -86,7 +86,7 @@ int RunCorrectionWorker(bool syntheticTest) {
       const std::atomic_bool cancelled{false};
       std::unique_ptr<IModelTransport> transport;
 #ifdef WEASELC_LOCAL_TEST_BUILD
-      if (fixed) transport = std::make_unique<FixedAutomaticTransport>(request.text == L"这里有错子。");
+      if (fixed) transport = std::make_unique<FixedAutomaticTransport>(verdict == FixedVerdict::Suggest);
 #endif
       auto client = CreateModelClient(config.provider, std::move(transport));
       record(WorkerStage::RequestStarted);

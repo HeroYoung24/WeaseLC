@@ -3,6 +3,7 @@
 #include "WeaselTSF.h"
 #include <KeyEvent.h>
 #include "CandidateList.h"
+#include <CorrectionPipelineDiagnostics.h>
 
 static weasel::KeyEvent prevKeyEvent;
 static BOOL prevfEaten = FALSE;
@@ -85,6 +86,17 @@ HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
   com_ptr<WeaselTSF> keepAlive = this;
   if (!eaten) return E_POINTER;
   *eaten = FALSE;
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  // Prove entry independently of Capture. Never record the key or modifiers.
+  static thread_local ULONGLONG nextDiagnostic = 0;
+  const auto now = GetTickCount64();
+  if (now >= nextDiagnostic) {
+    correction::FrontendDiagnostic entered;
+    entered.stage = 1; entered.flags = (test ? 1 : 0) | (up ? 2 : 0) | (context ? 4 : 0);
+    correction::SaveFrontendDiagnostic(L"LastKey", entered);
+    nextDiagnostic = now + 1000;
+  }
+#endif
   if (_automatic->Key(context, key, flags, test, up, eaten)) {
     _pendingKeyDown.Reset(); _pendingKeyUp.Reset();
     return S_OK;

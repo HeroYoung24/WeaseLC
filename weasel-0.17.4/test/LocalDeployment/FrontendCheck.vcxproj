@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32"><Configuration>Release</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals"><ProjectGuid>{5E931DEE-7F0E-4E02-9A81-40CB730DD4C0}</ProjectGuid><WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion></PropertyGroup>
+  <Import Project="..\..\weasel.props" />
+  <Import Project="$(VCTargetsPath)Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v143</PlatformToolset><UseDebugLibraries>false</UseDebugLibraries><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <Import Project="$(VCTargetsPath)Microsoft.Cpp.props" />
+  <PropertyGroup><OutDir>$(ProjectDir)..\..\output\FrontendTests\$(Platform)\</OutDir><IntDir>$(ProjectDir)..\..\msbuild\FrontendTests\$(Platform)\</IntDir></PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><LanguageStandard>stdcpp17</LanguageStandard><WarningLevel>Level4</WarningLevel><AdditionalIncludeDirectories>$(ProjectDir)..\..\include</AdditionalIncludeDirectories><PreprocessorDefinitions>WEASELC_LOCAL_TEST_BUILD;WIN32;UNICODE;_UNICODE;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions><RuntimeLibrary>MultiThreaded</RuntimeLibrary></ClCompile>
+    <Link><SubSystem>Console</SubSystem><AdditionalDependencies>advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="FrontendCheck.cpp" /></ItemGroup>
+  <Import Project="$(VCTargetsPath)Microsoft.Cpp.targets" />
+</Project>

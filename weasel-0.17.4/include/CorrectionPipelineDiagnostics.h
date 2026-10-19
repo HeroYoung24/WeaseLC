@@ -17,8 +17,17 @@ struct WorkerDiagnostic {
   DWORD state = 0xffffffff, nativeError = 0, httpStatus = 0, elapsedMs = 0;
   FILETIME time{};
 };
+// LastKey: callback observed (no keycode); LastCommit: production commit delivery;
+// LastGate: Capture entry/settings/target validation. Fixed-size metadata only.
+struct FrontendDiagnostic {
+  DWORD version = 1, stage = 0, units = 0, flags = 0;
+  HRESULT error = S_OK;
+  DWORD source = 0;
+  FILETIME time{};
+};
 static_assert(sizeof(CaptureDiagnostic) == 24, "capture metadata format");
 static_assert(sizeof(WorkerDiagnostic) == 40, "worker metadata format");
+static_assert(sizeof(FrontendDiagnostic) == 32, "frontend metadata format");
 #ifdef WEASELC_LOCAL_TEST_BUILD
 inline constexpr wchar_t kPipelineDiagnosticKey[] = WEASEL_CORRECTION_REG_KEY L"\\Diagnostics";
 template<class T> inline void SavePipelineDiagnostic(const wchar_t* name, T result) {
@@ -33,6 +42,17 @@ inline bool UseFixedAutomaticReply() {
   DWORD value = 0, bytes = sizeof(value);
   return RegGetValueW(HKEY_CURRENT_USER, kPipelineDiagnosticKey, L"UseFixedReplyV1",
       RRF_RT_REG_DWORD, nullptr, &value, &bytes) == ERROR_SUCCESS && value == 1;
+}
+inline void SaveFrontendDiagnostic(const wchar_t* name, FrontendDiagnostic result,
+                                   const wchar_t* path = kPipelineDiagnosticKey) {
+  // A loaded, retired TIP may still receive callbacks during teardown. Never
+  // recreate removed test settings after Purge; the test controller provisions
+  // the diagnostics key before enabling the acceptance test.
+  HKEY key = nullptr;
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, path, 0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) return;
+  GetSystemTimeAsFileTime(&result.time);
+  RegSetValueExW(key, name, 0, REG_BINARY, reinterpret_cast<const BYTE*>(&result), sizeof(result));
+  RegCloseKey(key);
 }
 #endif
 }  // namespace correction

@@ -70,8 +70,8 @@ try:
         winreg.SetValueEx(key, "UseFixedReplyV1", 0, winreg.REG_DWORD, 1)
     for arch in ("x64", "Win32"):
         exe = SOURCE / "output" / "LocalTest" / arch / "WeaselDeployer.exe"
-        samples = [("这里有错子。", 1, 3)]
-        samples += [("这里有错子。"[:units], 0, 1) for units in range(1, 6)]
+        samples = [(text, 1, 3) for text in ("这里有错子。", "这里有错子.", "这里有错子")]
+        samples += [("这里有错子"[:units], 0, 1) for units in range(1, 5)]
         for text, count, state in samples:
             result, meta = invoke(exe, text)
             assert result.returncode == 0 and len(result.stdout) == 1228

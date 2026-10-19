@@ -3,6 +3,7 @@
 #include "EditSession.h"
 #include "ResponseParser.h"
 #include "CandidateList.h"
+#include <CorrectionPipelineDiagnostics.h>
 
 /* Start Composition */
 class CStartCompositionEditSession : public CEditSession {
@@ -495,6 +496,16 @@ HRESULT WeaselTSF::_ApplyCompositionResponse(TfEditCookie cookie, ITfContext* co
                                             const ServerResponse& response) {
   if (!context) return E_INVALIDARG;
   const auto generation = _GetEditGeneration();
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  correction::FrontendDiagnostic delivery;
+  auto recordDelivery = [&](DWORD stage, HRESULT error = S_OK) {
+    if (response.commit.empty()) return;
+    delivery.source = delivery.stage; delivery.stage = stage; delivery.error = error;
+    delivery.units = static_cast<DWORD>(response.commit.size());
+    correction::SaveFrontendDiagnostic(L"LastCommit", delivery);
+  };
+  recordDelivery(1);
+#endif
   const HRESULT result = [&]() -> HRESULT {
     auto current = [&]() { return _IsEditSessionCurrent(generation); };
     auto start = [&]() {
@@ -515,18 +526,36 @@ HRESULT WeaselTSF::_ApplyCompositionResponse(TfEditCookie cookie, ITfContext* co
     if (!response.commit.empty()) {
       HRESULT hr = _IsComposing() ? S_OK : start();
       if (FAILED(hr)) return hr;
+#ifdef WEASELC_LOCAL_TEST_BUILD
+      recordDelivery(2);
+#endif
       if (!current()) return TF_E_DISCONNECTED;
       CInsertTextEditSession insert(this, context, _pComposition, response.commit);
       hr = insert.DoEditSession(cookie);
       if (FAILED(hr)) return hr;
+#ifdef WEASELC_LOCAL_TEST_BUILD
+      recordDelivery(3);
+#endif
       com_ptr<ITfRange> committedRange;
       if (_pComposition) _pComposition->GetRange(&committedRange);
       _committed = TRUE;
       if (!current()) return TF_E_DISCONNECTED;
+#ifdef WEASELC_LOCAL_TEST_BUILD
+      recordDelivery(4);
+#endif
       hr = end(FALSE);
       if (FAILED(hr)) return hr;
+#ifdef WEASELC_LOCAL_TEST_BUILD
+      recordDelivery(5);
+#endif
       if (!current()) return TF_E_DISCONNECTED;
+#ifdef WEASELC_LOCAL_TEST_BUILD
+      recordDelivery(6);
+#endif
       _automatic->Capture(context, cookie, committedRange, response.commit);
+#ifdef WEASELC_LOCAL_TEST_BUILD
+      recordDelivery(7);
+#endif
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
       ProbeCaptureCommit(context, cookie, response.commit);
 #endif
@@ -544,6 +573,9 @@ HRESULT WeaselTSF::_ApplyCompositionResponse(TfEditCookie cookie, ITfContext* co
     if (SUCCEEDED(hr) && current()) _automatic->RecordInput(context, cookie);
     return hr;
   }();
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  if (FAILED(result)) recordDelivery(8, result);
+#endif
   // Do not leave Rime consuming keys for a composition the host cannot update.
   // A reentrant lifecycle change already owns recovery for its generation.
   if (FAILED(result) && _IsEditSessionCurrent(generation)) _RetireComposition();

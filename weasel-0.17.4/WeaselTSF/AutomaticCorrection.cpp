@@ -147,6 +147,13 @@ LRESULT CALLBACK AutomaticCorrection::WindowProc(HWND window, UINT message, WPAR
 }
 void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
                                   ITfRange* committed, const std::wstring& text) try {
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  correction::FrontendDiagnostic gate;
+  gate.stage = 1; gate.units = static_cast<DWORD>(text.size());
+  gate.flags = (context ? 1 : 0) | (committed ? 2 : 0);
+  correction::SaveFrontendDiagnostic(L"LastGate", gate);
+  correction::PreferencesRead preferenceRead;
+#endif
   // Carry forward only text this service just committed at the same tracked
   // insertion point. Never pull earlier document contents into the model.
   std::wstring accumulated;
@@ -165,10 +172,31 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   if (!testing_)
 #endif
-    preferences_ = correction::LoadPreferences();
+    preferences_ = correction::LoadPreferences(
+#ifdef WEASELC_LOCAL_TEST_BUILD
+        &preferenceRead
+#endif
+    );
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  gate.source = static_cast<DWORD>(preferenceRead.stage);
+  gate.error = HRESULT_FROM_WIN32(preferenceRead.error);
+  gate.flags |= (static_cast<DWORD>(preferences_.mode) << 8) |
+      (preferences_.automatic.enabled ? 0x10000 : 0);
+#endif
   if (!preferences_.automatic.enabled || preferences_.mode != correction::Mode::Local ||
       !correction::ValidAutomaticOptions(preferences_.automatic) || !context || !committed ||
-      !correction::ValidAutomaticText(text.c_str(), static_cast<unsigned>(text.size()), 1024)) return;
+      !correction::ValidAutomaticText(text.c_str(), static_cast<unsigned>(text.size()), 1024)) {
+#ifdef WEASELC_LOCAL_TEST_BUILD
+    gate.stage = !preferences_.automatic.enabled || preferences_.mode != correction::Mode::Local ? 2 :
+        !correction::ValidAutomaticOptions(preferences_.automatic) ? 3 : !context || !committed ? 4 : 5;
+    correction::SaveFrontendDiagnostic(L"LastGate", gate);
+#endif
+    return;
+  }
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  gate.stage = 6;
+  correction::SaveFrontendDiagnostic(L"LastGate", gate);
+#endif
   Report(correction::AutomaticStage::Captured);
   context_ = context;
   if (previous && !accumulated.empty()) {
