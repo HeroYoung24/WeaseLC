@@ -5,6 +5,9 @@
 #include <CorrectionProbe.h>
 #include <CorrectionCapture.h>
 #include <CorrectionScope.h>
+#ifdef WEASELC_LOCAL_TEST_BUILD
+#include <CorrectionScopeTrace.h>
+#endif
 
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 namespace correction {
@@ -197,6 +200,15 @@ STDAPI WeaselTSF::OnEndEdit(ITfContext* pContext,
     }
     pEnumTextChanges->Release();
   }
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  if (text_changed && _automatic->ConsumeScopeReadTrace(pContext)) {
+    TF_SELECTION selected{};ULONG count=0;
+    const auto queried=pContext->GetSelection(ecReadOnly,TF_DEFAULT_SELECTION,1,&selected,&count);
+    com_ptr<ITfRange> range;range.Attach(selected.range);
+    if(queried==S_OK && count==1 && range)
+      correction::SaveScopeTrace(correction::TraceInputScope(pContext,ecReadOnly,range,2));
+  }
+#endif
   if (_correctionProbePending && text_changed &&
       correction::SameIdentity(pContext, _correctionProbeContext)) {
     _correctionProbePending = false;

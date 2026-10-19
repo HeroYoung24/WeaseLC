@@ -139,6 +139,25 @@ int wmain(int argc, wchar_t** argv) {
   auto snapshot = [&]() { return call.Exchange(Self(), request, settings, 1000) && settings.status == BrokerStatus::Ok; };
   auto run = [&]() { return call.Exchange(Self(), CheckRequestFor(settings), reply, 3000); };
   check(snapshot() && settings.settings.enabled && settings.settings.timeoutSeconds == 30, "shared public settings snapshot");
+  {
+    BrokerRequest notice;notice.operation=BrokerOperation::Metadata;
+    notice.metadata=BrokerMetadata::ScopeTrace;notice.metadataBytes=40;
+    const DWORD trace[10]{1,1,3,0,0,static_cast<DWORD>(E_FAIL),0,0,0,0};
+    memcpy(notice.data,trace,sizeof(trace));
+    DWORD saved[10]{};DWORD bytes=sizeof(saved);
+    const auto key=root+L"\\Diagnostics";
+    const bool sent=call.SendMetadata(Self(),notice);
+    const auto deadline=GetTickCount64()+1000;
+    while(RegGetValueW(HKEY_CURRENT_USER,key.c_str(),L"LastScopeAfterEnd",RRF_RT_REG_BINARY,nullptr,saved,&bytes)!=ERROR_SUCCESS &&
+        GetTickCount64()<deadline){bytes=sizeof(saved);Sleep(5);}
+    check(sent &&
+        RegGetValueW(HKEY_CURRENT_USER,key.c_str(),L"LastScopeAfterEnd",RRF_RT_REG_BINARY,nullptr,saved,&bytes)==ERROR_SUCCESS &&
+        bytes==sizeof(trace) && !memcmp(trace,saved,sizeof(trace)),"scope trace metadata relays without content");
+    const DWORD invalid=3;memcpy(notice.data+sizeof(DWORD),&invalid,sizeof(invalid));
+    check(call.SendMetadata(Self(),notice) &&
+        RegGetValueW(HKEY_CURRENT_USER,key.c_str(),L"LastScopeAfterEnd",RRF_RT_REG_BINARY,nullptr,saved,&bytes)==ERROR_SUCCESS &&
+        !memcmp(trace,saved,sizeof(trace)),"scope trace rejects unknown phase without replacing evidence");
+  }
   check(run() && reply.status == BrokerStatus::Ok && reply.result.count == 1, "fixed response through production parser and broker");
   check(!call.Exchange(L"C:\\invalid-server.exe", request, reply), "reject mismatched backend executable");
   auto stale = CheckRequestFor(settings); stale.revision--;

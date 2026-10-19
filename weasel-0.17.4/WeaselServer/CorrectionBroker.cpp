@@ -97,6 +97,12 @@ struct CorrectionBroker::Impl {
     DWORD version = 0; memcpy(&version, request.data, sizeof(version));
     if (!MetadataSize(request.metadata) || request.metadataBytes != MetadataSize(request.metadata) ||
         version != 1 || !RegistryRevision(path)) return;
+    if (request.metadata == BrokerMetadata::ScopeTrace) {
+      DWORD phase=0;memcpy(&phase,request.data+sizeof(DWORD),sizeof(phase));
+      const wchar_t* entries[]{L"LastScopeBeforeEnd",L"LastScopeAfterEnd",L"LastScopeReadEdit"};
+      if(phase>2)return;
+      PrepareDiagnostics();Record(entries[phase],request.data,request.metadataBytes);return;
+    }
     const wchar_t* names[]{L"LastKey",L"LastCommit",L"LastGate",L"LastCapture",L"LastAutomatic",L"LastScope"};
     PrepareDiagnostics();
     Record(names[static_cast<unsigned>(request.metadata)], request.data, request.metadataBytes);

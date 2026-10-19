@@ -249,8 +249,13 @@ static bool Run(HMODULE module, bool live, bool local, bool holdout, const std::
   return valid;
 }
 #include "AutomaticChecks.inc"
+#include "ScopeHostChecks.inc"
 
 int wmain(int argc, wchar_t** argv) {
+  if(argc==2 && !wcscmp(argv[1],L"--scope-host")) {
+    if(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)!=S_OK)return 1;
+    const bool valid=RunScopeHostChecks();CoUninitialize();return valid?0:1;
+  }
   if (argc == 2 && !wcscmp(argv[1], L"/correction-worker-selftest")) return RunAutomaticFixtureWorker();
   const bool automatic = argc == 3 && !wcscmp(argv[2], L"--automatic");
   const bool automaticLocal = argc == 4 && !wcscmp(argv[2], L"--automatic-local");

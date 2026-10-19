@@ -4,6 +4,9 @@
 #include "ResponseParser.h"
 #include "CandidateList.h"
 #include <CorrectionPipelineDiagnostics.h>
+#ifdef WEASELC_LOCAL_TEST_BUILD
+#include <CorrectionScopeTrace.h>
+#endif
 
 /* Start Composition */
 class CStartCompositionEditSession : public CEditSession {
@@ -538,6 +541,10 @@ HRESULT WeaselTSF::_ApplyCompositionResponse(TfEditCookie cookie, ITfContext* co
 #endif
       com_ptr<ITfRange> committedRange;
       if (_pComposition) _pComposition->GetRange(&committedRange);
+#ifdef WEASELC_LOCAL_TEST_BUILD
+      if (_automatic->ScopeTraceEnabled())
+        correction::SaveScopeTrace(correction::TraceInputScope(context,cookie,committedRange,0));
+#endif
       _committed = TRUE;
       if (!current()) return TF_E_DISCONNECTED;
 #ifdef WEASELC_LOCAL_TEST_BUILD
@@ -553,6 +560,12 @@ HRESULT WeaselTSF::_ApplyCompositionResponse(TfEditCookie cookie, ITfContext* co
       recordDelivery(6);
 #endif
       _automatic->Capture(context, cookie, committedRange, response.commit);
+#ifdef WEASELC_LOCAL_TEST_BUILD
+      if (_automatic->ScopeTraceEnabled()) {
+        correction::SaveScopeTrace(correction::TraceInputScope(context,cookie,committedRange,1));
+        _automatic->ScheduleScopeReadTrace(context);
+      }
+#endif
 #ifdef WEASELC_LOCAL_TEST_BUILD
       recordDelivery(7);
 #endif

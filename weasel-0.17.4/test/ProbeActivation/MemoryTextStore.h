@@ -192,6 +192,8 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   }
   STDMETHODIMP RequestAttrsAtPosition(LONG, ULONG count, const TS_ATTRID* attributes,
                                       DWORD flags) override {
+    ++attrsAtPositionCalls;
+    if (attrsAtPositionResult != S_OK) return attrsAtPositionResult;
     return RequestSupportedAttrs(flags, count, attributes);
   }
   STDMETHODIMP RequestAttrsTransitioningAtPosition(LONG, ULONG, const TS_ATTRID*, DWORD) override {
@@ -200,6 +202,8 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   STDMETHODIMP RetrieveRequestedAttrs(ULONG count, TS_ATTRVAL* values, ULONG* fetched) override {
     if (!fetched || (count && !values)) return E_POINTER;
     *fetched = 0;
+    ++retrieveAttrsCalls;
+    if (retrieveAttrsResult != S_OK) return retrieveAttrsResult;
     if (count && scopeRequested_) {
       values[0].idAttr = GUID_PROP_INPUTSCOPE;
       values[0].dwOverlapId = 0;
@@ -213,6 +217,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
     return S_OK;
   }
   STDMETHODIMP GetInputScopes(InputScope** scopes, UINT* count) override {
+    ++inputScopeCalls;
     if (!scopes || !count) return E_POINTER;
     *count = 0;
     *scopes = static_cast<InputScope*>(CoTaskMemAlloc(sizeof(InputScope)));
@@ -225,7 +230,9 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   STDMETHODIMP GetXML(BSTR*) override { return E_NOTIMPL; }
   STDMETHODIMP FindNextAttrTransition(LONG, LONG halt, ULONG, const TS_ATTRID*,
       DWORD, LONG* next, BOOL* found, LONG* offset) override {
+    ++attrTransitionCalls;
     if (!next || !found || !offset) return E_POINTER;
+    if (attrTransitionResult != S_OK) return attrTransitionResult;
     *next = halt; *found = FALSE; *offset = 0; return S_OK;
   }
   STDMETHODIMP GetFormattedText(LONG, LONG, IDataObject**) override { return E_NOTIMPL; }
@@ -250,6 +257,9 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   bool refuseWrites = false;  // synthetic refusal; never affects a real host
   DWORD dynamicStatus = 0;
   unsigned textReads = 0;
+  // Fault injection belongs only to this owned host, never the installed TIP.
+  HRESULT attrsAtPositionResult = S_OK, retrieveAttrsResult = S_OK, attrTransitionResult = S_OK;
+  unsigned attrsAtPositionCalls = 0, retrieveAttrsCalls = 0, attrTransitionCalls = 0, inputScopeCalls = 0;
   RECT textRect{100, 100, 110, 120};
   BOOL textClipped = FALSE;
   bool layoutAvailable = true;

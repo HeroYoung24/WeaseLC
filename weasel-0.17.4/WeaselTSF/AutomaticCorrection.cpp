@@ -80,6 +80,9 @@ void AutomaticCorrection::StopWorker() {
   Close(job_); Close(process_); Close(output_);
 }
 void AutomaticCorrection::Cancel() {
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  scopeReadTraceContext_.Release();
+#endif
   ++revision_; ready_ = false; checked_ = false;
   StopWorker(); Hide();
   context_.Release(); range_.Release();
@@ -91,6 +94,12 @@ void AutomaticCorrection::Cancel() {
   caret_ = {};
   if (window_) KillTimer(window_, 1);
 }
+#ifdef WEASELC_LOCAL_TEST_BUILD
+bool AutomaticCorrection::ConsumeScopeReadTrace(ITfContext* context) {
+  if(!correction::SameIdentity(scopeReadTraceContext_,context))return false;
+  scopeReadTraceContext_.Release();return true;
+}
+#endif
 bool AutomaticCorrection::EnsureWindow() {
   if (window_) return true;
   WNDCLASSW wc{};

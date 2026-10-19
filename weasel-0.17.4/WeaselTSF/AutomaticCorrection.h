@@ -23,6 +23,11 @@ class AutomaticCorrection {
   HRESULT Edit(TfEditCookie, ITfContext*, bool apply, bool* applied);
   bool Focused(ITfContext* target = nullptr) const;
   void Poll();
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  bool ScopeTraceEnabled() const { return preferences_.mode==correction::Mode::Local && preferences_.automatic.enabled; }
+  void ScheduleScopeReadTrace(ITfContext* context) { scopeReadTraceContext_=context; }
+  bool ConsumeScopeReadTrace(ITfContext* context);
+#endif
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   void ConfigureTest(const correction::Preferences&, TfClientId, const std::wstring& worker);
   bool InjectTest(const correction::AutomaticReply&);
@@ -72,6 +77,9 @@ class AutomaticCorrection {
   HANDLE process_ = nullptr, job_ = nullptr, output_ = nullptr;
   bool ready_ = false, checked_ = false, downTab_ = false;
   bool polling_ = false, requesting_ = false;
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  com_ptr<ITfContext> scopeReadTraceContext_;
+#endif
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   bool testing_ = false;
   bool testingBroker_ = false;

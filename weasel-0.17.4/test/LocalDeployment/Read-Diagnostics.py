@@ -102,7 +102,8 @@ except (OSError, ValueError) as error:
 
 formats = {"LastKey": "<6IQ", "LastCommit": "<6IQ", "LastGate": "<6IQ",
            "LastCapture": "<4IQ", "LastWorker": "<8IQ", "LastAutomatic": "<4IQ",
-           "LastScope": "<5I", "LastBrokerCheck": "<7I2Q2I"}
+           "LastScope": "<5I", "LastBrokerCheck": "<7I2Q2I",
+           "LastScopeBeforeEnd": "<10I", "LastScopeAfterEnd": "<10I", "LastScopeReadEdit": "<10I"}
 try:
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, root + r"\Diagnostics") as key:
         for name, layout in formats.items():
