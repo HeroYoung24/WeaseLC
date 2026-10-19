@@ -250,8 +250,10 @@ static bool Run(HMODULE module, bool live, bool local, bool holdout, const std::
 }
 #include "AutomaticChecks.inc"
 #include "ScopeHostChecks.inc"
+#include "NativeScopeChecks.inc"
 
 int wmain(int argc, wchar_t** argv) {
+  if(argc==2 && !wcscmp(argv[1],L"--native-scope"))return RunNativeScopeChecks()?0:1;
   if(argc==2 && !wcscmp(argv[1],L"--scope-host")) {
     if(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)!=S_OK)return 1;
     const bool valid=RunScopeHostChecks();CoUninitialize();return valid?0:1;

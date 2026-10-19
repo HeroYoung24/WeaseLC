@@ -14,6 +14,7 @@ static_assert(sizeof(ScopeTrace)==40,"bounded scope trace metadata");
 inline ScopeTrace TraceInputScope(ITfContext* context,TfEditCookie cookie,ITfRange* range,DWORD phase) {
   ScopeTrace trace;trace.phase=phase;
   if(!context || !range)return trace;
+  trace.flags|=NativeTextContextEvidence(context)<<8;
   CComPtr<ITfContext> rangeContext;
   trace.rangeContext=range->GetContext(&rangeContext);
   if(trace.rangeContext==S_OK && SameIdentity(context,rangeContext))trace.flags|=1;

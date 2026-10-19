@@ -160,6 +160,24 @@ static bool TestCorrectionScope() {
   input.scopes={static_cast<InputScope>(10000)};
   check(read().stage==ScopeStage::UnsupportedScope,"unknown enum remains blocked");
   input.scopes={IS_TEXT,IS_TEXT};check(static_cast<bool>(read()),"all text multi-scope allowed");
+  const auto verified=+[](ITfContext*,ITfRange*){return true;};
+  auto verifiedLocal=[&]{return InspectInputScope(&context,1,&range,ScopeUse::LocalCommit,verified);};
+  property.result=E_FAIL;property.type=VT_EMPTY;
+  check(verifiedLocal().stage==ScopeStage::NativePlainText && static_cast<bool>(verifiedLocal()),
+      "independently verified native plaintext allows only local commits after empty E_FAIL");
+  check(InspectInputScope(&context,1,&range,ScopeUse::NearbyText,verified).stage==ScopeStage::PropertyValue,
+      "native plaintext does not grant nearby or arbitrary history access");
+  check(InspectInputScope(&context,1,&range,ScopeUse::LocalCommit,nullptr).stage==ScopeStage::PropertyValue,
+      "missing native verifier never broadens an unavailable scope");
+  property.result=S_FALSE;check(verifiedLocal().stage==ScopeStage::PropertyValue,"S_FALSE does not enter native fallback");
+  property.result=TF_E_NOLOCK;check(verifiedLocal().stage==ScopeStage::PropertyValue,"invalid lock does not enter native fallback");
+  property.result=E_FAIL;property.type=VT_UNKNOWN;
+  check(verifiedLocal().stage==ScopeStage::PropertyValue,"partial interface from failed query does not enter native fallback");
+  property.result=S_OK;input.scopes={IS_PRIVATE};
+  check(verifiedLocal().stage==ScopeStage::ProtectedScope,"explicit private scope defeats native verification");
+  property.result=E_FAIL;property.type=VT_EMPTY;context.flags=TF_SD_READONLY;
+  check(verifiedLocal().stage==ScopeStage::ReadOnly,"readonly status defeats native verification");context.flags=0;
+  property.result=S_OK;property.type=VT_UNKNOWN;input.scopes={IS_TEXT};
   FocusView view;context.activeView=&view;
   view.window=CreateWindowExW(0,L"EDIT",L"",WS_POPUP|ES_PASSWORD,0,0,100,100,nullptr,nullptr,nullptr,nullptr);
   check(view.window && read().stage==ScopeStage::PasswordStyle,"password window style overrides ordinary text scope");

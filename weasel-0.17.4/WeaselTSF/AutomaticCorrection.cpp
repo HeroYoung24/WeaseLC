@@ -261,6 +261,7 @@ bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
     Report(scope == correction::ProbeStatus::ProtectedField ? correction::AutomaticStage::ProtectedField :
         correction::AutomaticStage::ScopeUnavailable); return false;
   }
+  if(details.stage==correction::ScopeStage::NativePlainText)correction::SaveScopeDiagnostic(details);
   if (revision != revision_ || !ReadExact(target, cookie, text) || revision != revision_) {
     Report(correction::AutomaticStage::TextChanged); return false;
   }

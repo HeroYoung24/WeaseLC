@@ -198,6 +198,7 @@ static bool TestRetainedCandidate(HMODULE module, IClassFactory* factory) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+  if(argc==2 && std::wstring(argv[1])==L"--scope-policy")return TestCorrectionScope()?0:1;
   if (argc == 2 && std::wstring(argv[1]) == L"--registration-checks")
     return RegistrationTests::Run() ? 0 : 1;
   if (argc < 3 || argc > 4 ||

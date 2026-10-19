@@ -40,7 +40,8 @@ while($clock.Elapsed.TotalSeconds -lt $Seconds){
     foreach($name in @('LastScopeBeforeEnd','LastScopeAfterEnd','LastScopeReadEdit')) {
       $v=Read-Metadata $key $name 40;$scopeTrace[$name]=$null
       if($v) {
-        $entry=[ordered]@{phase=[BitConverter]::ToUInt32($v,4);flags=[BitConverter]::ToUInt32($v,8)}
+        $traceFlags=[BitConverter]::ToUInt32($v,8)
+        $entry=[ordered]@{phase=[BitConverter]::ToUInt32($v,4);flags=$traceFlags;nativeFlags=(($traceFlags -shr 8) -band 255);nativeVerified=((($traceFlags -shr 8) -band 255) -eq 255)}
         $fields=@('rangeContext','selectionLock','original','start','end','selection','enumeration')
         for($i=0;$i -lt $fields.Count;$i++){$entry[$fields[$i]]=('0x{0:X8}' -f [BitConverter]::ToUInt32($v,12+4*$i))}
         $scopeTrace[$name]=$entry

@@ -3,13 +3,14 @@
 #include <msctf.h>
 #include <inputscope.h>
 #include <atlcomcli.h>
+#include "CorrectionNativeScope.h"
 
 namespace correction {
 enum class ScopeStage : DWORD {
   NotRun, Ready, MissingTarget, PasswordStyle, PropertyQuery, MissingProperty,
   PropertyValue, ValueType, ScopeInterface, ScopeQuery, EmptyScopes,
   TooManyScopes, UnsupportedScope, ProtectedScope, KeyboardUnavailable,
-  KeyboardDisabled, EmptyContext, ReadOnly, StatusUnavailable
+  KeyboardDisabled, EmptyContext, ReadOnly, StatusUnavailable, NativePlainText
 };
 enum class ScopeUse { NearbyText, LocalCommit };
 struct ScopeDiagnostic {
@@ -18,11 +19,12 @@ struct ScopeDiagnostic {
   HRESULT error = S_OK;
   LONG scope = 0;
   DWORD variantType = VT_EMPTY;
-  explicit operator bool() const { return stage == ScopeStage::Ready; }
+  explicit operator bool() const { return stage == ScopeStage::Ready || stage == ScopeStage::NativePlainText; }
 };
 static_assert(sizeof(ScopeDiagnostic) == 20, "Scope diagnostic wire size");
 // A default scope is usable only for this IME's tracked local commits, never as
-// permission to read arbitrary nearby/history text. Query failures stay closed.
+// permission to read arbitrary nearby/history text. An unavailable property
+// needs independent verification of a focused native multiline plaintext field.
 inline ScopeDiagnostic CommittedInputState(ITfContext* context) {
   ScopeDiagnostic result;
   if (!context) { result.stage = ScopeStage::MissingTarget; result.error = E_POINTER; return result; }
@@ -50,7 +52,8 @@ inline ScopeDiagnostic CommittedInputState(ITfContext* context) {
   result.stage = ScopeStage::Ready; result.error = S_OK; return result;
 }
 inline ScopeDiagnostic InspectInputScope(ITfContext* context, TfEditCookie cookie, ITfRange* range,
-                                          ScopeUse use = ScopeUse::NearbyText) {
+                                          ScopeUse use = ScopeUse::NearbyText,
+                                          NativeScopeVerifier native = NativeTextRangeVerified) {
   ScopeDiagnostic result;
   if (!context || !range) { result.stage = ScopeStage::MissingTarget; result.error = E_POINTER; return result; }
   CComPtr<ITfContextView> view;
@@ -79,6 +82,13 @@ inline ScopeDiagnostic InspectInputScope(ITfContext* context, TfEditCookie cooki
     if (result.error != S_OK || !input) result.stage = ScopeStage::ScopeInterface;
   }
   VariantClear(&value);
+  // Some otherwise usable native editors cannot expose GUID_PROP_INPUTSCOPE.
+  // Verify a separate, narrow plaintext-control capability; never turn an
+  // arbitrary failed/missing property or a protected scope into permission.
+  if(use==ScopeUse::LocalCommit && result.stage==ScopeStage::PropertyValue &&
+      result.error==E_FAIL && result.variantType==VT_EMPTY && native && native(context,range)) {
+    result.stage=ScopeStage::NativePlainText;result.error=S_OK;return result;
+  }
   if (result.stage != ScopeStage::NotRun || !input) return result;
   InputScope* scopes = nullptr; UINT count = 0;
   result.error = input->GetInputScopes(&scopes, &count);
@@ -108,13 +118,13 @@ inline bool ProtectedScope(const ScopeDiagnostic& result) {
 inline const wchar_t* ScopeStageText(ScopeStage stage, bool chinese) {
   const wchar_t* zh[] = {L"尚无范围记录",L"允许的输入范围",L"无目标范围",L"密码输入框",L"范围属性查询失败",
     L"宿主未提供范围属性",L"范围属性读取失败",L"范围属性类型不可用",L"范围接口不可用",
-    L"范围类型查询失败",L"范围类型为空",L"范围类型数量异常",L"宿主类型不在文本白名单",L"私密/密码/PIN 字段",L"输入许可状态不可确认",L"宿主禁止输入",L"无有效输入字段",L"只读字段",L"宿主状态不可用"};
+    L"范围类型查询失败",L"范围类型为空",L"范围类型数量异常",L"宿主类型不在文本白名单",L"私密/密码/PIN 字段",L"输入许可状态不可确认",L"宿主禁止输入",L"无有效输入字段",L"只读字段",L"宿主状态不可用",L"已核验原生纯文本编辑框"};
   const wchar_t* en[] = {L"No scope record",L"Allowed input scope",L"Missing target",L"Password control",
     L"Scope property query failed",L"Scope property absent",L"Scope property read failed",L"Scope value type unavailable",
     L"Scope interface unavailable",L"Scope query failed",L"Empty scope list",L"Oversized scope list",
-    L"Scope not in text allowlist",L"Private/password/PIN field",L"Keyboard state unavailable",L"Keyboard disabled",L"Empty input context",L"Read-only field",L"Host status unavailable"};
+    L"Scope not in text allowlist",L"Private/password/PIN field",L"Keyboard state unavailable",L"Keyboard disabled",L"Empty input context",L"Read-only field",L"Host status unavailable",L"Verified native plaintext editor"};
   const auto index = static_cast<unsigned>(stage);
-  if (index > static_cast<unsigned>(ScopeStage::StatusUnavailable)) return chinese ? L"未知" : L"unknown";
+  if (index > static_cast<unsigned>(ScopeStage::NativePlainText)) return chinese ? L"未知" : L"unknown";
   return chinese ? zh[index] : en[index];
 }
 }  // namespace correction
