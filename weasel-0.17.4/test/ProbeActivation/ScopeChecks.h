@@ -49,11 +49,47 @@ class ScopeProperty : public ITfReadOnlyProperty {
   }
   STDMETHODIMP GetContext(ITfContext**) override { return E_NOTIMPL; }
 };
-class ScopeContext : public CompositionContext {
+class ScopeCompartment : public ITfCompartment {
+ public:
+  ULONG refs=1;
+  HRESULT result=S_FALSE;
+  VARTYPE type=VT_EMPTY;
+  LONG value=0;
+  STDMETHODIMP QueryInterface(REFIID id,void** out) override {
+    *out=nullptr;if(id!=IID_IUnknown && id!=IID_ITfCompartment)return E_NOINTERFACE;
+    *out=this;AddRef();return S_OK;
+  }
+  STDMETHODIMP_(ULONG) AddRef() override {return ++refs;}
+  STDMETHODIMP_(ULONG) Release() override {return --refs;}
+  STDMETHODIMP GetValue(VARIANT* out) override {VariantInit(out);out->vt=type;if(type==VT_I4)out->lVal=value;return result;}
+  STDMETHODIMP SetValue(TfClientId,const VARIANT*) override {return E_NOTIMPL;}
+};
+class ScopeContext : public CompositionContext, public ITfCompartmentMgr {
  public:
   explicit ScopeContext(CompositionRange& range) : CompositionContext(range) {}
   HRESULT result = S_OK;
+  HRESULT statusResult=S_OK,compartmentResult=S_OK;
+  DWORD flags=0;
+  bool provideKeyboard=true,missingCompartment=false;
+  ScopeCompartment disabled,empty;
   ITfReadOnlyProperty* property = nullptr;
+  STDMETHODIMP QueryInterface(REFIID id,void** out) override {
+    if(id==IID_ITfCompartmentMgr){*out=nullptr;if(!provideKeyboard)return E_NOINTERFACE;
+      *out=static_cast<ITfCompartmentMgr*>(this);AddRef();return S_OK;}
+    return CompositionContext::QueryInterface(id,out);
+  }
+  STDMETHODIMP_(ULONG) AddRef() override {return CompositionContext::AddRef();}
+  STDMETHODIMP_(ULONG) Release() override {return CompositionContext::Release();}
+  STDMETHODIMP GetStatus(TF_STATUS* out) override {*out={};out->dwDynamicFlags=flags;return statusResult;}
+  STDMETHODIMP GetCompartment(REFGUID id,ITfCompartment** out) override {
+    *out=nullptr;if(compartmentResult!=S_OK || missingCompartment)return compartmentResult;
+    if(id==GUID_COMPARTMENT_KEYBOARD_DISABLED)*out=&disabled;
+    else if(id==GUID_COMPARTMENT_EMPTYCONTEXT)*out=&empty;
+    else return E_INVALIDARG;
+    (*out)->AddRef();return S_OK;
+  }
+  STDMETHODIMP ClearCompartment(TfClientId,REFGUID) override {return E_NOTIMPL;}
+  STDMETHODIMP EnumCompartments(IEnumGUID**) override {return E_NOTIMPL;}
   STDMETHODIMP GetAppProperty(REFGUID id,ITfReadOnlyProperty** out) override {
     *out=nullptr;
     if (id != GUID_PROP_INPUTSCOPE) return E_INVALIDARG;
@@ -95,10 +131,31 @@ static bool TestCorrectionScope() {
   input.scopes.assign(65,IS_TEXT);check(read().stage==ScopeStage::TooManyScopes,"oversized list rejected before scanning");
   input.scopes={IS_DEFAULT};
   check(read().stage==ScopeStage::UnsupportedScope && read().scope==IS_DEFAULT,"default scope diagnosed without broadening access");
+  auto local=[&]{return InspectInputScope(&context,1,&range,ScopeUse::LocalCommit);};
+  check(static_cast<bool>(local()),"explicit default scope allowed for tracked local IME commits only");
+  input.scopes={IS_DEFAULT,IS_TEXT};check(static_cast<bool>(local()),"default and text combination allowed for local commits");
+  input.scopes={IS_DEFAULT,IS_URL};check(local().stage==ScopeStage::UnsupportedScope,"default cannot override URL scope");
+  input.scopes={IS_DEFAULT};
+  property.type=VT_EMPTY;check(local().stage==ScopeStage::ValueType,"missing input type is not treated as explicit default");property.type=VT_UNKNOWN;
+  context.provideKeyboard=false;check(local().stage==ScopeStage::KeyboardUnavailable,"unknown keyboard manager remains blocked");context.provideKeyboard=true;
+  context.compartmentResult=E_FAIL;check(local().stage==ScopeStage::KeyboardUnavailable,"keyboard compartment failure remains blocked");context.compartmentResult=S_OK;
+  context.missingCompartment=true;check(local().stage==ScopeStage::KeyboardUnavailable,"null keyboard compartment rejected");context.missingCompartment=false;
+  context.disabled.result=S_OK;context.disabled.type=VT_I4;context.disabled.value=1;
+  context.empty.result=S_OK;context.empty.type=VT_I4;context.empty.value=0;
+  check(local().stage==ScopeStage::KeyboardDisabled,"empty-context false cannot override keyboard-disabled true");
+  context.disabled.value=0;context.empty.value=1;
+  check(local().stage==ScopeStage::EmptyContext,"empty context independently blocks local commits");context.empty.value=0;
+  context.disabled.type=VT_BSTR;check(local().stage==ScopeStage::KeyboardUnavailable,"unexpected keyboard value type remains blocked");
+  context.disabled.type=VT_EMPTY;context.disabled.result=E_FAIL;
+  check(local().stage==ScopeStage::KeyboardUnavailable,"failed empty keyboard value is not treated as unset");
+  context.disabled.result=S_FALSE;context.empty.result=S_FALSE;context.empty.type=VT_EMPTY;
+  check(static_cast<bool>(local()),"documented unset keyboard flags allow ordinary local commits");
+  context.flags=TF_SD_READONLY;check(local().stage==ScopeStage::ReadOnly,"readonly context rejected before scope read");context.flags=0;
+  context.statusResult=E_FAIL;check(local().stage==ScopeStage::StatusUnavailable,"unknown host status remains blocked");context.statusResult=S_OK;
   input.scopes={IS_URL};check(read().stage==ScopeStage::UnsupportedScope && read().scope==IS_URL,"URL scope remains blocked");
   for(auto scope:{IS_PASSWORD,IS_NUMERIC_PASSWORD,IS_PRIVATE,IS_NUMERIC_PIN,IS_ALPHANUMERIC_PIN,IS_ALPHANUMERIC_PIN_SET}) {
     input.scopes={IS_TEXT,IS_DEFAULT,scope};
-    check(ProtectedScope(read()) && read().scope==scope,"protected scope overrides text and unsupported scopes");
+    check(ProtectedScope(read()) && read().scope==scope && ProtectedScope(local()),"protected scope overrides text and default scopes in both policies");
   }
   input.scopes={static_cast<InputScope>(10000)};
   check(read().stage==ScopeStage::UnsupportedScope,"unknown enum remains blocked");
@@ -107,7 +164,7 @@ static bool TestCorrectionScope() {
   view.window=CreateWindowExW(0,L"EDIT",L"",WS_POPUP|ES_PASSWORD,0,0,100,100,nullptr,nullptr,nullptr,nullptr);
   check(view.window && read().stage==ScopeStage::PasswordStyle,"password window style overrides ordinary text scope");
   if(view.window)DestroyWindow(view.window);context.activeView=nullptr;
-  check(input.refs==1 && property.refs==1 && context.references==1 && range.references==1 && view.refs==1,
+  check(input.refs==1 && property.refs==1 && context.references==1 && range.references==1 && view.refs==1 && context.disabled.refs==1 && context.empty.refs==1,
       "scope checks balance all COM references without reading text");
   std::cout<<"Scope checks = "<<checks<<", failures = "<<failures<<'\n';return failures==0;
 }

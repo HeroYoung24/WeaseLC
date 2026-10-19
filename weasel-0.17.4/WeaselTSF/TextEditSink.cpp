@@ -30,8 +30,9 @@ WeaselProbeGetCapturedResult(correction::ProbeResult* result) {
 namespace {
 bool IsOrdinaryTextScope(ITfContext* context, TfEditCookie cookie,
                          ITfRange* selected, correction::ProbeStatus& status,
-                         correction::ScopeDiagnostic* details = nullptr) {
-  const auto result = correction::InspectInputScope(context, cookie, selected);
+                         correction::ScopeDiagnostic* details = nullptr,
+                         correction::ScopeUse use = correction::ScopeUse::NearbyText) {
+  const auto result = correction::InspectInputScope(context, cookie, selected, use);
   if (details) *details = result;
   status = result ? correction::ProbeStatus::Readable : correction::ProtectedScope(result)
       ? correction::ProbeStatus::ProtectedField : correction::ProbeStatus::ScopeUnavailable;
@@ -93,7 +94,7 @@ correction::ProbeResult ProbeContext(ITfContext* context,
 bool WeaselTSF::_CorrectionSafeScope(ITfContext* context, TfEditCookie cookie, ITfRange* range,
                                     correction::ProbeStatus* reason, correction::ScopeDiagnostic* details) {
   correction::ProbeStatus status = correction::ProbeStatus::ScopeUnavailable;
-  const bool safe = context && range && IsOrdinaryTextScope(context, cookie, range, status, details);
+  const bool safe = IsOrdinaryTextScope(context, cookie, range, status, details, correction::ScopeUse::LocalCommit);
   if (reason) *reason = safe ? correction::ProbeStatus::Readable : status;
   return safe;
 }

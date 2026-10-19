@@ -10,6 +10,7 @@
 #include <CorrectionProbe.h>
 #include <CorrectionHintView.h>
 #include <CorrectionDeployment.h>
+#include <CorrectionPipelineDiagnostics.h>
 
 namespace {
 constexpr ULONGLONG kLifetime = 10000;
@@ -184,6 +185,14 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   started_ = GetTickCount64();
   SettingsTime(settingsWrite_);
   if (!Validate(cookie, context)) { Cancel(); return; }
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  // Validate has read back the exact owned range under the host's edit lock.
+  correction::CaptureDiagnostic captured;
+  captured.totalUnits = static_cast<DWORD>(text_.size());
+  captured.addedUnits = static_cast<DWORD>(text.size());
+  captured.retainedUnits = captured.totalUnits - captured.addedUnits;
+  correction::SavePipelineDiagnostic(L"LastCapture", captured);
+#endif
   if (!EnsureWindow()) { Report(correction::AutomaticStage::LayoutUnavailable); Cancel(); return; }
   RecordInput(context, cookie);
   if (!context_) return;

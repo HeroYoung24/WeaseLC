@@ -1,8 +1,32 @@
 #include <windows.h>
 #include <CorrectionAutomatic.h>
 #include <CorrectionLexicon.h>
+#include <CorrectionPipelineDiagnostics.h>
 #include "CorrectionPreferences.h"
 #include "CorrectionWorker.h"
+
+#ifdef WEASELC_LOCAL_TEST_BUILD
+namespace {
+// Only the independently named test build can replace HTTP with this compiled
+// transport. The production parser, thresholds, kept terms and reply pipe are
+// still exercised. No public UI option or network listener is introduced.
+class FixedAutomaticTransport final : public correction::IModelTransport {
+ public:
+  explicit FixedAutomaticTransport(bool typo) : typo_(typo) {}
+  correction::TransportResult Post(const correction::ModelConfig&, const correction::Endpoint&,
+      const std::string&, const std::atomic_bool&) override {
+    correction::TransportResult result;
+    result.state = correction::State::NoSuggestion; result.httpStatus = 200;
+    result.body = typo_
+      ? R"({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\"version\":1,\"decision\":\"suggestions\",\"suggestions\":[{\"original\":\"\u9519\u5b50\",\"replacement\":\"\u9519\u5b57\",\"reason\":\"fixture\",\"score\":0.99}]}"}}]})"
+      : R"({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\"version\":1,\"decision\":\"no_change\",\"suggestions\":[]}"}}]})";
+    return result;
+  }
+ private:
+  bool typo_;
+};
+}  // namespace
+#endif
 
 int RunCorrectionWorker(bool syntheticTest) {
   using namespace correction;
@@ -13,6 +37,31 @@ int RunCorrectionWorker(bool syntheticTest) {
       read != sizeof(input) || input.magic != 0x31434357 || input.version != 1 ||
       !ValidAutomaticText(input.text, input.units, 1024)) return 2;
   AutomaticReply reply;
+  const auto started = GetTickCount64();
+  WorkerDiagnostic diagnostic; diagnostic.units = input.units;
+  auto record = [&](WorkerStage stage) {
+#ifdef WEASELC_LOCAL_TEST_BUILD
+    if (!syntheticTest) {
+      diagnostic.stage = stage;
+      diagnostic.elapsedMs = static_cast<DWORD>(GetTickCount64() - started);
+      SavePipelineDiagnostic(L"LastWorker", diagnostic);
+    }
+#endif
+  };
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  const bool fixed = !syntheticTest && UseFixedAutomaticReply();
+  diagnostic.provider = fixed ? 1 : 0;
+#endif
+  record(WorkerStage::Received);
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  // Accept compiled prefixes too: a person can commit the sentence in several
+  // pieces and pause between them. Valid no-change keeps the owned context.
+  const std::wstring fixedTarget = L"这里有错子。";
+  if (fixed && (input.units > fixedTarget.size() ||
+      fixedTarget.compare(0, input.units, input.text, input.units) != 0)) {
+    record(WorkerStage::Rejected); SecureZeroMemory(&input, sizeof(input)); return 4;
+  }
+#endif
   try {
     auto preferences = syntheticTest ? Preferences{} : LoadPreferences();
     if (syntheticTest) {
@@ -35,13 +84,22 @@ int RunCorrectionWorker(bool syntheticTest) {
       request.session = 1; request.version = 1; request.safeText = true;
       request.source = Source::CommittedText; request.text.assign(input.text, input.units);
       const std::atomic_bool cancelled{false};
-      auto client = CreateModelClient(config.provider);
+      std::unique_ptr<IModelTransport> transport;
+#ifdef WEASELC_LOCAL_TEST_BUILD
+      if (fixed) transport = std::make_unique<FixedAutomaticTransport>(request.text == L"这里有错子。");
+#endif
+      auto client = CreateModelClient(config.provider, std::move(transport));
+      record(WorkerStage::RequestStarted);
       auto result = client->Check(config, request, cancelled);
+      diagnostic.state = static_cast<DWORD>(result.state);
+      diagnostic.nativeError = result.nativeError; diagnostic.httpStatus = result.httpStatus;
+      record(WorkerStage::Returned);
       // This test must receive an actual valid no-change response, rather than
       // confusing a transport/parse failure with the zero-suggestion contract.
       if (syntheticTest && request.text == L"这里有错" && result.state != State::NoSuggestion) return 6;
       if (!syntheticTest && !LoadUserLexicon(lexicon)) return 5;
       FilterKeptTerms(lexicon, request, result);
+      diagnostic.state = static_cast<DWORD>(result.state);
       if (result.state == State::Suggestions) for (const auto& suggestion : result.suggestions) {
         if (reply.count == 8 || suggestion.original.size() > 32 || suggestion.replacement.size() > 32) continue;
         auto& item = reply.items[reply.count++];
@@ -53,10 +111,11 @@ int RunCorrectionWorker(bool syntheticTest) {
         memcpy(item.replacement, suggestion.replacement.data(), item.replacementUnits * sizeof(WCHAR));
       }
     }
-  } catch (...) { reply = {}; }
+  } catch (...) { reply = {}; diagnostic.state = static_cast<DWORD>(State::InvalidResponse); }
   SecureZeroMemory(&input, sizeof(input));
   DWORD written = 0;
   const bool ok = WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), &reply, sizeof(reply), &written, nullptr) && written == sizeof(reply);
+  record(ok ? WorkerStage::Written : WorkerStage::Rejected);
   SecureZeroMemory(&reply, sizeof(reply));
   return ok ? 0 : 3;
 }

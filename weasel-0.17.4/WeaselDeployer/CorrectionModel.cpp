@@ -271,7 +271,10 @@ class ChatClient final : public IModelClient {
         result.nativeError = response.nativeError; result.httpStatus = response.httpStatus;
         return result;
       }
-      return ParseChatResponse(response.body, config, request);
+      auto result = ParseChatResponse(response.body, config, request);
+      result.httpStatus = response.httpStatus;
+      result.nativeError = response.nativeError;
+      return result;
     } catch (...) { return Tagged(State::InvalidResponse, request); }
   }
  private:

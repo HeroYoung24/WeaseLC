@@ -140,7 +140,7 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
       IS_NUMERIC_PIN, IS_ALPHANUMERIC_PIN, IS_ALPHANUMERIC_PIN_SET};
   for (unsigned field = 0; field < (local ? 1U : _countof(fieldScopes)); ++field) {
     ComPtr<MemoryTextStore> store;
-    store.Attach(new MemoryTextStore(fieldScopes[field], field != 1));
+    store.Attach(new MemoryTextStore(local ? IS_DEFAULT : fieldScopes[field], field != 1));
     ComPtr<ITfDocumentMgr> document; ComPtr<ITfContext> context;
     TfEditCookie cookie = 0;
     if (manager->CreateDocumentMgr(&document) != S_OK || document->CreateContext(client, 0,
@@ -158,6 +158,36 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     auto noKey = [&]() { BOOL eaten = TRUE; return key(service.Get(), context.Get(), VK_TAB, 0, 1, &eaten) == S_FALSE && !eaten; };
     check(configureNow(), "automatic configuration bound to test client only");
     check(Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"), "production commit with automatic capture");
+    if (field == 3) {
+      check(inject(service.Get(),&reply)==S_OK && state().first,"explicit default scope supports local committed-text suggestions");
+      check(edit([&](TfEditCookie ec){return preedit(service.Get(),context.Get(),ec,L"ni");}),"default-scope preedit starts beside correction target");
+      BOOL eaten=FALSE;
+      check(key(service.Get(),context.Get(),VK_TAB,0,1,&eaten)==S_OK && eaten && store->text==L"这里有错子。ni",
+          "default-scope Tab query preserves original text");
+      check(key(service.Get(),context.Get(),VK_TAB,0,0,&eaten)==S_OK && eaten && store->text==L"这里有错字。ni",
+          "default-scope Tab corrects tracked text and preserves pinyin");
+      key(service.Get(),context.Get(),VK_TAB,0,2,&eaten);
+      check(Commit(apply,service.Get(),context.Get(),client,L"你好") && store->text==L"这里有错字。你好",
+          "default-scope input continues normally after correction");
+      configureNow();Commit(apply,service.Get(),context.Get(),client,L"这里有错子。");inject(service.Get(),&reply);
+      ComPtr<ITfCompartmentMgr> compartments;context.As(&compartments);
+      ComPtr<ITfCompartment> disabled,empty;
+      const bool available=compartments && compartments->GetCompartment(GUID_COMPARTMENT_KEYBOARD_DISABLED,&disabled)==S_OK &&
+          compartments->GetCompartment(GUID_COMPARTMENT_EMPTYCONTEXT,&empty)==S_OK && disabled && empty;
+      VARIANT value;VariantInit(&value);value.vt=VT_I4;value.lVal=1;
+      const bool marked=available && disabled->SetValue(client,&value)==S_OK;
+      value.lVal=0;const bool emptyFalse=available && empty->SetValue(client,&value)==S_OK;
+      check(marked && emptyFalse && noKey() && !state().first,"default scope still rejects disabled input even when empty-context flag is false");
+      if(available)disabled->SetValue(client,&value);
+      configureNow();Commit(apply,service.Get(),context.Get(),client,L"这里有错子。");inject(service.Get(),&reply);
+      value.lVal=1;const bool noField=available && empty->SetValue(client,&value)==S_OK;
+      check(noField && noKey() && !state().first,"default scope rejects an empty input context");
+      value.lVal=0;if(available)empty->SetValue(client,&value);
+      configureNow();Commit(apply,service.Get(),context.Get(),client,L"这里有错子。");inject(service.Get(),&reply);
+      store->ChangeScope(IS_PRIVATE);
+      check(noKey() && !state().first,"default-to-private transition cancels before accepting a suggestion");
+      invalidate(service.Get());document->Pop(TF_POPF_ALL);continue;
+    }
     if (field) {
       check(inject(service.Get(), &reply) == S_FALSE && noKey() && store->text == L"这里有错子。",
           "missing/default/private/password/PIN field never shows, consumes Tab or changes text");

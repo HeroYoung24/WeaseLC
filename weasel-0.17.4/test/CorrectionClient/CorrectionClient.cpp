@@ -200,6 +200,7 @@ int wmain(int argc, wchar_t** argv) {
   auto result = client->Check(config, request, cancelled);
   Check(result.state == State::Suggestions && result.suggestions.size() == 1 &&
       result.suggestions[0].start == 3 && result.session == 77 && result.version == 5, "valid correction and tags");
+  Check(result.httpStatus == 200 && result.nativeError == 0, "successful transport metadata preserved");
   auto sent = json::parse(observed->sent).as_object();
   Check(!sent.at("stream").as_bool() && sent.at("response_format").as_object().at("type") == "json_object", "nonstream JSON request");
   Check(sent.at("messages").as_array().size() == 2, "instruction and data separate");
