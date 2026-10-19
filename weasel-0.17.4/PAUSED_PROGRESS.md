@@ -1,5 +1,7 @@
 # 开发进度（更新：2026-10-19）
 
+> **2026-10-19 当前：兼容版实机范围与部分缓存累计已通过，进入固定提示/Tab 验收。** 用户确认两次中文上屏正常；LastScope19、nativeFlags255，LastCapture 显示保留2单元再新增1单元，证明范围逐字回读与累计发生。普通“你好/再见”被合成固定响应白名单按设计拒绝（Broker InvalidRequest5），不能据此称模型链路通过，也不能声称两完整短语连续保留。保留当前测试记事本与安装，同版下一步新行输入精确夹具“这里有错子。”并输入 ni 检查成功响应、提示及 Tab；未启动真实模型。详见 [实机结果](docs/NATIVE_PLAINTEXT_COMPATIBILITY_2026-10-19.md)。
+
 > **2026-10-19 当前：重启后兼容修复 a1a3826 已部署，等待两次中文上屏验证。** 已清理旧测试文件，UAC 安装与注册回退演练成功；实际安装 200 文件哈希、原版基线、双架构中文后端及普通/MSIX 固定响应预检通过。专用后端 PID 6080、协调器 PID 4580，新记事本 `WeaseLC-native-compat-2026-10-19.txt` PID 25860、观察器 PID 7100。仅启用合成固定响应，未启动真实模型。先实际分别上屏“你好”“再见”，保留窗口，检查 NativePlainText(19)、nativeFlags 与 LastCapture 累计，再测试固定提示及 Tab；实机上文/提示尚未宣称通过。当前会话见 `output/LocalTest/broker-acceptance-active-2026-10-19.json`。以下暂停状态及旧部署信息为历史记录。
 
 > **用户已明确要求暂缓释放 DLL，先保存进度；部署与测试暂停。** 兼容修复提交 `a1a3826`，新包 `output/LocalTest/Deployment` 的 200 文件校验通过，尚未部署。当前独立 COM/TIP 已回退、专用进程退出、纠错关闭，普通测试设置/旧程序保留，原版基线一致。已发现 ChatGPT/Explorer 加载旧 DLL，不强制卸载。恢复时先让用户释放旧模块，再复核占用 → Purge/安装兼容包 → 检查 NativePlainText、nativeFlags、LastCapture → 固定提示/Tab；不要重新构建旧对照版或直接重复失败的整句测试。完整证据与边界见 [兼容修复报告](docs/NATIVE_PLAINTEXT_COMPATIBILITY_2026-10-19.md)，会话信息见 `output/LocalTest/broker-acceptance-active-2026-10-19.json`。
