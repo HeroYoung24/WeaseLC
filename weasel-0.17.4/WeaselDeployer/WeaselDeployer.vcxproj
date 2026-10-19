@@ -204,6 +204,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CorrectionWorker.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="CorrectionBrokerEntry.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="..\WeaselServer\CorrectionBroker.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="CorrectionModel.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="CorrectionPreferences.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="CorrectionLexicon.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>

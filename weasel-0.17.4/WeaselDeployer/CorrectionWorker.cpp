@@ -6,27 +6,7 @@
 #include "CorrectionWorker.h"
 
 #ifdef WEASELC_LOCAL_TEST_BUILD
-#include "../test/LocalDeployment/FixedAutomaticReply.h"
-namespace {
-// Only the independently named test build can replace HTTP with this compiled
-// transport. The production parser, thresholds, kept terms and reply pipe are
-// still exercised. No public UI option or network listener is introduced.
-class FixedAutomaticTransport final : public correction::IModelTransport {
- public:
-  explicit FixedAutomaticTransport(bool typo) : typo_(typo) {}
-  correction::TransportResult Post(const correction::ModelConfig&, const correction::Endpoint&,
-      const std::string&, const std::atomic_bool&) override {
-    correction::TransportResult result;
-    result.state = correction::State::NoSuggestion; result.httpStatus = 200;
-    result.body = typo_
-      ? R"({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\"version\":1,\"decision\":\"suggestions\",\"suggestions\":[{\"original\":\"\u9519\u5b50\",\"replacement\":\"\u9519\u5b57\",\"reason\":\"fixture\",\"score\":0.99}]}"}}]})"
-      : R"({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\"version\":1,\"decision\":\"no_change\",\"suggestions\":[]}"}}]})";
-    return result;
-  }
- private:
-  bool typo_;
-};
-}  // namespace
+#include "../test/LocalDeployment/FixedAutomaticTransport.h"
 #endif
 
 int RunCorrectionWorker(bool syntheticTest) {

@@ -14,13 +14,6 @@
 
 namespace {
 constexpr ULONGLONG kLifetime = 10000;
-bool SettingsTime(FILETIME& time) {
-  HKEY key = nullptr;
-  if (RegOpenKeyExW(HKEY_CURRENT_USER, correction::kRegistryKey, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return false;
-  const auto status = RegQueryInfoKeyW(key, nullptr, nullptr, nullptr, nullptr, nullptr,
-      nullptr, nullptr, nullptr, nullptr, nullptr, &time);
-  RegCloseKey(key); return status == ERROR_SUCCESS;
-}
 bool Same(ITfRange* a, ITfRange* b, TfEditCookie cookie, TfAnchor aa, TfAnchor bb) {
   LONG difference = 1;
   return (aa == TF_ANCHOR_START ? a->CompareStart(cookie, b, bb, &difference)
@@ -82,6 +75,7 @@ void AutomaticCorrection::Report(correction::AutomaticStage stage, correction::F
 }
 void AutomaticCorrection::Hide() { if (window_) ShowWindow(window_, SW_HIDE); }
 void AutomaticCorrection::StopWorker() {
+  brokerCall_.Reset();
   // Closing this job terminates only the child we created, including on teardown.
   Close(job_); Close(process_); Close(output_);
 }
@@ -170,13 +164,18 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   }
   Cancel();
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
-  if (!testing_)
+  if (!testing_ || testingBroker_)
 #endif
-    preferences_ = correction::LoadPreferences(
+    if (!LoadBrokerPreferences()) {
+      preferences_ = correction::Preferences{};
 #ifdef WEASELC_LOCAL_TEST_BUILD
-        &preferenceRead
+      preferenceRead.stage = correction::PreferencesStage::QueryFailed;
+      preferenceRead.error = ERROR_NOT_READY;
 #endif
-    );
+    }
+#ifdef WEASELC_LOCAL_TEST_BUILD
+    else { preferenceRead.stage = correction::PreferencesStage::Ready; preferenceRead.error = ERROR_SUCCESS; }
+#endif
 #ifdef WEASELC_LOCAL_TEST_BUILD
   gate.source = static_cast<DWORD>(preferenceRead.stage);
   gate.error = HRESULT_FROM_WIN32(preferenceRead.error);
@@ -211,7 +210,6 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
       range_->SetGravity(cookie, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD) != S_OK) { Report(correction::AutomaticStage::RangeMismatch); Cancel(); return; }
   text_ = std::move(accumulated);
   started_ = GetTickCount64();
-  SettingsTime(settingsWrite_);
   if (!Validate(cookie, context)) { Cancel(); return; }
 #ifdef WEASELC_LOCAL_TEST_BUILD
   // Validate has read back the exact owned range under the host's edit lock.
@@ -226,13 +224,13 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   if (!context_) return;
   nextSettings_ = started_ + 500;
   nextValidation_ = started_;
-  SetTimer(window_, 1, 40, nullptr);
+  if (!SetTimer(window_, 1, 40, nullptr)) { Report(correction::AutomaticStage::LayoutUnavailable); Cancel(); }
 } catch (...) { Cancel(); }
 bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
   if (!context_ || !correction::SameIdentity(context, context_) || !range_) {
     Report(correction::AutomaticStage::RangeMismatch); return false;
   }
-  if (GetTickCount64() - started_ >= kLifetime) { Report(correction::AutomaticStage::Expired); return false; }
+  if (GetTickCount64() - started_ >= Lifetime()) { Report(correction::AutomaticStage::Expired); return false; }
   if (!Focused()) return false;
   if (!SettingsCurrent()) { Report(correction::AutomaticStage::SettingsChanged); return false; }
   const auto revision = revision_;
@@ -418,7 +416,7 @@ void AutomaticCorrection::Position(const RECT& caret) {
   Refresh();
 }
 void AutomaticCorrection::Refresh() {
-  if (ready_ && GetTickCount64() - started_ >= kLifetime) { Cancel(); return; }
+  if (ready_ && GetTickCount64() - started_ >= Lifetime()) { Cancel(); return; }
   if (!ready_ || !window_) { Hide(); return; }
   if (!positionValid_) { Report(correction::AutomaticStage::LayoutUnavailable); Hide(); return; }
   if (!Focused()) { Hide(); return; }
@@ -457,9 +455,11 @@ void AutomaticCorrection::Refresh() {
   RECT previous{}; GetWindowRect(window_, &previous);
   if (EqualRect(&previous, &placed) && IsWindowVisible(window_)) return;
   InvalidateRect(window_, nullptr, TRUE);
+  if (!SetWindowPos(window_, HWND_TOPMOST, placed.left, placed.top, placed.right - placed.left,
+      placed.bottom - placed.top, SWP_NOACTIVATE | SWP_SHOWWINDOW) || !IsWindowVisible(window_)) {
+    Report(correction::AutomaticStage::LayoutUnavailable); Hide(); return;
+  }
   Report(correction::AutomaticStage::Shown);
-  SetWindowPos(window_, HWND_TOPMOST, placed.left, placed.top, placed.right - placed.left,
-      placed.bottom - placed.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, bool test, bool up, BOOL* eaten) try {
   if (!eaten) return false;
@@ -522,6 +522,20 @@ bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
   ready_ = true; Report(correction::AutomaticStage::Ready); return true;
 }
 bool AutomaticCorrection::StartWorker() {
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  if (!testing_ || testingBroker_)
+#endif
+  {
+    correction::BrokerRequest request; request.operation = correction::BrokerOperation::Check;
+    request.requestId = ++brokerRequestId_; request.revision = brokerRevision_;
+    request.input.units = static_cast<DWORD>(text_.size());
+    memcpy(request.input.text, text_.data(), text_.size() * sizeof(WCHAR));
+    const bool sent = brokerCall_.Begin(BrokerServer(), request);
+    SecureZeroMemory(&request, sizeof(request)); return sent;
+  }
+#ifndef WEASEL_CORRECTION_PROBE_BUILD
+  return false;
+#else
   // Pipes remain below the 4 KiB capacity, so the one initial write cannot wait
   // for model execution. Only the worker's explicit three standard handles inherit.
   SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
@@ -596,6 +610,7 @@ bool AutomaticCorrection::StartWorker() {
   }
   process_ = process.hProcess; process.hProcess = nullptr;
   cleanup(); return true;
+#endif
 }
 void AutomaticCorrection::Poll() {
   if (polling_) return;
@@ -603,22 +618,39 @@ void AutomaticCorrection::Poll() {
   struct Guard { bool& flag; ~Guard() { flag = false; } } guard{polling_};
   const auto now = GetTickCount64();
   if (!Focused()) { ResetKeys(); Cancel(); return; }
-  if (now - started_ >= kLifetime) { Report(correction::AutomaticStage::Expired); Cancel(); return; }
+  if (now - started_ >= Lifetime()) { Report(correction::AutomaticStage::Expired); Cancel(); return; }
   if (now >= nextValidation_) {
     if (!Request(false, context_)) { Cancel(); return; }
     nextValidation_ = now + 120;
   }
   if (now >= nextSettings_) {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
-    if (!testing_)
+    if (!testing_ || testingBroker_)
 #endif
       if (!SettingsCurrent()) { Cancel(); return; }
     nextSettings_ = now + 500;
   }
-  if (!checked_ && !ready_ && !process_ && now - started_ >= preferences_.automatic.debounce) {
+  if (!checked_ && !ready_ && !process_ && !brokerCall_.Active() && now - started_ >= preferences_.automatic.debounce) {
     if (!Request(false, context_)) { Cancel(); return; }
     if (!StartWorker()) { Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
     Report(correction::AutomaticStage::WorkerStarted);
+  }
+  if (brokerCall_.Active()) {
+    correction::BrokerReply reply;
+    const int state = brokerCall_.Poll(reply);
+    if (state < 0) { Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
+    if (state == 1) {
+      const bool valid = reply.status == correction::BrokerStatus::Ok &&
+          reply.settings.revision == brokerRevision_ &&
+          (reply.modelState == static_cast<DWORD>(correction::State::Suggestions) ||
+           reply.modelState == static_cast<DWORD>(correction::State::NoSuggestion) ||
+           reply.modelState == static_cast<DWORD>(correction::State::Filtered));
+      if (!valid) { SecureZeroMemory(&reply, sizeof(reply)); Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
+      const bool accepted = AcceptReply(reply.result);
+      SecureZeroMemory(&reply, sizeof(reply));
+      if (!accepted) { Report(correction::AutomaticStage::InvalidReply); Cancel(); return; }
+      if (!Request(false, context_)) { Cancel(); return; }
+    }
   }
   if (process_) {
     DWORD available = 0;
@@ -646,18 +678,51 @@ void AutomaticCorrection::Poll() {
 }
 bool AutomaticCorrection::SettingsCurrent() const {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
-  if (testing_) return true;
+  if (testing_ && !testingBroker_) return true;
 #endif
-  FILETIME current{};
-  return SettingsTime(current) && CompareFileTime(&current, &settingsWrite_) == 0;
+  correction::BrokerRequest request; correction::BrokerReply reply; correction::BrokerCall call;
+  return call.Exchange(BrokerServer(), request, reply) &&
+      reply.status == correction::BrokerStatus::Ok && reply.settings.enabled &&
+      reply.settings.revision == brokerRevision_;
+}
+bool AutomaticCorrection::LoadBrokerPreferences() {
+  correction::BrokerRequest request; correction::BrokerReply reply; correction::BrokerCall call;
+  if (!call.Exchange(BrokerServer(), request, reply) ||
+      reply.status != correction::BrokerStatus::Ok) return false;
+  const auto& saved = reply.settings;
+  correction::Preferences value;
+  value.mode = saved.enabled ? correction::Mode::Local : correction::Mode::Off;
+  value.timing = saved.timing;
+  auto& a = value.automatic; a.enabled = saved.enabled != 0; a.tab = saved.tab != 0;
+  a.side = saved.side; a.gap = saved.gap; a.width = saved.width; a.font = saved.font; a.debounce = saved.debounce;
+  if (!saved.revision || saved.enabled > 1 || saved.tab > 1 || saved.timing > 1 ||
+      saved.timeoutSeconds < 2 || saved.timeoutSeconds > 60 || !std::isfinite(saved.threshold) ||
+      saved.threshold < 0 || saved.threshold > 1 || !correction::ValidAutomaticOptions(a)) return false;
+  value.local.timeoutSeconds = saved.timeoutSeconds;
+  value.local.useCustomThreshold = true; value.local.minimumScore = saved.threshold;
+  preferences_ = std::move(value); brokerRevision_ = saved.revision;
+  return true;
+}
+ULONGLONG AutomaticCorrection::Lifetime() const {
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  if (testing_ && !testingBroker_) return kLifetime;
+#endif
+  return (std::max)(kLifetime, preferences_.local.timeoutSeconds * 1000ULL + preferences_.automatic.debounce + 2000);
+}
+std::wstring AutomaticCorrection::BrokerServer() const {
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  if (testing_ && testingBroker_) return testWorker_;
+#endif
+  return correction::CorrectionBrokerServerPath();
 }
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 void AutomaticCorrection::ConfigureTest(const correction::Preferences& preferences, TfClientId client, const std::wstring& worker) {
   Cancel(); ResetKeys(); testing_ = true; testFocused_ = true;
-  preferences_ = preferences; testClient_ = client; testWorker_ = worker;
+  testingBroker_ = worker.compare(0, 7, L"broker:") == 0;
+  preferences_ = preferences; testClient_ = client; testWorker_ = testingBroker_ ? worker.substr(7) : worker;
 }
 bool AutomaticCorrection::InjectTest(const correction::AutomaticReply& reply) {
-  if (!testing_ || !context_ || !AcceptReply(reply)) return false;
+  if (!testing_ || testingBroker_ || !context_ || !AcceptReply(reply)) return false;
   if (!Request(false, context_)) { Cancel(); return false; }
   Refresh(); return true;
 }
@@ -683,6 +748,11 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticState(
   if (!service || !ready || !window) return E_INVALIDARG;
   auto& automatic = static_cast<WeaselTSF*>(service)->Automatic();
   *ready = automatic.TestReady(); *window = automatic.TestWindow(); return S_OK;
+}
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticDiagnostic(
+    ITfTextInputProcessorEx* service, correction::AutomaticDiagnostic* result) {
+  if (!service || !result) return E_INVALIDARG;
+  *result = static_cast<WeaselTSF*>(service)->Automatic().DiagnosticTest(); return S_OK;
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticPoll(ITfTextInputProcessorEx* service) {
   if (!service) return E_INVALIDARG;

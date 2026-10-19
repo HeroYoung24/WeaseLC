@@ -7,6 +7,9 @@
 #include <CorrectionHintView.h>
 #include <dbghelp.h>
 #include "ContextAlias.h"
+#include "../../WeaselServer/CorrectionBroker.h"
+#include "../LocalDeployment/FixedAutomaticTransport.h"
+#include <CorrectionDiagnostics.h>
 #pragma comment(lib, "dbghelp.lib")
 static bool SaveOwnedHint(HWND window, const wchar_t* filename) {
   RECT rect{}; if (!GetClientRect(window, &rect) || IsRectEmpty(&rect)) return false;
@@ -384,6 +387,7 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     preferences.automatic.enabled = true; preferences.automatic.tab = true;
     invalidate(service.Get()); document->Pop(TF_POPF_ALL);
   }
+  #include "BrokerChecks.inc"
   const RECT work{-1920, 0, 0, 1080};
   if (!local) {
     ComPtr<ITfTextInputProcessorEx> temporary;

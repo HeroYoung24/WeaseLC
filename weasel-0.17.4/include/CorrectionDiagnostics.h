@@ -2,6 +2,9 @@
 #include "CorrectionProbe.h"
 #include "CorrectionFocus.h"
 #include "CorrectionScope.h"
+#if defined(WEASELTSF_EXPORTS) && !defined(WEASEL_CORRECTION_PROBE_BUILD)
+#include "CorrectionBrokerWire.h"
+#endif
 
 namespace correction {
 enum class AutomaticStage : DWORD {
@@ -28,6 +31,11 @@ inline ScopeDiagnostic LoadScopeDiagnostic(const wchar_t* path = kDiagnosticKey)
   return result;
 }
 inline void SaveScopeDiagnostic(const ScopeDiagnostic& result, const wchar_t* path = kDiagnosticKey) {
+#if defined(WEASELTSF_EXPORTS) && !defined(WEASEL_CORRECTION_PROBE_BUILD)
+  if (!wcscmp(path, kDiagnosticKey)) {
+    RelayCorrectionMetadata(BrokerMetadata::Scope, &result, sizeof(result)); return;
+  }
+#endif
   const auto previous = LoadScopeDiagnostic(path);
   if (previous.stage == result.stage && previous.error == result.error &&
       previous.scope == result.scope && previous.variantType == result.variantType) return;
@@ -37,6 +45,12 @@ inline void SaveScopeDiagnostic(const ScopeDiagnostic& result, const wchar_t* pa
   RegCloseKey(key);
 }
 inline void SaveAutomaticDiagnostic(AutomaticDiagnostic result, const wchar_t* path = kDiagnosticKey) {
+#if defined(WEASELTSF_EXPORTS) && !defined(WEASEL_CORRECTION_PROBE_BUILD)
+  if (!wcscmp(path, kDiagnosticKey)) {
+    GetSystemTimeAsFileTime(&result.time);
+    RelayCorrectionMetadata(BrokerMetadata::Automatic, &result, sizeof(result)); return;
+  }
+#endif
   HKEY key = nullptr;
   if (RegCreateKeyExW(HKEY_CURRENT_USER, path, 0, nullptr, 0,
       KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return;

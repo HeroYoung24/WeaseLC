@@ -1,5 +1,6 @@
 target("WeaselTSF")
   set_kind("shared")
+  add_defines("WEASELTSF_EXPORTS")
   add_files("./*.cpp", "WeaselTSF.def")
   add_files("../WeaselDeployer/CorrectionPreferences.cpp")
   add_rules("add_rcfiles", "use_weaselconstants")

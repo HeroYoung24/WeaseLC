@@ -1,6 +1,7 @@
 target("WeaselDeployer")
   set_kind("binary")
   add_files("./*.cpp")
+  add_files("../WeaselServer/CorrectionBroker.cpp")
   add_rules("add_rcfiles", "use_weaselconstants", "subwin")
   add_links("imm32", "kernel32", "rime")
   add_deps("WeaselIPC", "RimeWithWeasel")

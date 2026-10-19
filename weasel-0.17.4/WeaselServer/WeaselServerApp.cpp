@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "WeaselServerApp.h"
 #include <filesystem>
+#include <CorrectionBrokerProcess.h>
 
 WeaselServerApp::WeaselServerApp()
     : m_handler(std::make_unique<RimeWithWeaselHandler>(&m_ui)),
@@ -16,6 +17,12 @@ int WeaselServerApp::Run() {
   if (!m_server.Start())
     return -1;
 
+  // Launch from the normal backend, so packaged document hosts cannot change
+  // the child's registry identity. Model faults stay outside the Rime process.
+  correction::BrokerProcess correctionBroker;
+  try { correctionBroker.Start((install_dir() / L"WeaselDeployer.exe").wstring()); }
+  catch (...) { correctionBroker.Stop(); }
+
   // This fork has no signed release feed. Do not initialize the upstream
   // updater: it could replace the experimental build with another product.
   m_ui.Create(m_server.GetHWnd());
@@ -27,6 +34,8 @@ int WeaselServerApp::Run() {
   tray_icon.Refresh();
 
   int ret = m_server.Run();
+
+  correctionBroker.Stop();
 
   m_handler->Finalize();
   m_ui.Destroy();

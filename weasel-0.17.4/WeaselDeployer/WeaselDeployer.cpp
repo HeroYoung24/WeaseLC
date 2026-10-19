@@ -13,6 +13,7 @@
 CAppModule _Module;
 
 static int Run(LPTSTR lpCmdLine);
+int RunCorrectionBroker();
 
 int APIENTRY _tWinMain(HINSTANCE hInstance,
                        HINSTANCE hPrevInstance,
@@ -22,6 +23,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
   std::wstring option;
   if (!weasel::ParseSingleOption(GetCommandLineW(), option) || !weasel::DeployerOption(option)) return 2;
   lpCmdLine = option.data();
+  if (!wcscmp(L"/correction-broker", lpCmdLine)) return RunCorrectionBroker();
   if (!wcscmp(L"/correction-worker", lpCmdLine)) return RunCorrectionWorker();
   if (!wcscmp(L"/correction-worker-selftest", lpCmdLine)) return RunCorrectionWorker(true);
   if (!wcscmp(L"/rime-learning-selftest", lpCmdLine)) {

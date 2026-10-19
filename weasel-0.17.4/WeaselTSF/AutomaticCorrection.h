@@ -1,6 +1,7 @@
 #pragma once
 #include <CorrectionAutomatic.h>
 #include <CorrectionDiagnostics.h>
+#include <CorrectionBrokerClient.h>
 #include "../WeaselDeployer/CorrectionPreferences.h"
 
 class WeaselTSF;
@@ -43,6 +44,9 @@ class AutomaticCorrection {
   void Hide();
   TfClientId Client() const;
   bool SettingsCurrent() const;
+  bool LoadBrokerPreferences();
+  ULONGLONG Lifetime() const;
+  std::wstring BrokerServer() const;
   void ReadPosition(ITfContext*, TfEditCookie);
   void Report(correction::AutomaticStage, correction::FocusResult = {}) const;
   mutable correction::AutomaticDiagnostic diagnostic_;
@@ -57,7 +61,8 @@ class AutomaticCorrection {
   correction::Preferences preferences_;
   correction::AutomaticReply::Item item_{};
   ULONGLONG revision_ = 0, started_ = 0, nextSettings_ = 0, nextValidation_ = 0;
-  FILETIME settingsWrite_{};
+  ULONGLONG brokerRevision_ = 0, brokerRequestId_ = 0;
+  correction::BrokerCall brokerCall_;
   HWND window_ = nullptr;
   RECT caret_{};
   UINT anchorDpi_ = 96;
@@ -68,6 +73,7 @@ class AutomaticCorrection {
   bool polling_ = false, requesting_ = false;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   bool testing_ = false;
+  bool testingBroker_ = false;
   bool testFocused_ = true;
   TfClientId testClient_ = TF_CLIENTID_NULL;
   std::wstring testWorker_;
