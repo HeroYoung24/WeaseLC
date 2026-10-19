@@ -426,11 +426,15 @@ void AutomaticCorrection::Refresh() {
   RECT anchor = caret_;
   if (owner_->_IsComposing()) {
     RECT candidate{};
-    if (owner_->_cand->WindowRect(candidate)) anchor = candidate;
+    bool requireCandidate = true;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
-    else if (!testing_)
+    requireCandidate = !testing_ || strictCandidateTest_;
 #endif
-      { Report(correction::AutomaticStage::CandidateUnavailable); Hide(); return; }  // Respect apps that own the candidate UI themselves.
+    // Keep the failure branch outside #ifdef: production must retain the else.
+    if (owner_->_cand->WindowRect(candidate)) anchor = candidate;
+    else if (requireCandidate) {
+      Report(correction::AutomaticStage::CandidateUnavailable); Hide(); return;
+    }
   }
   if (anchor.bottom <= anchor.top) { Hide(); return; }
   MONITORINFO monitor{sizeof(monitor)};
@@ -716,8 +720,15 @@ std::wstring AutomaticCorrection::BrokerServer() const {
   return correction::CorrectionBrokerServerPath();
 }
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
+bool AutomaticCorrection::CandidateTest(DWORD mode, RECT& position) {
+  if (!testing_) return false;
+  strictCandidateTest_ = mode != 0;
+  const bool result = owner_->_cand->TestPresentation(mode, position);
+  Refresh(); return result;
+}
 void AutomaticCorrection::ConfigureTest(const correction::Preferences& preferences, TfClientId client, const std::wstring& worker) {
   Cancel(); ResetKeys(); testing_ = true; testFocused_ = true;
+  strictCandidateTest_ = false;
   testingBroker_ = worker.compare(0, 7, L"broker:") == 0;
   preferences_ = preferences; testClient_ = client; testWorker_ = testingBroker_ ? worker.substr(7) : worker;
 }
@@ -753,6 +764,12 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticDiagnostic(
     ITfTextInputProcessorEx* service, correction::AutomaticDiagnostic* result) {
   if (!service || !result) return E_INVALIDARG;
   *result = static_cast<WeaselTSF*>(service)->Automatic().DiagnosticTest(); return S_OK;
+}
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticCandidate(
+    ITfTextInputProcessorEx* service, DWORD mode, RECT* position) {
+  if (!service || !position || mode > 3) return E_INVALIDARG;
+  auto& automatic = static_cast<WeaselTSF*>(service)->Automatic();
+  return automatic.CandidateTest(mode, *position) ? S_OK : S_FALSE;
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticPoll(ITfTextInputProcessorEx* service) {
   if (!service) return E_INVALIDARG;

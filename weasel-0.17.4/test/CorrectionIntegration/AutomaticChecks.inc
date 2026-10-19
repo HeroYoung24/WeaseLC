@@ -387,6 +387,7 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     preferences.automatic.enabled = true; preferences.automatic.tab = true;
     invalidate(service.Get()); document->Pop(TF_POPF_ALL);
   }
+  #include "VisualChecks.inc"
   #include "BrokerChecks.inc"
   const RECT work{-1920, 0, 0, 1080};
   if (!local) {

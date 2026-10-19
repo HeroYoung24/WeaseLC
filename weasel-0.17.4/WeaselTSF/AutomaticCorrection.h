@@ -32,6 +32,7 @@ class AutomaticCorrection {
   void FocusTest(bool focused) { testFocused_ = focused; }
   DWORD ProcessTest() const { return process_ ? GetProcessId(process_) : 0; }
   correction::AutomaticDiagnostic DiagnosticTest() const { return diagnostic_; }
+  bool CandidateTest(DWORD mode, RECT& position);
 #endif
  private:
   static LRESULT CALLBACK WindowProc(HWND, UINT, WPARAM, LPARAM);
@@ -75,6 +76,7 @@ class AutomaticCorrection {
   bool testing_ = false;
   bool testingBroker_ = false;
   bool testFocused_ = true;
+  bool strictCandidateTest_ = false;
   TfClientId testClient_ = TF_CLIENTID_NULL;
   std::wstring testWorker_;
 #endif

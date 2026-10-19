@@ -67,6 +67,9 @@ class CCandidateList : public ITfIntegratableCandidateListUIElement,
   weasel::UIStyle& style();
   bool WindowRect(RECT& rect) const { return _pbShow && _ui->WindowRect(rect); }
   UINT WindowDpi() const { return _ui->WindowDpi(); }
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  bool TestPresentation(DWORD mode, RECT& position);
+#endif
 
  private:
   // void _UpdateOwner();

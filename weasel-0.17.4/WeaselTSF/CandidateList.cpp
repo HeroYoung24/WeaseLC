@@ -8,6 +8,33 @@
 using namespace std;
 using namespace weasel;
 
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+bool CCandidateList::TestPresentation(DWORD mode, RECT& position) {
+  if (mode == 0) { _ui->Destroy(); _pbShow = TRUE; return true; }
+  if (mode == 2 || mode == 3) {
+    _pbShow = mode == 2 ? FALSE : TRUE; _ui->Hide(); return true;
+  }
+  _ui->Destroy(); _pbShow = TRUE;
+  auto& style = _ui->style(); style = UIStyle{};
+  style.font_face = style.label_font_face = style.comment_font_face = L"Microsoft YaHei";
+  style.font_point = style.label_font_point = style.comment_font_point = 14;
+  style.back_color = 0xfff7f7f7; style.text_color = style.candidate_text_color = 0xff202020;
+  style.label_text_color = style.comment_text_color = 0xff505050;
+  style.hilited_candidate_back_color = 0xffe8d5c0; style.hilited_candidate_text_color = 0xff202020;
+  style.margin_x = style.margin_y = 10; style.spacing = style.candidate_spacing = 6;
+  style.border = 1; style.border_color = 0xff888888;
+  // Never parent the synthetic panel to a real application's foreground HWND.
+  if (!_ui->Create(nullptr)) return false;
+  Context context; context.preedit.str = L"ni";
+  context.cinfo.candies = {Text(L"你"),Text(L"呢"),Text(L"尼")};
+  context.cinfo.labels = {Text(L"1"),Text(L"2"),Text(L"3")};
+  context.cinfo.comments.resize(3);
+  Status status; status.composing = true;
+  _ui->UpdateInputPosition(position); _ui->Update(context, status); _ui->Show();
+  return WindowRect(position) && !IsRectEmpty(&position);
+}
+#endif
+
 CCandidateList::CCandidateList(WeaselTSF* pTextService)
     : _ui(make_unique<UI>()), _tsf(pTextService), _pbShow(TRUE) {
   _cRef = 1;
