@@ -1,5 +1,7 @@
 # 开发进度（更新：2026-10-19）
 
+> **用户已明确要求暂缓释放 DLL，先保存进度；部署与测试暂停。** 兼容修复提交 `a1a3826`，新包 `output/LocalTest/Deployment` 的 200 文件校验通过，尚未部署。当前独立 COM/TIP 已回退、专用进程退出、纠错关闭，普通测试设置/旧程序保留，原版基线一致。已发现 ChatGPT/Explorer 加载旧 DLL，不强制卸载。恢复时先让用户释放旧模块，再复核占用 → Purge/安装兼容包 → 检查 NativePlainText、nativeFlags、LastCapture → 固定提示/Tab；不要重新构建旧对照版或直接重复失败的整句测试。完整证据与边界见 [兼容修复报告](docs/NATIVE_PLAINTEXT_COMPATIBILITY_2026-10-19.md)，会话信息见 `output/LocalTest/broker-acceptance-active-2026-10-19.json`。
+
 > **2026-10-19 最新：实机确认输入类型属性持续不可用，已实现严格的原生纯文本兼容路径，尚未部署。** 三阶段均为范围/属性上下文同一、选区锁 S_OK，原范围/起点/终点/选区 GetValue 全 E_FAIL，枚举 S_OK；排除跨上下文、锁和结束组合时机的猜测。新逻辑只在 LocalCommit 的 E_FAIL/VT_EMPTY 情况下，以真实焦点、同进程/线程、视图包含、明确 Edit/RichEdit、多行、启用、无密码/只读、RichEdit 纯文本模式独立核验；不覆盖明确私密/PIN 类型，不扩展任意历史读取。双架构各 50 范围策略、15 真实控件、81 TSF 对照通过，正式目标构建通过。用户已关闭记事本，诊断版已注销/专用进程退出、原版基线一致，纠错关闭。已发现 ChatGPT/Explorer 加载旧 DLL，部分系统进程不可枚举，未强制卸载。下一次释放后部署新兼容包，先检查 NativePlainText/LastCapture/nativeFlags，再固定提示/Tab。详见 [兼容修复及实机证据](docs/NATIVE_PLAINTEXT_COMPATIBILITY_2026-10-19.md)。
 
 > **2026-10-19 当前：接口对照版 1af35b5 已安装，等待两次上屏采样。** 用户重启 ChatGPT 后全进程旧模块零占用/不可读，UAC 清理与安装/注册回退演练通过，实际 200 文件哈希与原版基线通过。独立后端 PID 6320、协调器 PID 22064；双架构合成中文与已安装协调器普通/MSIX 固定响应预检通过，预检诊断清空。仅固定响应开启，未运行真实模型；新记事本 `WeaseLC-scope-interface-2026-10-19.txt` 已打开，观察器 PID 28120。本轮只要求实际分别上屏“你好”“再见”并保持前台 5 秒，切回搜狗后保留窗口；不要求提示/Tab，随后读取 BeforeEnd/AfterEnd/ReadEdit 的范围身份、锁、原范围/起点/终点/选区/枚举返回值。会话入口仍为 `output/LocalTest/broker-acceptance-active-2026-10-19.json`。E_FAIL 未宣称修复，不混入上轮失败记录。
