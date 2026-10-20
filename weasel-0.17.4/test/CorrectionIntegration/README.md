@@ -1,5 +1,9 @@
 # 真实 TSF 文本写入与模型回路
 
+2026-10-20：当前源码两架构 `--automatic` 各293项通过，含真实协调器在途请求的导航/生命周期取消及后续请求恢复。
+
+`CorrectionIntegration.exe <匹配架构的weaselProbe.dll> --automatic-broker-http <回环chat/completions地址> <模型名>`：18项自有TSF宿主检查，使用真实协调器及HTTP/模型驱动固定内置语料，不注入建议，验证显示、Tab保留ni、后续中文和关闭设置；临时配置根按PID创建并清理，不修改日常/独立安装配置，不注册或激活TIP。焦点/候选锚点仍属于测试宿主配置，不能替代真实应用验收。详见 [本轮报告](../../docs/DEVELOPMENT_REVIEW_2026-10-20.md)。
+
 同日后续：`--automatic` 现为每架构 145 项，新增真实上下文别名传入 Tab 后查询只读、接受保留拼音与后续提交。独立的生产焦点校验/诊断 22 项并入 `ProbeActivation --composition-checks`，不注册输入法。详见 [焦点修正与验收边界](../../docs/AUTOMATIC_HINT_FOCUS_FIX_2026-10-18.md)。
 
 2026-10-18：`--automatic` 扩展至每架构 139 项，包括有/无提示时鼠标移出预编辑或拖选跨边界，枚举确认宿主旧组合结束，并验证新位置可继续输入与提交；仍不激活 TIP。未激活测试服务绑定自有宿主客户端 ID，确保延迟清理实际执行。详见 [吞键修复与测试](../../docs/INTERRUPTED_INPUT_FIX_2026-10-18.md)。

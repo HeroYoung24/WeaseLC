@@ -102,7 +102,7 @@ class AutomaticHostEdit final : public ITfEditSession {
   ULONG refs_ = 1;
   std::function<HRESULT(TfEditCookie)> body_;
 };
-static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool local) {
+static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool local, const ModelConfig* brokerModel = nullptr) {
   auto handler = AddVectoredExceptionHandler(1, AutomaticException);
   struct Cleanup { void* handler; ~Cleanup() { if (handler) RemoveVectoredExceptionHandler(handler); } } cleanup{handler};
   std::cout << std::unitbuf;
@@ -141,7 +141,7 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
   const HWND foreground = GetForegroundWindow();
   const InputScope fieldScopes[] = {IS_TEXT, IS_TEXT, IS_PASSWORD, IS_DEFAULT, IS_PRIVATE,
       IS_NUMERIC_PIN, IS_ALPHANUMERIC_PIN, IS_ALPHANUMERIC_PIN_SET};
-  for (unsigned field = 0; field < (local ? 1U : _countof(fieldScopes)); ++field) {
+  for (unsigned field = 0; field < (brokerModel ? 0U : local ? 1U : _countof(fieldScopes)); ++field) {
     ComPtr<MemoryTextStore> store;
     store.Attach(new MemoryTextStore(local ? IS_DEFAULT : fieldScopes[field], field != 1));
     ComPtr<ITfDocumentMgr> document; ComPtr<ITfContext> context;
@@ -387,10 +387,12 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     preferences.automatic.enabled = true; preferences.automatic.tab = true;
     invalidate(service.Get()); document->Pop(TF_POPF_ALL);
   }
-  #include "VisualChecks.inc"
+  if (!brokerModel) {
+    #include "VisualChecks.inc"
+  }
   #include "BrokerChecks.inc"
   const RECT work{-1920, 0, 0, 1080};
-  if (!local) {
+  if (!local && !brokerModel) {
     ComPtr<ITfTextInputProcessorEx> temporary;
     ComPtr<ITfKeyEventSink> temporaryKeys;
     ComPtr<MemoryTextStore> host; host.Attach(new MemoryTextStore());

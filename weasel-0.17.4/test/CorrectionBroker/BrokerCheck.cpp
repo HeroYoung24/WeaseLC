@@ -2,6 +2,7 @@
 #include <CorrectionLexicon.h>
 #include <CorrectionPipelineDiagnostics.h>
 #include <CorrectionBrokerProcess.h>
+#include <CorrectionBrokerSupervisor.h>
 #include "../../WeaselServer/CorrectionBroker.h"
 #include "../../WeaselDeployer/CorrectionPreferences.h"
 #include "../LocalDeployment/FixedAutomaticTransport.h"
@@ -79,7 +80,11 @@ bool RemoteClient(const std::wstring& server, const std::wstring& output, const 
   return configured && checked && metadata && file.good();
 }
 #include "ListenerChecks.inc"
+#include "SupervisorChecks.inc"
 int wmain(int argc, wchar_t** argv) {
+  if (argc == 2 && !wcscmp(argv[1], L"/correction-broker")) return RunSupervisorFixture();
+  if (argc == 2 && !wcscmp(argv[1], L"--supervisor")) return RunSupervisorChecks();
+  if (argc == 3 && !wcscmp(argv[1], L"--supervisor-process")) return RunSupervisedBrokerProcess(argv[2]);
   if (argc == 2 && !wcscmp(argv[1], L"--listener-lifecycle")) return RunListenerChecks();
   if (argc == 3 && (!wcscmp(argv[1], L"--process") || !wcscmp(argv[1], L"--process-on"))) {
     const bool enabled = !wcscmp(argv[1], L"--process-on");

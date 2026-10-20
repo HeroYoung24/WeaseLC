@@ -261,17 +261,24 @@ int wmain(int argc, wchar_t** argv) {
   if (argc == 2 && !wcscmp(argv[1], L"/correction-worker-selftest")) return RunAutomaticFixtureWorker();
   const bool automatic = argc == 3 && !wcscmp(argv[2], L"--automatic");
   const bool automaticLocal = argc == 4 && !wcscmp(argv[2], L"--automatic-local");
+  const bool automaticBroker = argc == 5 && !wcscmp(argv[2], L"--automatic-broker-http");
   if (argc != 2 && argc != 5 && argc != 6 && !automatic && !automaticLocal) return 2;
   const bool live = argc == 6 && wcscmp(argv[2], L"--live-codex") == 0;
   const bool local = (argc == 5 || argc == 6) && wcscmp(argv[2], L"--local-http") == 0;
   const bool holdout = local && argc == 6 && wcscmp(argv[5], L"--holdout") == 0;
   if (local && argc == 6 && !holdout) return 2;
-  if (argc != 2 && !live && !local && !automatic && !automaticLocal) return 2;
+  if (argc != 2 && !live && !local && !automatic && !automaticLocal && !automaticBroker) return 2;
+  ModelConfig brokerModel;
+  if (automaticBroker) {
+    brokerModel.mode = Mode::Local; brokerModel.endpoint = argv[3]; brokerModel.model = argv[4];
+    brokerModel.timeoutSeconds = 5;
+    if (!ValidateConfig(brokerModel)) return 2;
+  }
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
   if (CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED) != S_OK) return 1;
   HMODULE module = LoadLibraryW(argv[1]);
-  bool valid = module && ((automatic || automaticLocal) ? RunAutomaticChecks(module,
-      automaticLocal ? argv[3] : L"", automaticLocal) : Run(module, live, local, holdout,
+  bool valid = module && ((automatic || automaticLocal || automaticBroker) ? RunAutomaticChecks(module,
+      automaticLocal ? argv[3] : L"", automaticLocal, automaticBroker ? &brokerModel : nullptr) : Run(module, live, local, holdout,
       (live || local) ? argv[3] : L"", (live || local) ? argv[4] : L"", live ? argv[5] : L""));
   bool released = module != nullptr;
   if (module) {
