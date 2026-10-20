@@ -45,7 +45,13 @@ struct MockTransport : IModelTransport {
     return response;
   }
 };
+#include "QualityChecks.inc"
 int wmain(int argc, wchar_t** argv) {
+  if (argc > 1 && !wcscmp(argv[1], L"--quality")) {
+    if (argc != 7) return 2;
+    try { return RunQualityChecks(argv[2], argv[3], argv[4], argv[5], argv[6]); }
+    catch (...) { return 2; }
+  }
   if (argc == 2 && wcscmp(argv[1], L"--storage-checks") == 0) {
     const auto path = L"Software\\WeaseLC-Lexicon-Test-" + std::to_wstring(GetCurrentProcessId());
     HKEY key = nullptr; DWORD disposition = 0;

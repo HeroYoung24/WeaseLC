@@ -339,7 +339,9 @@ const char* CorrectionInstructions() {
       "格式示例：若原文是“我在图书管看书。”，返回"
       "{\"version\":1,\"decision\":\"suggestions\",\"suggestions\":[{\"original\":\"图书管\","
       "\"replacement\":\"图书馆\",\"reason\":\"场所名称错字\",\"score\":0.98}]}。"
-      "无须修改时返回{\"version\":1,\"decision\":\"no_change\",\"suggestions\":[]}。";
+      "无须修改时返回{\"version\":1,\"decision\":\"no_change\",\"suggestions\":[]}。"
+      "输出前核对：每条suggestions中的original和replacement必须不同，原样返回不是纠错建议。"
+      "如果没有需要修改的内容，只返回decision为no_change且suggestions为空数组；不要创建原文与替换相同的条目。";
 }
 std::string BuildCorrectionInput(const CheckRequest& request) {
   if (!ValidRequest(request)) throw std::runtime_error("input");

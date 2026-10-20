@@ -1,5 +1,13 @@
 # 纠错接口离线检查
 
+2026-10-20：默认离线检查已为每架构130项。新增仅合成语料的质量排查工具：
+
+`CorrectionClient.exe --quality <回环chat/completions地址> <模型名> <提示方案> <语料组> <新JSON文件绝对路径>`。
+
+提示方案为baseline（冻结旧生产提示）、current（当前生产）、phonetic/verify/minimal（未采纳的语义试验）、contract（输出契约澄清）；语料组为development、validation、diagnostic或contract-audit。只处理编译样例，输出必须在本项目output/LocalTest且不得覆盖旧文件。实际0.90门槛不变；零分重解析仅为同一响应的诊断，保护规则仍生效。
+
+退出0表示该组严格质量通过，1表示仍有质量/协议失败，2表示调用或工具错误。`CompareQuality.py --pair <原版JSON> <候选JSON> [--pair ...] --output <新判定JSON>` 另做逐例相对回归比较；相对通过不代表严格质量通过。详见 [质量排查报告](../../docs/MODEL_QUALITY_INVESTIGATION_2026-10-20.md)。不修改用户配置、输入法注册或安装，也不提供任意文本输入。
+
 `CorrectionClient.vcxproj` 支持 Release x64/Win32，编译生产模型/设置编解码代码，注入内存模拟传输。现有 110 项离线检查覆盖回环与 HTTPS 授权约束、关闭/密码/取消不发送、版本/目标匹配、UTF-16/转义、分数过滤、异常响应、请求/响应大小、传输错误、配置不保存密钥/授权、响应单次消费、请求去抖/取消/失效、代码/网址保护，以及建议操作/显式保留词的界限。默认不调用模型、CLI、网络或系统注册，不读取用户正文，不保存设置。
 
 `--storage-checks`：7 项真实临时注册表读写检查，只使用新建 `HKCU\Software\WeaseLC-Lexicon-Test-<进程号>`，验证重开读取、非法保存不覆盖、损坏值拒绝和清空，结束后删除临时键。不写真实保留词。
