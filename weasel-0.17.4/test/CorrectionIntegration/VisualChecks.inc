@@ -82,12 +82,43 @@ if (!local) {
       check(!IsWindowVisible(state().second) && details.stage == AutomaticStage::CandidateUnavailable,
           "host-owned candidate fails closed instead of using an unverified rectangle");
       anchor = positions[0]; candidate(visualService.Get(),1,&anchor);
+      const auto beforeHiddenQuery = host->text;
+      candidate(visualService.Get(),4,&anchor);
+      check(IsWindowVisible(state().second), "candidate race fixture retains stale hint until next refresh");
+      consumed = TRUE;
+      check(key(visualService.Get(),context.Get(),VK_TAB,0,1,&consumed)==S_FALSE && !consumed &&
+          host->text==beforeHiddenQuery && !IsWindowVisible(state().second),
+          "Tab query rechecks candidate visibility before claiming the key");
+      anchor = positions[0]; candidate(visualService.Get(),1,&anchor);
+      check(key(visualService.Get(),context.Get(),VK_TAB,0,1,&consumed)==S_OK && consumed,
+          "candidate is visible during initial Tab query");
+      candidate(visualService.Get(),4,&anchor);
+      consumed = TRUE;
+      check(key(visualService.Get(),context.Get(),VK_TAB,0,0,&consumed)==S_FALSE && !consumed &&
+          host->text==beforeHiddenQuery && !IsWindowVisible(state().second),
+          "candidate disappearing after query cannot apply a stale correction");
+      // A refused actual Tab cancels the suggestion; prepare a new one.
+      check(prepare(), "strict visual fixture recovers after stale candidate rejection");
+      anchor = positions[0]; candidate(visualService.Get(),1,&anchor);
       const auto beforeAccept = host->text;
       check(key(visualService.Get(),context.Get(),VK_TAB,0,1,&consumed)==S_OK && consumed && host->text==beforeAccept,
           "strict displayed hint permits read-only Tab query");
       check(key(visualService.Get(),context.Get(),VK_TAB,0,0,&consumed)==S_OK && consumed && !state().first,
           "strict native candidate hint accepts Tab and retires");
       key(visualService.Get(),context.Get(),VK_TAB,0,2,&consumed);
+      visual.timing = 1;
+      check(configure(visualService.Get(),&visual,client,L"")==S_OK &&
+          Commit(apply,visualService.Get(),context.Get(),client,L"这里有错子。") &&
+          inject(visualService.Get(),&reply)==S_OK,
+          "immediate-mode strict visual fixture prepared without composition");
+      anchor = positions[0]; candidate(visualService.Get(),1,&anchor);
+      candidate(visualService.Get(),3,&anchor);
+      RECT immediate{}, overlap{};
+      check(IsWindowVisible(state().second) && GetWindowRect(state().second,&immediate) &&
+          immediate.left >= host->textRect.right && !IntersectRect(&overlap,&immediate,&host->textRect),
+          "immediate hint stays at host caret when an old candidate is hidden");
+      check(key(visualService.Get(),context.Get(),VK_TAB,0,1,&consumed)==S_OK && consumed,
+          "immediate hint permits Tab without requiring a composing candidate");
       candidate(visualService.Get(),0,&anchor); invalidate(visualService.Get()); document->Pop(TF_POPF_ALL);
     }
   }

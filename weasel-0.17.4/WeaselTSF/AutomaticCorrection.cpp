@@ -343,6 +343,9 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
   if (applied) *applied = false;
   if (!Validate(cookie, context)) { Cancel(); return S_FALSE; }
   ReadPosition(context, cookie);
+  // A layout/candidate can disappear between timer ticks or between the TSF
+  // query and actual key callbacks. Recheck presentation under this edit lock.
+  Refresh();
   if (!apply) return S_OK;
   if (!positionValid_) { Hide(); return S_FALSE; }
   if (!ready_ || !window_ || !IsWindowVisible(window_) || !preferences_.automatic.tab) return S_FALSE;
@@ -434,6 +437,7 @@ void AutomaticCorrection::Refresh() {
     Report(correction::AutomaticStage::WaitingComposition); Hide(); return;
   }
   RECT anchor = caret_;
+  UINT scale = anchorDpi_;
   if (owner_->_IsComposing()) {
     RECT candidate{};
     bool requireCandidate = true;
@@ -441,7 +445,11 @@ void AutomaticCorrection::Refresh() {
     requireCandidate = !testing_ || strictCandidateTest_;
 #endif
     // Keep the failure branch outside #ifdef: production must retain the else.
-    if (owner_->_cand->WindowRect(candidate)) anchor = candidate;
+    if (owner_->_cand->WindowRect(candidate)) {
+      anchor = candidate;
+      const auto dpi = owner_->_cand->WindowDpi();
+      if (dpi) scale = dpi;
+    }
     else if (requireCandidate) {
       Report(correction::AutomaticStage::CandidateUnavailable); Hide(); return;
     }
@@ -449,9 +457,7 @@ void AutomaticCorrection::Refresh() {
   if (anchor.bottom <= anchor.top) { Hide(); return; }
   MONITORINFO monitor{sizeof(monitor)};
   if (!GetMonitorInfoW(MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST), &monitor)) { Hide(); return; }
-  // Use the anchor monitor DPI, also when moving from a different monitor.
-  const UINT dpi = owner_->_cand->WindowDpi();
-  const UINT scale = dpi ? dpi : anchorDpi_;
+  // Immediate hints use the host caret, not the DPI of a hidden old candidate.
   const auto& options = preferences_.automatic;
   SIZE size{(std::min)(static_cast<LONG>(MulDiv(options.width, scale, 96)), monitor.rcWork.right - monitor.rcWork.left), 0};
   if (size.cx != measuredSize_.cx || scale != measuredDpi_) {
@@ -500,6 +506,7 @@ bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, boo
         (owner_->_isToOpenClose && !owner_->_IsKeyboardOpen())) { Cancel(); return false; }
   if (test) {
     if (!Request(false, context)) { Cancel(); return false; }
+    if (!ready_ || !window_ || !IsWindowVisible(window_)) return false;
     *eaten = TRUE; return true;
   }
   if (!Request(true, context)) { Cancel(); return false; }
@@ -734,7 +741,9 @@ bool AutomaticCorrection::CandidateTest(DWORD mode, RECT& position) {
   if (!testing_) return false;
   strictCandidateTest_ = mode != 0;
   const bool result = owner_->_cand->TestPresentation(mode, position);
-  Refresh(); return result;
+  // Mode 4 models a candidate disappearing between the timer and a key event.
+  if (mode != 4) Refresh();
+  return result;
 }
 void AutomaticCorrection::ConfigureTest(const correction::Preferences& preferences, TfClientId client, const std::wstring& worker) {
   Cancel(); ResetKeys(); testing_ = true; testFocused_ = true;
@@ -777,7 +786,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticDiagnostic(
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticCandidate(
     ITfTextInputProcessorEx* service, DWORD mode, RECT* position) {
-  if (!service || !position || mode > 3) return E_INVALIDARG;
+  if (!service || !position || mode > 4) return E_INVALIDARG;
   auto& automatic = static_cast<WeaselTSF*>(service)->Automatic();
   return automatic.CandidateTest(mode, *position) ? S_OK : S_FALSE;
 }

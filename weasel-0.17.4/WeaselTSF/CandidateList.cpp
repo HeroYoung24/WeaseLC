@@ -11,7 +11,7 @@ using namespace weasel;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 bool CCandidateList::TestPresentation(DWORD mode, RECT& position) {
   if (mode == 0) { _ui->Destroy(); _pbShow = TRUE; return true; }
-  if (mode == 2 || mode == 3) {
+  if (mode == 2 || mode == 3 || mode == 4) {
     _pbShow = mode == 2 ? FALSE : TRUE; _ui->Hide(); return true;
   }
   _ui->Destroy(); _pbShow = TRUE;

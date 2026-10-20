@@ -98,6 +98,11 @@
     check(state().first && IsWindowVisible(state().second) && !EqualRect(&beforeMove, &afterMove) &&
         !IntersectRect(&overlap, &afterMove, &store->textRect), "scroll refresh follows host caret without covering it");
     store->textClipped = TRUE;
+    BOOL clippedConsumed = TRUE;
+    const auto beforeClippedQuery = store->text;
+    check(key(service.Get(),context.Get(),VK_TAB,0,1,&clippedConsumed)==S_FALSE && !clippedConsumed &&
+        store->text==beforeClippedQuery && !IsWindowVisible(state().second),
+        "Tab query releases stale hint when caret clips before layout notification");
     layouts->OnLayoutChange(context.Get(), TF_LC_CHANGE, nullptr); poll(service.Get());
     check(state().first && !IsWindowVisible(state().second) && noKey(), "off-screen caret hides hint and releases Tab");
     store->textClipped = FALSE; store->layoutAvailable = false;
