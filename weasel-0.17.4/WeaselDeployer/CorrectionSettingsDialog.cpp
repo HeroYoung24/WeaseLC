@@ -11,6 +11,8 @@
 #include <CorrectionDiagnostics.h>
 #include <CorrectionReview.h>
 #include <CorrectionLexicon.h>
+#include <CorrectionServiceControl.h>
+#include <CorrectionBrokerClient.h>
 #include "Resource.h"
 #include "CorrectionPreferences.h"
 #include "CorrectionSettingsDialog.h"
@@ -19,6 +21,14 @@
 namespace {
 using namespace correction;
 constexpr UINT_PTR kPoll = 1;
+struct ServiceJob {
+  std::atomic_bool done{false};
+  HANDLE cancel = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  bool available = false, endpoint = false, retry = false;
+  ServiceReply service;
+  BrokerReply health;
+  ~ServiceJob() { if (cancel) CloseHandle(cancel); }
+};
 struct Job {
   std::atomic_bool cancelled{false};
   std::atomic_bool done{false};
@@ -30,6 +40,9 @@ struct DialogState {
   Preferences preferences;
   Mode editing = Mode::Local;
   std::shared_ptr<Job> job;
+  std::shared_ptr<ServiceJob> serviceJob;
+  ULONGLONG servicePolled = 0;
+  bool canRetryService = false;
   SuggestionReview review;
   UserLexicon lexicon;
   bool lexiconReady = true;
@@ -42,6 +55,73 @@ struct DialogState {
   const wchar_t* Text(const wchar_t* zh, const wchar_t* en) const { return chinese ? zh : en; }
   ModelConfig& Profile() { return editing == Mode::Online ? preferences.online : preferences.local; }
 };
+void ShowService(HWND dialog, DialogState& state, const ServiceJob& job) {
+  std::wstring backend = state.Text(L"无法取得监护状态：后端未启动或版本不匹配。", L"Supervisor unavailable: backend absent or version mismatch.");
+  if (job.available) {
+    switch (static_cast<BrokerProcessStage>(job.service.stage)) {
+      case BrokerProcessStage::Stopped: backend = state.Text(L"纠错服务已停止。", L"Correction service stopped."); break;
+      case BrokerProcessStage::Starting: backend = state.Text(L"纠错服务正在启动。", L"Correction service starting."); break;
+      case BrokerProcessStage::Running:
+        backend = job.endpoint ? state.Text(L"纠错协调器已连接。", L"Correction coordinator connected.") :
+            state.Text(L"协调器进程运行中，接口尚未响应。", L"Coordinator process running; endpoint not responding."); break;
+      case BrokerProcessStage::Backoff: backend = state.Text(L"纠错服务正在等待重试。", L"Correction service waiting to retry."); break;
+      case BrokerProcessStage::Exhausted:
+        backend = job.service.launchFailed ? state.Text(L"无法启动纠错服务，已停止自动重试。", L"Could not start correction service; automatic retries stopped.") :
+            state.Text(L"纠错服务连续退出，已停止自动重试。", L"Correction service repeatedly exited; automatic retries stopped."); break;
+    }
+  }
+  if (job.retry && !job.service.accepted) backend += state.Text(L" 恢复未受理，请稍后重试。", L" Recovery not accepted; check again.");
+  SetDlgItemTextW(dialog, IDC_CORRECTION_SERVICE_STATE, backend.c_str());
+  std::wstring model = state.Text(L"模型状态未知；可在右侧手动检查，不会自动发送文本。", L"Model untested. Use Check text to test; no text is sent automatically here.");
+  if (job.endpoint && job.health.status == BrokerStatus::InvalidRequest)
+    model = state.Text(L"当前协调器不支持状态查询，请更新配套后端。", L"Coordinator lacks status support; update the matching backend.");
+  else if (job.endpoint && job.health.status != BrokerStatus::Ok)
+    model = state.Text(L"已保存配置不可用；请核对模型设置并保存。", L"Saved configuration unavailable; review model settings and save.");
+  else if (job.endpoint && !job.health.settings.enabled)
+    model = state.Text(L"自动提示未启用（按已保存配置）；手动检查可独立使用。", L"Automatic hints disabled in saved settings; manual checking is separate.");
+  else if (job.endpoint && job.health.modelState <= static_cast<DWORD>(State::InvalidResponse)) {
+    model = state.Text(L"上次自动检查：", L"Last automatic check: ");
+    model += StateText(static_cast<State>(job.health.modelState), state.chinese);
+  }
+  SetDlgItemTextW(dialog, IDC_CORRECTION_SERVICE_MODEL, model.c_str());
+  state.canRetryService = job.available && job.service.retryAvailable &&
+      job.service.stage == static_cast<DWORD>(BrokerProcessStage::Exhausted) && !state.demo;
+  EnableWindow(GetDlgItem(dialog, IDC_CORRECTION_SERVICE_RETRY), state.canRetryService);
+}
+void BeginServicePoll(HWND dialog, DialogState& state, bool retry = false) {
+  if (state.testing || state.demo || state.serviceJob || (retry && !state.canRetryService)) return;
+  auto job = std::make_shared<ServiceJob>();
+  if (!job->cancel) return;
+  WCHAR filename[32768]{};
+  if (!GetModuleFileNameW(nullptr, filename, _countof(filename))) return;
+  const std::wstring self(filename);
+  const auto slash = self.find_last_of(L'\\');
+  if (slash == std::wstring::npos) return;
+  const auto server = self.substr(0, slash + 1) + L"WeaselServer.exe";
+  state.serviceJob = job; state.servicePolled = GetTickCount64(); job->retry = retry;
+  EnableWindow(GetDlgItem(dialog, IDC_CORRECTION_SERVICE_RETRY), FALSE);
+  try {
+    std::thread([job, self, server]() {
+      try {
+        job->available = QueryCorrectionService(server, job->retry, job->service, job->cancel);
+        if (WaitForSingleObject(job->cancel, 0) == WAIT_TIMEOUT) {
+          BrokerCall call; BrokerRequest request; request.operation = BrokerOperation::Health;
+          job->endpoint = call.Exchange(self, request, job->health, 120);
+        }
+      } catch (...) {}
+      job->done.store(true);
+    }).detach();
+  } catch (...) {
+    state.serviceJob.reset(); ShowService(dialog, state, *job);
+  }
+}
+void PollService(HWND dialog, DialogState& state) {
+  if (state.serviceJob && state.serviceJob->done.load()) {
+    auto completed = std::move(state.serviceJob);
+    ShowService(dialog, state, *completed);
+  }
+  if (GetTickCount64() - state.servicePolled >= 1000) BeginServicePoll(dialog, state);
+}
 std::wstring Text(HWND window, int id) {
   const HWND control = GetDlgItem(window, id);
   const int count = GetWindowTextLengthW(control);
@@ -387,6 +467,14 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
         state->Text(L"保留词表读取失败，请在“管理保留词”中清空并保存后重试。",
                     L"Kept terms could not be read. Clear/save them in Manage kept terms before checking."));
     UpdateButtons(dialog, *state);
+    EnableWindow(GetDlgItem(dialog, IDC_CORRECTION_SERVICE_RETRY), FALSE);
+    SetDlgItemTextW(dialog, IDC_CORRECTION_SERVICE_STATE, state->demo || state->testing ?
+        state->Text(L"离线演示/自检：不连接纠错服务。", L"Offline demo/self-test: service not contacted.") :
+        state->Text(L"正在查询纠错服务状态…", L"Checking correction service status…"));
+    SetDlgItemTextW(dialog, IDC_CORRECTION_SERVICE_MODEL,
+        state->Text(L"本区显示已保存配置的运行状态；不会自动启动模型或发送文本。",
+                    L"Status uses saved settings. This panel does not start a model or send text."));
+    BeginServicePoll(dialog, *state);
     if (!state->testing) SetTimer(dialog, kPoll, 100, nullptr);
     // This interactive window is requested by the user; ignore inherited SW_HIDE.
     if (!state->testing) {
@@ -401,10 +489,11 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
     return TRUE;
   }
   if (!state) return FALSE;
-  if (message == WM_TIMER && wParam == kPoll) { Poll(dialog, *state); return TRUE; }
+  if (message == WM_TIMER && wParam == kPoll) { Poll(dialog, *state); PollService(dialog, *state); return TRUE; }
   if (message == WM_CLOSE) { SendMessageW(dialog, WM_COMMAND, IDCANCEL, 0); return TRUE; }
   if (message == WM_DESTROY) {
     KillTimer(dialog, kPoll);
+    if (state->serviceJob) SetEvent(state->serviceJob->cancel);
     Cancel(*state, dialog);
     SetDlgItemTextW(dialog, IDC_CORRECTION_TOKEN, L"");
     return TRUE;
@@ -437,6 +526,7 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
     return TRUE;
   }
   switch (id) {
+    case IDC_CORRECTION_SERVICE_RETRY: BeginServicePoll(dialog, *state, true); return TRUE;
     case IDC_CORRECTION_APPLY:
     case IDC_CORRECTION_IGNORE:
     case IDC_CORRECTION_KEEP: {
@@ -609,9 +699,36 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
         IDC_CORRECTION_CHECK, IDC_CORRECTION_CANCEL_CHECK, IDC_CORRECTION_CLI_RESERVED,
         IDC_CORRECTION_JSON_MODE, IDC_CORRECTION_CONSENT, IDC_CORRECTION_DEFAULTS,
         IDC_CORRECTION_SUGGESTIONS, IDC_CORRECTION_APPLY, IDC_CORRECTION_IGNORE,
-        IDC_CORRECTION_KEEP, IDC_CORRECTION_TERMS, IDC_CORRECTION_AUTOMATIC})
+        IDC_CORRECTION_KEEP, IDC_CORRECTION_TERMS, IDC_CORRECTION_AUTOMATIC,
+        IDC_CORRECTION_SERVICE_STATE, IDC_CORRECTION_SERVICE_MODEL, IDC_CORRECTION_SERVICE_RETRY})
       check(GetDlgItem(dialog, id) != nullptr, "control present");
     check(!IsWindowVisible(dialog), "hidden test window");
+    check(!state.serviceJob && !IsWindowEnabled(GetDlgItem(dialog, IDC_CORRECTION_SERVICE_RETRY)),
+        "offline UI test never queries/restarts installed backend");
+    ServiceJob service;
+    service.available = true;
+    for (auto stage : {BrokerProcessStage::Starting, BrokerProcessStage::Backoff, BrokerProcessStage::Exhausted}) {
+      service.service.stage = static_cast<DWORD>(stage);
+      service.service.retryAvailable = stage == BrokerProcessStage::Exhausted;
+      ShowService(dialog, state, service);
+      check(IsWindowEnabled(GetDlgItem(dialog, IDC_CORRECTION_SERVICE_RETRY)) == (stage == BrokerProcessStage::Exhausted),
+          "manual recovery offered only after automatic retries exhausted");
+    }
+    service.service.stage = static_cast<DWORD>(BrokerProcessStage::Running);
+    service.endpoint = false;
+    ShowService(dialog, state, service);
+    const auto notReady = Text(dialog, IDC_CORRECTION_SERVICE_STATE);
+    service.endpoint = true; service.health.status = BrokerStatus::Ok;
+    service.health.settings.enabled = 1; service.health.modelState = static_cast<DWORD>(State::TransportError);
+    ShowService(dialog, state, service);
+    check(Text(dialog, IDC_CORRECTION_SERVICE_STATE) != notReady &&
+        Text(dialog, IDC_CORRECTION_SERVICE_MODEL).find(StateText(State::TransportError, state.chinese)) != std::wstring::npos &&
+        !IsWindowEnabled(GetDlgItem(dialog, IDC_CORRECTION_SERVICE_RETRY)),
+        "model unreachable differs from coordinator endpoint failure and cannot restart a live coordinator");
+    service.health.modelState = static_cast<DWORD>(State::NoSuggestion);
+    ShowService(dialog, state, service);
+    check(Text(dialog, IDC_CORRECTION_SERVICE_MODEL).find(StateText(State::NoSuggestion, state.chinese)) != std::wstring::npos,
+        "successful no-suggestion is distinct from model failure");
     AutomaticDialogState automatic{state, state.preferences.automatic, true};
     HWND autoDialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_CORRECTION_AUTOMATIC), dialog,
         AutomaticDialogProc, reinterpret_cast<LPARAM>(&automatic));
@@ -747,8 +864,11 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
         "invalid inactive score draft cannot block using the default threshold");
     SendMessageW(dialog, WM_COMMAND, IDC_CORRECTION_DEFAULTS, 0);
     check(state.preferences.mode == Mode::Off && !IsWindowEnabled(GetDlgItem(dialog, IDC_CORRECTION_CHECK)), "defaults disable checks");
+    state.serviceJob = std::make_shared<ServiceJob>();
+    const auto closingService = state.serviceJob;
     SendMessageW(dialog, WM_COMMAND, IDCANCEL, 0);
-    check(!IsWindow(dialog), "window destroyed");
+    check(!IsWindow(dialog) && WaitForSingleObject(closingService->cancel, 0) == WAIT_OBJECT_0,
+        "closing dialog cancels its management request without callbacks to destroyed window");
   }
   SetThreadUILanguage(previous);
   return valid;

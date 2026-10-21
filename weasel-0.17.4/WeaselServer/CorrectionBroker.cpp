@@ -9,6 +9,7 @@
 #include <vector>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 #ifdef WEASELC_LOCAL_TEST_BUILD
 #include "../test/LocalDeployment/FixedAutomaticTransport.h"
 #endif
@@ -41,14 +42,35 @@ bool Unpackaged() {
   UINT32 size = 0;
   return !get || get(&size, nullptr) == APPMODEL_ERROR_NO_PACKAGE;
 }
-ULONGLONG RegistryRevision(const std::wstring& path) {
+ULONGLONG RegistryRevision(const std::wstring& path) try {
   HKEY key = nullptr; FILETIME time{};
   if (RegOpenKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return 0;
+  struct CloseKey { HKEY key; ~CloseKey() { RegCloseKey(key); } } close{key};
   const auto status = RegQueryInfoKeyW(key, nullptr, nullptr, nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr, nullptr, nullptr, &time);
-  RegCloseKey(key);
-  return status == ERROR_SUCCESS ? (static_cast<ULONGLONG>(time.dwHighDateTime) << 32) | time.dwLowDateTime : 0;
-}
+  if (status != ERROR_SUCCESS) return 0;
+  // Registry FILETIME can stay identical across rapid writes. Include bounded
+  // persisted settings/kept terms so those edits invalidate in-flight requests
+  // and model health. This opaque change token is not an authentication hash.
+  ULONGLONG revision = 14695981039346656037ull;
+  auto mix = [&](const void* data, size_t size) {
+    const auto* bytes = static_cast<const BYTE*>(data);
+    for (size_t i = 0; i < size; ++i) { revision ^= bytes[i]; revision *= 1099511628211ull; }
+  };
+  mix(&time, sizeof(time));
+  struct Value { const wchar_t* name; DWORD limit; bool required; };
+  for (const auto value : {Value{L"SettingsV2", 16384, true}, {L"KeptTermsV1", 128 * 1024, false}}) {
+    DWORD size = 0;
+    auto read = RegGetValueW(key, nullptr, value.name, RRF_RT_REG_BINARY, nullptr, nullptr, &size);
+    if (read == ERROR_FILE_NOT_FOUND && !value.required) { mix(&size, sizeof(size)); continue; }
+    if (read != ERROR_SUCCESS || !size || size > value.limit) return 0;
+    std::vector<BYTE> bytes(size);
+    read = RegGetValueW(key, nullptr, value.name, RRF_RT_REG_BINARY, nullptr, bytes.data(), &size);
+    if (read != ERROR_SUCCESS || size != bytes.size()) return 0;
+    mix(&size, sizeof(size)); mix(bytes.data(), bytes.size());
+  }
+  return revision ? revision : 1;
+} catch (...) { return 0; }
 }
 struct CorrectionBroker::Impl {
   std::wstring path, name;
@@ -61,6 +83,11 @@ struct CorrectionBroker::Impl {
   std::function<void()> beforeConnect;
 #endif
   std::atomic<unsigned> checks{0};
+  // Only metadata from the latest started check is eligible for management UI.
+  // No text/result array is retained, and settings changes invalidate this state.
+  std::mutex healthMutex;
+  ULONGLONG checkSequence = 0, healthRevision = 0;
+  DWORD healthState = 0xffffffff, healthError = 0, healthHttp = 0, healthElapsed = 0;
   struct Worker { std::thread thread; std::atomic_bool done{false}; };
   std::vector<std::unique_ptr<Worker>> workers;
   Impl(std::wstring settings, std::function<std::unique_ptr<IModelTransport>()> factory)
@@ -194,7 +221,28 @@ struct CorrectionBroker::Impl {
     try {
       switch (request.operation) {
         case BrokerOperation::Settings: reply.status = Snapshot(reply.settings); break;
-        case BrokerOperation::Check: Check(pipe, request, reply); break;
+        case BrokerOperation::Check: {
+          ULONGLONG sequence;
+          { std::lock_guard<std::mutex> lock(healthMutex); sequence = ++checkSequence; }
+          Check(pipe, request, reply);
+          std::lock_guard<std::mutex> lock(healthMutex);
+          if (sequence == checkSequence && reply.status != BrokerStatus::SettingsChanged &&
+              reply.modelState <= static_cast<DWORD>(State::InvalidResponse) &&
+              reply.modelState != static_cast<DWORD>(State::Cancelled)) {
+            healthRevision = request.revision; healthState = reply.modelState;
+            healthError = reply.nativeError; healthHttp = reply.httpStatus; healthElapsed = reply.elapsedMs;
+          }
+          break;
+        }
+        case BrokerOperation::Health: {
+          reply.status = Snapshot(reply.settings);
+          std::lock_guard<std::mutex> lock(healthMutex);
+          if (reply.status == BrokerStatus::Ok && reply.settings.revision == healthRevision) {
+            reply.modelState = healthState; reply.nativeError = healthError;
+            reply.httpStatus = healthHttp; reply.elapsedMs = healthElapsed;
+          }
+          break;
+        }
         case BrokerOperation::Metadata: Metadata(request); return;
         default: reply.status = BrokerStatus::InvalidRequest;
       }

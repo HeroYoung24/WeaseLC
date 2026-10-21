@@ -60,6 +60,7 @@ static int RunSupervisorChecks() {
     const DWORD first = child.Snapshot().processId;
     check(!child.Start(Self(), fast) && child.Snapshot().processId == first,
         "second Start cannot replace a running owner");
+    check(!child.RequestRetry(), "manual recovery never restarts a live child");
     HANDLE process = observe(first);
     check(process && TerminateProcess(process, 77) && running(child, 2) && child.Snapshot().processId != first,
         "unexpected exit restarts an owned child after backoff");
@@ -80,7 +81,12 @@ static int RunSupervisorChecks() {
     check(ended.attempts == 4 && ended.consecutiveFailures == 4 && !ended.processId && !ended.launchFailed &&
         ended.lastExitCode == 73 && child.Snapshot().attempts == 4,
         "initial launch plus three retries cannot become an infinite crash loop");
+    SetEnvironmentVariableW(env, L"normal");
+    check(ended.retryAvailable && child.RequestRetry() && !child.RequestRetry() && running(child, 1),
+        "one explicit recovery resets exhausted budget and coalesces repeated clicks");
     child.Stop();
+    check(!child.RequestRetry() && !child.Snapshot().retryAvailable, "recovery after Stop cannot launch a child");
+    SetEnvironmentVariableW(env, L"crash");
   }
   {
     BrokerSupervisor child;

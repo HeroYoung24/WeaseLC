@@ -3,6 +3,7 @@
 #include <CorrectionPipelineDiagnostics.h>
 #include <CorrectionBrokerProcess.h>
 #include <CorrectionBrokerSupervisor.h>
+#include <CorrectionServiceControl.h>
 #include "../../WeaselServer/CorrectionBroker.h"
 #include "../../WeaselDeployer/CorrectionPreferences.h"
 #include "../LocalDeployment/FixedAutomaticTransport.h"
@@ -22,13 +23,13 @@ class Transport : public IModelTransport {
       const std::string& body, const std::atomic_bool& cancelled) override {
     ++fixture_.calls;
     const auto mode = fixture_.mode.load();
-    if (mode == 4 || mode == 5) {
-      const auto end = GetTickCount64() + (mode == 5 ? 11000 : 2000);
+    if (mode == 4 || mode == 5 || mode == 7) {
+      const auto end = GetTickCount64() + (mode == 5 ? 11000 : mode == 7 ? 300 : 2000);
       while (GetTickCount64() < end && !cancelled.load()) Sleep(5);
       if (cancelled.load()) { ++fixture_.cancelled; TransportResult result; result.state = State::Cancelled; return result; }
     }
     TransportResult result;
-    if (mode == 1) { result.state = State::Timeout; result.nativeError = 12002; return result; }
+    if (mode == 1 || mode == 7) { result.state = State::Timeout; result.nativeError = 12002; return result; }
     if (mode == 2) { result.state = State::NoSuggestion; result.httpStatus = 500; return result; }
     if (mode == 3) { result.state = State::NoSuggestion; result.httpStatus = 200; result.body = "invalid"; return result; }
     FixedAutomaticTransport fixed(mode != 6);
@@ -81,9 +82,11 @@ bool RemoteClient(const std::wstring& server, const std::wstring& output, const 
 }
 #include "ListenerChecks.inc"
 #include "SupervisorChecks.inc"
+#include "ServiceControlChecks.inc"
 int wmain(int argc, wchar_t** argv) {
   if (argc == 2 && !wcscmp(argv[1], L"/correction-broker")) return RunSupervisorFixture();
   if (argc == 2 && !wcscmp(argv[1], L"--supervisor")) return RunSupervisorChecks();
+  if (argc == 2 && !wcscmp(argv[1], L"--service-control")) return RunServiceControlChecks();
   if (argc == 3 && !wcscmp(argv[1], L"--supervisor-process")) return RunSupervisedBrokerProcess(argv[2]);
   if (argc == 2 && !wcscmp(argv[1], L"--listener-lifecycle")) return RunListenerChecks();
   if (argc == 3 && (!wcscmp(argv[1], L"--process") || !wcscmp(argv[1], L"--process-on"))) {
@@ -153,6 +156,14 @@ int wmain(int argc, wchar_t** argv) {
   auto snapshot = [&]() { return call.Exchange(Self(), request, settings, 1000) && settings.status == BrokerStatus::Ok; };
   auto run = [&]() { return call.Exchange(Self(), CheckRequestFor(settings), reply, 3000); };
   check(snapshot() && settings.settings.enabled && settings.settings.timeoutSeconds == 30, "shared public settings snapshot");
+  BrokerReply health;
+  auto healthSnapshot = [&]() {
+    BrokerRequest status; status.operation = BrokerOperation::Health;
+    const auto calls = fixture.calls.load();
+    return call.Exchange(Self(), status, health, 1000) && health.status == BrokerStatus::Ok &&
+        fixture.calls.load() == calls && !health.result.count;
+  };
+  check(healthSnapshot() && health.modelState == 0xffffffff, "health query neither invokes model nor invents a successful check");
   {
     BrokerRequest notice;notice.operation=BrokerOperation::Metadata;
     notice.metadata=BrokerMetadata::ScopeTrace;notice.metadataBytes=40;
@@ -173,6 +184,8 @@ int wmain(int argc, wchar_t** argv) {
         !memcmp(trace,saved,sizeof(trace)),"scope trace rejects unknown phase without replacing evidence");
   }
   check(run() && reply.status == BrokerStatus::Ok && reply.result.count == 1, "fixed response through production parser and broker");
+  check(healthSnapshot() && health.modelState == static_cast<DWORD>(State::Suggestions),
+      "health retains result state without suggestion text");
   check(!call.Exchange(L"C:\\invalid-server.exe", request, reply), "reject mismatched backend executable");
   auto stale = CheckRequestFor(settings); stale.revision--;
   const auto before = fixture.calls.load();
@@ -186,14 +199,45 @@ int wmain(int argc, wchar_t** argv) {
     const State expected = mode == 1 ? State::Timeout : mode == 2 ? State::HttpError : State::InvalidResponse;
     check(run() && reply.status == BrokerStatus::ModelFailure && reply.modelState == static_cast<DWORD>(expected) && !reply.result.count,
         "model failure is distinct from no suggestion");
+    check(healthSnapshot() && health.modelState == static_cast<DWORD>(expected),
+        "management health distinguishes timeout, HTTP and invalid-response failures");
   }
   fixture.mode = 6;
   check(run() && reply.status == BrokerStatus::Ok && reply.modelState == static_cast<DWORD>(State::NoSuggestion), "valid no-change remains successful");
+  check(healthSnapshot() && health.modelState == static_cast<DWORD>(State::NoSuggestion),
+      "new successful check replaces previous model failure");
+  {
+    fixture.mode = 7; BrokerCall old;
+    const auto calls = fixture.calls.load();
+    const bool submitted = old.Begin(Self(), CheckRequestFor(settings));
+    const auto deadline = GetTickCount64() + 1000;
+    while (fixture.calls == calls && GetTickCount64() < deadline) { old.Poll(reply); Sleep(1); }
+    fixture.mode = 6;
+    const bool newer = run() && reply.modelState == static_cast<DWORD>(State::NoSuggestion);
+    int completed = 0;
+    while (!(completed = old.Poll(reply)) && GetTickCount64() < deadline) Sleep(1);
+    check(submitted && newer && completed == 1 && reply.modelState == static_cast<DWORD>(State::Timeout) &&
+        healthSnapshot() && health.modelState == static_cast<DWORD>(State::NoSuggestion),
+        "late failure from an older request cannot overwrite newer successful model health");
+  }
   fixture.mode = 0;
   UserLexicon lexicon; KeepTerm(lexicon, L"错子"); Save(root, preferences, lexicon);
   check(snapshot() && run() && reply.status == BrokerStatus::Ok && !reply.result.count &&
       reply.modelState == static_cast<DWORD>(State::Filtered), "kept-term filter runs in authoritative backend");
   preferences.automatic.enabled = false; Save(root, preferences);
+  const bool invalidatedHealth = healthSnapshot() && !health.settings.enabled && health.modelState == 0xffffffff;
+  if (!invalidatedHealth) std::cout << "Health revisions before=" << settings.settings.revision << " after=" << health.settings.revision
+      << " enabled=" << health.settings.enabled << " modelState=" << health.modelState << '\n';
+  check(invalidatedHealth,
+      "saved configuration changes invalidate previous model status");
+  bool rapidVersions = true;
+  for (unsigned i = 0; i < 24; ++i) {
+    const auto previous = health.settings.revision;
+    preferences.automatic.enabled = !preferences.automatic.enabled;
+    rapidVersions = Save(root, preferences) && healthSnapshot() && health.settings.revision != previous &&
+        health.settings.enabled == static_cast<DWORD>(preferences.automatic.enabled) && rapidVersions;
+  }
+  check(rapidVersions, "rapid configuration toggles always change opaque revision without timestamp sleeps");
   check(snapshot() && !settings.settings.enabled && run() && reply.status == BrokerStatus::Disabled, "disable switch is authoritative");
   preferences.automatic.enabled = true; Save(root, preferences); snapshot();
   fixture.mode = 4;

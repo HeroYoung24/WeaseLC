@@ -2,6 +2,7 @@
 #include "WeaselServerApp.h"
 #include <filesystem>
 #include <CorrectionBrokerSupervisor.h>
+#include <CorrectionServiceControl.h>
 
 WeaselServerApp::WeaselServerApp()
     : m_handler(std::make_unique<RimeWithWeaselHandler>(&m_ui)),
@@ -22,6 +23,10 @@ int WeaselServerApp::Run() {
   correction::BrokerSupervisor correctionBroker;
   try { correctionBroker.Start((install_dir() / L"WeaselDeployer.exe").wstring()); }
   catch (...) { correctionBroker.Stop(); }
+  correction::CorrectionServiceControl correctionControl(correctionBroker);
+  // Control failure leaves normal typing and the existing restart policy intact.
+  try { correctionControl.Start((install_dir() / L"WeaselDeployer.exe").wstring()); }
+  catch (...) {}
 
   // This fork has no signed release feed. Do not initialize the upstream
   // updater: it could replace the experimental build with another product.
@@ -35,6 +40,7 @@ int WeaselServerApp::Run() {
 
   int ret = m_server.Run();
 
+  correctionControl.Stop();
   correctionBroker.Stop();
 
   m_handler->Finalize();
