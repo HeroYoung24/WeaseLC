@@ -35,5 +35,68 @@
   "reasoning": false,
   "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU, Vulkan0",
   "automaticStartup": false,
-  "windowsService": false
+  "windowsService": false,
+  "evaluationModels": [
+    {
+      "variant": "4b-instruct",
+      "baseRevision": "Not specified by quantizer",
+      "accepted": false,
+      "licenseFile": "Qwen-Instruct-2507-LICENSE.txt",
+      "revision": "a06e946bb6b655725eafa393f4a9745d460374c9",
+      "files": [
+        {
+          "rfilename": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+          "blobId": "681d7d0d2c24530e22ca6c3f2ef14fbe254f17ae",
+          "size": 2497281120,
+          "lfs": {
+            "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+            "size": 2497281120,
+            "pointerSize": 135
+          }
+        }
+      ],
+      "baseModel": "Qwen/Qwen3-4B-Instruct-2507",
+      "repository": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+      "license": "Apache-2.0"
+    },
+    {
+      "license": "Apache-2.0",
+      "variant": "7b",
+      "repository": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+      "retrieval": "Partial HF download completed via Qwen ModelScope publisher mirror; both full SHA256 match pinned official files",
+      "accepted": false,
+      "revision": "bb5d59e06d9551d752d08b292a50eb208b07ab1f",
+      "files": [
+        {
+          "rfilename": "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+          "blobId": "72de309249b41bf41019dd2efc5cb8e4a19c8c8e",
+          "size": 3993201344,
+          "lfs": {
+            "sha256": "dfce12e3862a5283ccfb88221b48480e58745165de856439950d0f22590580db",
+            "size": 3993201344,
+            "pointerSize": 135
+          }
+        },
+        {
+          "rfilename": "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf",
+          "blobId": "c550b63c2e50a9984b5535c5c21ccd168c0cb08f",
+          "size": 689872288,
+          "lfs": {
+            "sha256": "539cf93f78e887edea1c04e2d7d8cdaca9d01dae9c9025bcb8accbe29df3d72a",
+            "size": 689872288,
+            "pointerSize": 134
+          }
+        }
+      ],
+      "licenseFile": "Qwen25-7B-LICENSE.txt"
+    }
+  ],
+  "latestTuning": {
+    "acceptancePassed": false,
+    "validConfigurations": 14,
+    "report": "../weasel-0.17.4/docs/MODEL_TUNING_REPORT_2026-10-21.md",
+    "clientDate": "2026-10-21",
+    "defaultChanged": false,
+    "developmentRequests": 980
+  }
 }

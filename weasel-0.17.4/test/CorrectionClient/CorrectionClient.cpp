@@ -48,8 +48,18 @@ struct MockTransport : IModelTransport {
 #include "QualityChecks.inc"
 int wmain(int argc, wchar_t** argv) {
   if (argc > 1 && !wcscmp(argv[1], L"--quality")) {
-    if (argc != 7 && argc != 8) return 2;
-    try { return RunQualityChecks(argv[2], argv[3], argv[4], argv[5], argv[6], argc == 8 ? argv[7] : L"greedy"); }
+    if (argc < 7 || argc > 9) return 2;
+    try {
+      unsigned seed = 104729;
+      if (argc == 9) {
+        const std::wstring value = argv[8];
+        if (value.empty() || value.find_first_not_of(L"0123456789") != std::wstring::npos) return 2;
+        const auto parsed = std::stoull(value);
+        if (parsed > 0xffffffffULL) return 2;
+        seed = static_cast<unsigned>(parsed);
+      }
+      return RunQualityChecks(argv[2], argv[3], argv[4], argv[5], argv[6], argc >= 8 ? argv[7] : L"greedy",seed);
+    }
     catch (...) { return 2; }
   }
   if (argc == 2 && wcscmp(argv[1], L"--storage-checks") == 0) {
