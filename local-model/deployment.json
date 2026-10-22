@@ -93,11 +93,14 @@
   ],
   "latestTuning": {
     "acceptancePassed": false,
-    "validConfigurations": 10,
-    "report": "../weasel-0.17.4/docs/MODEL_TUNING_ROUND3_REPORT_2026-10-22.md",
+    "validConfigurations": 2,
+    "report": "../weasel-0.17.4/docs/MODEL_CANDIDATE_GUARD_REPORT_2026-10-22.md",
     "clientDate": "2026-10-22",
     "defaultChanged": false,
-    "developmentRequests": 700,
-    "previousReport": "../weasel-0.17.4/docs/MODEL_TUNING_REPORT_2026-10-22.md"
+    "developmentRequests": 80,
+    "cachedResponsesReplayed": 140,
+    "weightsTrained": false,
+    "direction": "4B task adaptation; phonetic guard remains research-only",
+    "previousReport": "../weasel-0.17.4/docs/MODEL_TUNING_ROUND3_REPORT_2026-10-22.md"
   }
 }

@@ -1,5 +1,6 @@
 #include "QualityCorpus.h"
 #include "TuningCorpus.h"
+#include "CandidateGuardCorpus.h"
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
@@ -88,10 +89,11 @@ static int RunQualityChecks(const wchar_t* endpoint, const wchar_t* modelName,
   const bool tuningValidation = !wcscmp(corpus,L"tuning-validation");
   const bool tuningFinal = !wcscmp(corpus,L"tuning-final");
   const bool tuningDevelopment = !wcscmp(corpus,L"tuning-development");
+  const bool candidateGuard = !wcscmp(corpus,L"candidate-guard");
   const bool validation = !wcscmp(corpus, L"validation");
   const bool diagnosticCorpus = !wcscmp(corpus, L"diagnostic");
   const bool contractAudit = !wcscmp(corpus, L"contract-audit");
-  if (!validation && !diagnosticCorpus && !contractAudit && !speedValidation && !tuningValidation && !tuningFinal && !tuningDevelopment && wcscmp(corpus, L"development")) return 2;
+  if (!validation && !diagnosticCorpus && !contractAudit && !speedValidation && !tuningValidation && !tuningFinal && !tuningDevelopment && !candidateGuard && wcscmp(corpus, L"development")) return 2;
   if (wcscmp(candidate, L"baseline") && wcscmp(candidate, L"phonetic") && wcscmp(candidate, L"verify") &&
       wcscmp(candidate,L"minimal") && wcscmp(candidate,L"contract") && wcscmp(candidate,L"current") && wcscmp(candidate,L"spelling-v2")) return 2;
   const std::filesystem::path destination(output);
@@ -109,7 +111,7 @@ static int RunQualityChecks(const wchar_t* endpoint, const wchar_t* modelName,
   const std::atomic_bool cancelled{false};
   unsigned expectedTypos = 0, corrected = 0, controls = 0, falseAlarms = 0, wrong = 0, missed = 0, invalid = 0;
   json::array samples; std::vector<ULONGLONG> latencies;
-  const auto samplesToCheck = tuningFinal ? TuningFinalCorpus() : tuningValidation ? TuningValidationCorpus() : tuningDevelopment ? TuningDevelopmentCorpus() :
+  const auto samplesToCheck = candidateGuard ? CandidateGuardCorpus() : tuningFinal ? TuningFinalCorpus() : tuningValidation ? TuningValidationCorpus() : tuningDevelopment ? TuningDevelopmentCorpus() :
       speedValidation ? SpeedValidationCorpus() : QualityCorpus(validation, diagnosticCorpus, contractAudit);
   for (const auto& sample : samplesToCheck) {
     CheckRequest request; request.safeText = true; request.source = Source::CommittedText;
