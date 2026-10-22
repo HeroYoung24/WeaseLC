@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-weaselc-local-fixture'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WeaseLC 多环境输入测试 2026-10-22</title>
+<style>
+  body{font:18px/1.55 system-ui,sans-serif;max-width:950px;margin:24px auto;padding:0 20px;color:#182534;background:#f5f7fa}
+  section{background:white;border:1px solid #bdc8d5;border-radius:10px;padding:16px;margin:14px 0}
+  label{display:block;font-weight:600;margin-bottom:8px} input,textarea,[contenteditable]{box-sizing:border-box;width:100%;font:24px/1.6 system-ui,sans-serif;border:2px solid #7c8b9b;border-radius:6px;padding:10px;background:white;color:#142132}
+  textarea{height:140px;resize:vertical}[contenteditable]{min-height:115px} input:focus,textarea:focus,[contenteditable]:focus{outline:3px solid #76b8f5;outline-offset:2px}
+  p{margin:6px 0}small{color:#43536a} pre{font:14px/1.45 monospace;white-space:pre-wrap;max-height:180px;overflow:auto}
+</style>
+<h1>WeaseLC 多环境输入测试</h1>
+<p>仅输入合成测试文字，不填写真实信息。本页离线运行，不提交、不联网、不保存文本。</p>
+<p>先检查：nihao → 你好、半截 ni 后点击其他区域、退格、Shift及无提示时的Tab导航。</p>
+<p>纠错阶段：拼音输入“这里有错子。”，等待后再输入 ni，观察提示、Tab纠正及拼音保留。</p>
+<section><label for="plain">A · 多行普通文本框</label><textarea id="plain" aria-label="A 多行普通文本框" spellcheck="false" autocomplete="off"></textarea></section>
+<section><label for="single">B · 单行普通文本框</label><input id="single" aria-label="B 单行普通文本框" type="text" spellcheck="false" autocomplete="off"></section>
+<section><label id="rich-label">C · 富文本编辑区</label><div id="rich" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="rich-label" spellcheck="false"></div></section>
+<section><label for="secret">D · 密码字段（仅输入假数据，如 abc123）</label><input id="secret" aria-label="D 合成密码字段" type="password" autocomplete="off"><small>预期没有纠错提示，Tab正常离开；不要输入真实密码。</small></section>
+<section><label for="readonly">E · 只读字段</label><input id="readonly" aria-label="E 只读字段" readonly value="只读合成文字，不能改写"></section>
+<section><label>输入事件摘要</label><p id="summary" role="status">等待输入；只记录事件类型、焦点和计数，不记录输入内容。</p><pre id="events" aria-label="事件摘要"></pre></section>
+<script nonce="weaselc-local-fixture">
+  const records=[];let count=0;
+  for(const name of ['compositionstart','compositionend','input','focusin','focusout','keydown']){
+    document.addEventListener(name,event=>{
+      if(!['plain','single','rich','secret','readonly'].includes(event.target.id))return;
+      if(name==='keydown'&&!['Tab','Escape','Backspace','Enter'].includes(event.key))return;
+      count++;records.push(`${count} ${event.target.id} ${name}${name==='keydown'?' '+event.key:''}`);
+      if(records.length>18)records.shift();
+      document.getElementById('summary').textContent=`事件 ${count}；当前焦点：${document.activeElement.id||'其他区域'}`;
+      document.getElementById('events').textContent=records.join('\n');
+    });
+  }
+</script>
+</html>
