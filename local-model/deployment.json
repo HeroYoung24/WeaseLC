@@ -94,13 +94,15 @@
   "latestTuning": {
     "acceptancePassed": false,
     "validConfigurations": 2,
-    "report": "../weasel-0.17.4/docs/MODEL_CANDIDATE_GUARD_REPORT_2026-10-22.md",
+    "report": "../weasel-0.17.4/docs/MODEL_4B_BALANCE_REPORT_2026-10-22.md",
     "clientDate": "2026-10-22",
     "defaultChanged": false,
-    "developmentRequests": 80,
-    "cachedResponsesReplayed": 140,
+    "developmentRequests": 72,
+    "cachedResponsesReplayed": 740,
+    "historicalProfiles": 10,
+    "screenedOperatingPoints": 77,
     "weightsTrained": false,
-    "direction": "4B task adaptation; phonetic guard remains research-only",
-    "previousReport": "../weasel-0.17.4/docs/MODEL_TUNING_ROUND3_REPORT_2026-10-22.md"
+    "direction": "Keep original 4B, temperature 0, non-thinking, threshold 0.90; tiered threshold remains research-only",
+    "previousReport": "../weasel-0.17.4/docs/MODEL_CANDIDATE_GUARD_REPORT_2026-10-22.md"
   }
 }
