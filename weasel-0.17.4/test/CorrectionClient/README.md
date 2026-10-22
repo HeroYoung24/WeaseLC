@@ -1,5 +1,7 @@
 # 纠错接口离线检查
 
+2026-10-22第三轮：新增typical-020、minp-015、mirostat-3、thinking-16-greedy、thinking-24-greedy。`RunThirdRound.ps1`仅用编译开发语料，限制profile/型号/预算并核对实际slot参数，拒绝覆盖既有产物；须先启动对应本地模型并等待Ready。`EvaluateTuning.py --round-three`执行[预定计划](../../docs/MODEL_TUNING_ROUND3_PLAN_2026-10-22.md)门槛。10组700请求均拒绝，详见[报告](../../docs/MODEL_TUNING_ROUND3_REPORT_2026-10-22.md)。
+
 2026-10-22：质量工具新增测试专用wide-015、wide-035、repeat-light、thinking-16参数，报告含实际请求参数；显式profile和可选uint32种子位于原质量命令末尾。`EvaluateTuning.py --round-two`使用[第二轮计划](../../docs/MODEL_TUNING_PLAN_2026-10-22.md)的固定进入门槛，最终只接受tuning-final，不允许更换提示。9组630请求均拒绝，生产默认不变，详见[结果](../../docs/MODEL_TUNING_REPORT_2026-10-22.md)。
 
 2026-10-20：默认离线检查已为每架构130项。新增仅合成语料的质量排查工具：

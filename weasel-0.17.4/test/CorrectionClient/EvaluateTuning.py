@@ -68,12 +68,17 @@ def main():
     p.add_argument("--validation-corpus", choices=["tuning-validation", "tuning-final"], default="tuning-validation")
     p.add_argument("--allow-prompt-change", action="store_true")
     p.add_argument("--round-two", action="store_true", help="Apply the fixed 2026-10-22 development entry gate")
+    p.add_argument("--round-three", action="store_true", help="Apply the fixed third-round parameter plan")
     p.add_argument("--output", required=True)
     args = p.parse_args()
-    if args.round_two and args.allow_prompt_change:
-        p.error("Round two keeps the production prompt fixed")
-    if args.round_two and not args.development_only and args.validation_corpus != "tuning-final":
-        p.error("Round two requires the untouched tuning-final validation corpus")
+    if args.round_two and args.round_three:
+        p.error("Select one predeclared round")
+    strict_round = args.round_two or args.round_three
+    entry_reason = "round_three_development_entry" if args.round_three else "round_two_development_entry"
+    if strict_round and args.allow_prompt_change:
+        p.error("This round keeps the production prompt fixed")
+    if strict_round and not args.development_only and args.validation_corpus != "tuning-final":
+        p.error("This round requires the untouched tuning-final validation corpus")
     if args.development_only == bool(args.validation):
         p.error("Choose validation reports or --development-only")
     destination = artifact(args.output)
@@ -88,18 +93,40 @@ def main():
     if new["corrected"] < old["corrected"] or new["wrong"] > old["wrong"] or new["falseAlarms"] or new["invalid"] > old["invalid"]:
         reasons.append("development_regression")
     development_accepted = not reasons
-    if args.round_two:
+    if strict_round:
         if new["corrected"] < 14 or new["precision"] < .95 or new["medianMs"] > 600 or new["p95Ms"] > 1200:
-            reasons.append("round_two_development_entry")
+            reasons.append(entry_reason)
         sent = selected.get("requestParameters", {})
+        if selected["temperature"] > 0 and (type(selected.get("seed")) is not int or not 0 <= selected["seed"] <= 0xffffffff):
+            raise ValueError("Missing or invalid sampling seed")
         temperatures = {"greedy": 0, "wide-015": .15, "wide-035": .35, "repeat-light": 0, "thinking-16": .6}
+        if args.round_three:
+            temperatures = {"greedy": 0, "typical-020": .7, "minp-015": .7, "mirostat-3": .7,
+                            "thinking-16-greedy": 0, "thinking-24-greedy": 0}
         if selected.get("temperature") != temperatures.get(selected["profile"]):
             raise ValueError("Profile temperature differs from fixed plan")
         if sent.get("model") != selected["model"] or sent.get("temperature") != selected["temperature"] or \
                 sent.get("max_tokens") != 768 or sent.get("stream") is not False or \
                 sent.get("response_format") != {"type": "json_object"}:
             raise ValueError("Unexpected actual request parameters")
-        if selected["profile"] in {"wide-015", "wide-035"}:
+        if args.round_three and selected["profile"] != "greedy":
+            profile = selected["profile"]
+            parameters = dict(top_p=1, top_k=0, min_p=0, seed=selected.get("seed"))
+            if profile == "typical-020":
+                parameters["typical_p"] = .2
+            elif profile == "minp-015":
+                parameters["min_p"] = .15
+            elif profile == "mirostat-3":
+                parameters.update(mirostat=2, mirostat_tau=3, mirostat_eta=.1)
+            elif profile in {"thinking-16-greedy", "thinking-24-greedy"}:
+                parameters = dict(top_p=.95, top_k=20, min_p=0)
+                if selected.get("thinkingBudget") != (16 if profile == "thinking-16-greedy" else 24):
+                    raise ValueError("Thinking budget differs from third-round plan")
+            else:
+                raise ValueError("Unplanned third-round profile")
+            if any(sent.get(k) != v for k, v in parameters.items()):
+                raise ValueError("Parameters differ from third-round plan")
+        elif selected["profile"] in {"wide-015", "wide-035"}:
             if any(sent.get(k) != v for k, v in dict(top_p=1, top_k=0, min_p=0, seed=selected["seed"]).items()):
                 raise ValueError("Wide sampling parameters differ from fixed plan")
         elif selected["profile"] == "repeat-light":
@@ -119,7 +146,9 @@ def main():
             raise ValueError("Different validation configuration")
         if data["systemPrompt"] != selected["systemPrompt"]:
             raise ValueError("Validation prompt changed")
-        if args.round_two:
+        if strict_round:
+            if data["temperature"] > 0 and data.get("requestParameters", {}).get("seed") != data.get("seed"):
+                raise ValueError("Validation seed differs from actual request")
             without_seed = lambda d: {k: v for k, v in d.get("requestParameters", {}).items() if k != "seed"}
             if without_seed(data) != without_seed(selected) or data.get("thinkingBudget") != selected.get("thinkingBudget"):
                 raise ValueError("Validation request parameters changed")
@@ -140,6 +169,7 @@ def main():
                   profile=selected["profile"], baselineDevelopment=old, selectedDevelopment=new,
                   developmentAccepted=development_accepted,
                   roundTwoEntryAccepted=not any(r in reasons for r in ("development_regression", "round_two_development_entry")) if args.round_two else None,
+                  roundThreeEntryAccepted=not any(r in reasons for r in ("development_regression", entry_reason)) if args.round_three else None,
                   validationCorpus=args.validation_corpus, promptChanged=baseline["systemPrompt"] != selected["systemPrompt"],
                   promptSha256=[hashlib.sha256(d["systemPrompt"].encode()).hexdigest() for d in (baseline, selected)],
                   developmentSha256=[old_hash, new_hash], validation=rows,

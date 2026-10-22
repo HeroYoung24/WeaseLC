@@ -21,7 +21,21 @@ class QualityTransport final : public IModelTransport {
     request.at("messages").as_array()[0].at("content") = prompt_;
     // Test-only bounded sampling profile. Production configuration is untouched.
     const bool wide = profile_ == L"wide-015" || profile_ == L"wide-035";
-    if (wide) {
+    const bool entropy = profile_ == L"typical-020" || profile_ == L"minp-015" || profile_ == L"mirostat-3";
+    if (entropy) {
+      auto& parameters = request.as_object();
+      parameters["temperature"] = .7; parameters["top_p"] = 1.0;
+      parameters["top_k"] = 0; parameters["min_p"] = profile_ == L"minp-015" ? .15 : 0.0;
+      parameters["seed"] = seed_;
+      if (profile_ == L"typical-020") parameters["typical_p"] = .2;
+      if (profile_ == L"mirostat-3") {
+        parameters["mirostat"] = 2; parameters["mirostat_tau"] = 3.0; parameters["mirostat_eta"] = .1;
+      }
+    } else if (profile_ == L"thinking-16-greedy" || profile_ == L"thinking-24-greedy") {
+      auto& parameters = request.as_object();
+      parameters["temperature"] = 0.0; parameters["top_p"] = .95;
+      parameters["top_k"] = 20; parameters["min_p"] = 0.0;
+    } else if (wide) {
       auto& parameters = request.as_object();
       parameters["temperature"] = profile_ == L"wide-015" ? .15 : .35;
       parameters["top_p"] = 1.0; parameters["top_k"] = 0; parameters["min_p"] = 0.0;
@@ -67,7 +81,9 @@ static int RunQualityChecks(const wchar_t* endpoint, const wchar_t* modelName,
   const bool thinking = !wcscmp(profile,L"thinking-16") || !wcscmp(profile,L"thinking-32") || !wcscmp(profile,L"thinking-64");
   const bool wide = !wcscmp(profile,L"wide-015") || !wcscmp(profile,L"wide-035");
   const bool repeat = !wcscmp(profile,L"repeat-light");
-  if (!sampled && !official && !thinking && !wide && !repeat && wcscmp(profile,L"greedy") && wcscmp(profile,L"schema-greedy")) return 2;
+  const bool entropy = !wcscmp(profile,L"typical-020") || !wcscmp(profile,L"minp-015") || !wcscmp(profile,L"mirostat-3");
+  const bool thinkingGreedy = !wcscmp(profile,L"thinking-16-greedy") || !wcscmp(profile,L"thinking-24-greedy");
+  if (!sampled && !official && !thinking && !wide && !repeat && !entropy && !thinkingGreedy && wcscmp(profile,L"greedy") && wcscmp(profile,L"schema-greedy")) return 2;
   const bool speedValidation = !wcscmp(corpus,L"speed-validation");
   const bool tuningValidation = !wcscmp(corpus,L"tuning-validation");
   const bool tuningFinal = !wcscmp(corpus,L"tuning-final");
@@ -146,18 +162,17 @@ static int RunQualityChecks(const wchar_t* endpoint, const wchar_t* modelName,
   json::object report{{"corpus",QualityUtf8(corpus)}, {"candidate",QualityUtf8(candidate)},
     {"model",QualityUtf8(config.model)}, {"threshold",EffectiveThreshold(config)},
     {"systemPrompt",QualityPrompt(candidate)}, {"profile",QualityUtf8(profile)}, {"requestParameters",observed->requestParameters},
-    {"temperature",sampled ? .2 : wide ? (!wcscmp(profile,L"wide-015") ? .15 : .35) : official ? (!wcscmp(profile,L"qwen-fast") ? .7 : .4) : thinking ? .6 : 0.0},
     {"expectedTypos",expectedTypos}, {"corrected",corrected},
     {"missed",missed}, {"wrongCorrections",wrong}, {"controls",controls}, {"falseAlarms",falseAlarms},
     {"invalid",invalid}, {"medianMs",latencies[latencies.size()/2]},
     {"p95Ms",latencies[(latencies.size()*95+99)/100-1]}, {"maxMs",latencies.back()}, {"samples",std::move(samples)}};
-  if (sampled) { report["top_p"] = .8; report["seed"] = seed; }
-  if (official || thinking) {
-    report["top_p"] = thinking ? .95 : .8; report["top_k"] = 20; report["min_p"] = 0.0; report["seed"] = seed;
-  }
-  if (wide) { report["top_p"] = 1.0; report["top_k"] = 0; report["min_p"] = 0.0; report["seed"] = seed; }
-  if (repeat) { report["repeat_penalty"] = 1.03; report["repeat_last_n"] = 64; }
+  // Derive metadata from the actual request rather than duplicating the profile
+  // mapping: a new profile must never be reported as temperature=0 by omission.
+  for (const auto* key : {"temperature", "top_p", "top_k", "min_p", "typical_p", "mirostat",
+       "mirostat_tau", "mirostat_eta", "repeat_penalty", "repeat_last_n", "seed"})
+    if (const auto* value = observed->requestParameters.if_contains(key)) report[key] = *value;
   if (thinking) report["thinkingBudget"] = !wcscmp(profile,L"thinking-16") ? 16 : !wcscmp(profile,L"thinking-32") ? 32 : 64;
+  if (thinkingGreedy) report["thinkingBudget"] = !wcscmp(profile,L"thinking-16-greedy") ? 16 : 24;
   std::ofstream file(destination, std::ios::binary | std::ios::out);
   file << json::serialize(report);
   std::cout << "Quality corrected=" << corrected << '/' << expectedTypos << " falseAlarms=" << falseAlarms
