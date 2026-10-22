@@ -14,12 +14,22 @@ class QualityTransport final : public IModelTransport {
   explicit QualityTransport(std::string prompt, std::wstring profile, unsigned seed)
       : prompt_(std::move(prompt)), profile_(std::move(profile)), seed_(seed) {}
   std::string response;
+  json::object requestParameters;
   TransportResult Post(const ModelConfig& config, const Endpoint& endpoint, const std::string& body,
       const std::atomic_bool& cancelled) override {
     auto request = json::parse(body);
     request.at("messages").as_array()[0].at("content") = prompt_;
     // Test-only bounded sampling profile. Production configuration is untouched.
-    if (profile_ != L"greedy" && profile_ != L"schema-greedy") {
+    const bool wide = profile_ == L"wide-015" || profile_ == L"wide-035";
+    if (wide) {
+      auto& parameters = request.as_object();
+      parameters["temperature"] = profile_ == L"wide-015" ? .15 : .35;
+      parameters["top_p"] = 1.0; parameters["top_k"] = 0; parameters["min_p"] = 0.0;
+      parameters["seed"] = seed_;
+    } else if (profile_ == L"repeat-light") {
+      request.as_object()["repeat_penalty"] = 1.03;
+      request.as_object()["repeat_last_n"] = 64;
+    } else if (profile_ != L"greedy" && profile_ != L"schema-greedy") {
       auto& parameters = request.as_object();
       parameters["temperature"] = .2; parameters["top_p"] = .8; parameters["seed"] = seed_;
       if (profile_ != L"low-temperature") {
@@ -37,6 +47,7 @@ class QualityTransport final : public IModelTransport {
         "required":["original","replacement","reason","score"],"additionalProperties":false}}},
         "required":["version","decision","suggestions"],"additionalProperties":false})")}};
     }
+    requestParameters = request.as_object(); requestParameters.erase("messages");
     auto result = http_->Post(config, endpoint, json::serialize(request), cancelled);
     response = result.body;
     return result;
@@ -53,8 +64,10 @@ static int RunQualityChecks(const wchar_t* endpoint, const wchar_t* modelName,
     const wchar_t* candidate, const wchar_t* corpus, const wchar_t* output, const wchar_t* profile = L"greedy", unsigned seed = 104729) {
   const bool sampled = !wcscmp(profile,L"low-temperature");
   const bool official = !wcscmp(profile,L"qwen-fast") || !wcscmp(profile,L"qwen-mid");
-  const bool thinking = !wcscmp(profile,L"thinking-32") || !wcscmp(profile,L"thinking-64");
-  if (!sampled && !official && !thinking && wcscmp(profile,L"greedy") && wcscmp(profile,L"schema-greedy")) return 2;
+  const bool thinking = !wcscmp(profile,L"thinking-16") || !wcscmp(profile,L"thinking-32") || !wcscmp(profile,L"thinking-64");
+  const bool wide = !wcscmp(profile,L"wide-015") || !wcscmp(profile,L"wide-035");
+  const bool repeat = !wcscmp(profile,L"repeat-light");
+  if (!sampled && !official && !thinking && !wide && !repeat && wcscmp(profile,L"greedy") && wcscmp(profile,L"schema-greedy")) return 2;
   const bool speedValidation = !wcscmp(corpus,L"speed-validation");
   const bool tuningValidation = !wcscmp(corpus,L"tuning-validation");
   const bool tuningFinal = !wcscmp(corpus,L"tuning-final");
@@ -132,8 +145,8 @@ static int RunQualityChecks(const wchar_t* endpoint, const wchar_t* modelName,
   std::sort(latencies.begin(), latencies.end());
   json::object report{{"corpus",QualityUtf8(corpus)}, {"candidate",QualityUtf8(candidate)},
     {"model",QualityUtf8(config.model)}, {"threshold",EffectiveThreshold(config)},
-    {"systemPrompt",QualityPrompt(candidate)}, {"profile",QualityUtf8(profile)},
-    {"temperature",sampled ? .2 : official ? (!wcscmp(profile,L"qwen-fast") ? .7 : .4) : thinking ? .6 : 0.0},
+    {"systemPrompt",QualityPrompt(candidate)}, {"profile",QualityUtf8(profile)}, {"requestParameters",observed->requestParameters},
+    {"temperature",sampled ? .2 : wide ? (!wcscmp(profile,L"wide-015") ? .15 : .35) : official ? (!wcscmp(profile,L"qwen-fast") ? .7 : .4) : thinking ? .6 : 0.0},
     {"expectedTypos",expectedTypos}, {"corrected",corrected},
     {"missed",missed}, {"wrongCorrections",wrong}, {"controls",controls}, {"falseAlarms",falseAlarms},
     {"invalid",invalid}, {"medianMs",latencies[latencies.size()/2]},
@@ -142,6 +155,9 @@ static int RunQualityChecks(const wchar_t* endpoint, const wchar_t* modelName,
   if (official || thinking) {
     report["top_p"] = thinking ? .95 : .8; report["top_k"] = 20; report["min_p"] = 0.0; report["seed"] = seed;
   }
+  if (wide) { report["top_p"] = 1.0; report["top_k"] = 0; report["min_p"] = 0.0; report["seed"] = seed; }
+  if (repeat) { report["repeat_penalty"] = 1.03; report["repeat_last_n"] = 64; }
+  if (thinking) report["thinkingBudget"] = !wcscmp(profile,L"thinking-16") ? 16 : !wcscmp(profile,L"thinking-32") ? 32 : 64;
   std::ofstream file(destination, std::ios::binary | std::ios::out);
   file << json::serialize(report);
   std::cout << "Quality corrected=" << corrected << '/' << expectedTypos << " falseAlarms=" << falseAlarms

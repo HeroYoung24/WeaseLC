@@ -1,5 +1,5 @@
 param([int]$Port = 18963, [ValidateSet('1.7b','4b','4b-instruct','7b')][string]$Variant = '4b',
-  [ValidateSet(0,32,64)][int]$ThinkingBudget = 0)
+  [ValidateSet(0,16,32,64)][int]$ThinkingBudget = 0)
 $ErrorActionPreference = 'Stop'
 if ($Port -lt 1024 -or $Port -gt 65535) { throw 'Use an unprivileged local port.' }
 $name = if ($Variant -eq '7b') { 'qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf' } elseif ($Variant -eq '4b-instruct') { 'Qwen3-4B-Instruct-2507-Q4_K_M.gguf' } elseif ($Variant -eq '4b') { 'Qwen3-4B-Q4_K_M.gguf' } else { 'Qwen3-1.7B-Q8_0.gguf' }

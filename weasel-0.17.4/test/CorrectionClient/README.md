@@ -1,5 +1,7 @@
 # 纠错接口离线检查
 
+2026-10-22：质量工具新增测试专用wide-015、wide-035、repeat-light、thinking-16参数，报告含实际请求参数；显式profile和可选uint32种子位于原质量命令末尾。`EvaluateTuning.py --round-two`使用[第二轮计划](../../docs/MODEL_TUNING_PLAN_2026-10-22.md)的固定进入门槛，最终只接受tuning-final，不允许更换提示。9组630请求均拒绝，生产默认不变，详见[结果](../../docs/MODEL_TUNING_REPORT_2026-10-22.md)。
+
 2026-10-20：默认离线检查已为每架构130项。新增仅合成语料的质量排查工具：
 
 `CorrectionClient.exe --quality <回环chat/completions地址> <模型名> <提示方案> <语料组> <新JSON文件绝对路径>`。

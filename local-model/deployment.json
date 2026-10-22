@@ -93,10 +93,11 @@
   ],
   "latestTuning": {
     "acceptancePassed": false,
-    "validConfigurations": 14,
-    "report": "../weasel-0.17.4/docs/MODEL_TUNING_REPORT_2026-10-21.md",
-    "clientDate": "2026-10-21",
+    "validConfigurations": 9,
+    "report": "../weasel-0.17.4/docs/MODEL_TUNING_REPORT_2026-10-22.md",
+    "clientDate": "2026-10-22",
     "defaultChanged": false,
-    "developmentRequests": 980
+    "developmentRequests": 630,
+    "previousReport": "../weasel-0.17.4/docs/MODEL_TUNING_REPORT_2026-10-21.md"
   }
 }
