@@ -1,5 +1,11 @@
 # 当前开发进度（2026-10-23）
 
+## 最新人工实测：Edge Tab未改文，Word基本输入失败
+
+用户手动打开Edge夹具：A/B/C中文、中断恢复、退格、正常Tab导航及搜狗Shift通过。固定模式三框均出现提示，但Tab后原文都未变、ni保留、焦点未跳；诊断有两次TabApplied，代码仅凭SetText返回成功就置applied，未核验宿主最终结果。不能将成功状态当成替换通过。
+
+Word阶段为Off，用户报告数字选词附加1、句号重复；快照确认纠错/自动关闭，无Tab本身不算失败。已停止测试后端，用户确认搜狗在Word正常。优先排查Test/实际按键派发缓存、完整lParam/消息时间匹配及重入；Edge再核对SetText、组合恢复和宿主编辑后同步。均未修复、未部署猜测补丁，本轮未启动模型。详见[实测报告](docs/APPLICATION_TEST_REPORT_2026-10-23.md)，机器恢复入口`output/LocalTest/environment-manual-results-20261023.json`。不要继续扩展实机测试或重复无提示排查，先复现上述两个明确失败。
+
 ## 10-23续测：浏览器工具策略中断，尚未开始输入
 
 200安装文件及原输入法基线预检通过；保持纠错Off，启动专用后端并打开Edge。Computer Use随后因无法可靠确定当前浏览器URL、无法执行其策略检查而停止，已遵守停止指令，没有替换工具绕过或继续桌面输入。不是输入法故障，也不是新的应用验收结果；Edge/Word仍待测。已关闭纠错/固定响应并停止专用后端，本轮未启动模型。机器状态`output/LocalTest/environment-test-state-20261023.json`。后续可由用户手动在Edge打开`test/LocalDeployment/application-input-fixture.html`，按基础输入、Fixed、Model三阶段继续人工反馈和无正文诊断，不重复安装或调参。
