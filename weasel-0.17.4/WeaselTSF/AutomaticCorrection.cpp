@@ -536,6 +536,16 @@ void AutomaticCorrection::Refresh() {
   }
   Report(correction::AutomaticStage::Shown);
 }
+bool AutomaticCorrection::IntegratedKey(WPARAM key, LPARAM flags, BOOL* eaten) {
+  // The integrated-candidate callback is an actual key offer, not a TSF Test
+  // callback. Only claim the correction shortcut; ordinary candidate/navigation
+  // keys remain available to the application's integration implementation.
+  if (key != VK_TAB && key != VK_ESCAPE && key != VK_LEFT && key != VK_RIGHT &&
+      key != VK_HOME && key != VK_END && key != VK_DELETE && key != VK_BACK &&
+      key != VK_SHIFT && key != VK_CONTROL && key != VK_MENU) return false;
+  com_ptr<ITfContext> target = context_;
+  return Key(target, key, flags, false, false, eaten);
+}
 bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, bool test, bool up, BOOL* eaten) try {
   if (!eaten) return false;
   if (key != VK_TAB) {

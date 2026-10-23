@@ -20,6 +20,7 @@ class AutomaticCorrection {
   void Position(const RECT& caret);
   void Refresh();
   bool Key(ITfContext*, WPARAM, LPARAM, bool test, bool up, BOOL* eaten);
+  bool IntegratedKey(WPARAM, LPARAM, BOOL* eaten);
   struct WriteVerification {
     com_ptr<ITfRange> range;
     std::wstring text;

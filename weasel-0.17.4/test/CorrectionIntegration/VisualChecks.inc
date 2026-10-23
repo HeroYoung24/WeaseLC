@@ -19,6 +19,21 @@ if (!local) {
         document->CreateContext(client, 0, static_cast<ITextStoreACP*>(host.Get()), &context, &cookie) == S_OK && document->Push(context.Get()) == S_OK;
     check(made, "visual fixture uses owned text and native windows without TIP activation");
     if (made) {
+      const auto getCandidate = reinterpret_cast<HRESULT(WINAPI*)(ITfTextInputProcessorEx*, IUnknown**)>(
+          GetProcAddress(module, "WeaselProbeGetCandidate"));
+      ComPtr<IUnknown> candidateObject;
+      ComPtr<ITfIntegratableCandidateListUIElement> integrated;
+      check(getCandidate && getCandidate(visualService.Get(), &candidateObject) == S_OK &&
+          candidateObject.As(&integrated) == S_OK, "integrated candidate keyboard interface is available");
+      if (integrated) {
+        check(integrated->OnKeyDown(VK_TAB, 0, nullptr) == E_POINTER,
+            "integrated candidate rejects a missing handled output");
+        for (WPARAM offered : {WPARAM(VK_TAB), WPARAM(VK_ESCAPE), WPARAM(VK_UP), WPARAM(VK_DOWN), WPARAM('1'), WPARAM(VK_OEM_PERIOD)}) {
+          BOOL handled = TRUE;
+          check(integrated->OnKeyDown(offered, 0, &handled) == S_OK && !handled,
+              "integrated candidate never claims an unprocessed key without a hint");
+        }
+      }
       auto state = [&]() { DWORD ready = 0; HWND hint = nullptr; status(visualService.Get(), &ready, &hint); return std::make_pair(ready != 0, hint); };
       auto edit = [&](std::function<HRESULT(TfEditCookie)> body) {
         ComPtr<ITfEditSession> session; session.Attach(new AutomaticHostEdit(std::move(body))); HRESULT result = E_FAIL;
@@ -119,6 +134,29 @@ if (!local) {
           "immediate hint stays at host caret when an old candidate is hidden");
       check(key(visualService.Get(),context.Get(),VK_TAB,0,1,&consumed)==S_OK && consumed,
           "immediate hint permits Tab without requiring a composing candidate");
+      // Applications can offer a key through the integration interface as
+      // well as ITfKeyEventSink. The same accepted Tab must not write twice.
+      consumed = TRUE;
+      check(integrated && integrated->OnKeyDown(VK_ESCAPE,0,&consumed)==S_OK && !consumed && !state().first,
+          "integrated Escape dismisses correction without claiming the application's key");
+      check(prepare(), "integrated correction prepared with active pinyin");
+      anchor = positions[0]; candidate(visualService.Get(),1,&anchor);
+      const auto beforeIntegrated = host->text;
+      auto expectedIntegrated = beforeIntegrated;
+      const auto correctionAt = expectedIntegrated.rfind(L"错子");
+      if (correctionAt != std::wstring::npos) expectedIntegrated.replace(correctionAt,2,L"错字");
+      consumed = FALSE;
+      check(integrated && integrated->OnKeyDown(VK_TAB,0,&consumed)==S_OK && consumed &&
+          host->text==expectedIntegrated && host->text!=beforeIntegrated,
+          "integrated candidate Tab applies the displayed correction and preserves pinyin");
+      check(integrated && integrated->OnKeyDown(VK_TAB,LPARAM(1)<<30,&consumed)==S_OK && consumed &&
+          host->text==expectedIntegrated, "integrated Tab autorepeat cannot reapply a retired suggestion");
+      check(key(visualService.Get(),context.Get(),VK_TAB,0,0,&consumed)==S_OK && consumed &&
+          host->text==expectedIntegrated, "normal callback after integrated Tab cannot apply twice");
+      key(visualService.Get(),context.Get(),VK_TAB,0,2,&consumed);
+      consumed = TRUE;
+      check(integrated && integrated->OnKeyDown(VK_TAB,0,&consumed)==S_OK && !consumed,
+          "integrated Tab returns to application navigation after key-up");
       candidate(visualService.Get(),0,&anchor); invalidate(visualService.Get()); document->Pop(TF_POPF_ALL);
     }
   }

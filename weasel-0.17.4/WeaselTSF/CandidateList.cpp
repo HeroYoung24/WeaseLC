@@ -2,6 +2,7 @@
 
 #include "WeaselTSF.h"
 #include "CandidateList.h"
+#include "AutomaticCorrection.h"
 #include <KeyEvent.h>
 #include <math.h>
 
@@ -215,7 +216,11 @@ STDMETHODIMP CCandidateList::GetSelectionStyle(
 STDMETHODIMP CCandidateList::OnKeyDown(WPARAM wParam,
                                        LPARAM lParam,
                                        BOOL* pIsEaten) {
-  *pIsEaten = TRUE;
+  if (!pIsEaten) return E_POINTER;
+  *pIsEaten = FALSE;
+  if (!_tsf) return TF_E_DISCONNECTED;
+  com_ptr<WeaselTSF> keepAlive = _tsf;
+  keepAlive->Automatic().IntegratedKey(wParam, lParam, pIsEaten);
   return S_OK;
 }
 

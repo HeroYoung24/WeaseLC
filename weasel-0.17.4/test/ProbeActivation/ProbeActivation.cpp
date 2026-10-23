@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <msctf.h>
 #include <ctfutb.h>
+#include <ctffunc.h>
 #include <wrl/client.h>
 #include <dbghelp.h>
 
@@ -173,10 +174,12 @@ static bool TestRetainedCandidate(HMODULE module, IClassFactory* factory) {
   ComPtr<ITfTextInputProcessorEx> service;
   ComPtr<IUnknown> candidate;
   ComPtr<ITfCandidateListUIElementBehavior> behavior;
+  ComPtr<ITfIntegratableCandidateListUIElement> integrated;
   HRESULT hr = factory->CreateInstance(nullptr, IID_ITfTextInputProcessorEx,
       reinterpret_cast<void**>(service.GetAddressOf()));
   if (SUCCEEDED(hr)) hr = getCandidate(service.Get(), &candidate);
   if (SUCCEEDED(hr)) hr = candidate.As(&behavior);
+  if (SUCCEEDED(hr)) hr = candidate.As(&integrated);
   service.Reset();
   lifecycle(nullptr, &destroyedAfter, nullptr, nullptr);
   ComPtr<ITfDocumentMgr> document;
@@ -184,6 +187,9 @@ static bool TestRetainedCandidate(HMODULE module, IClassFactory* factory) {
       destroyedAfter == destroyedBefore + 1 &&
       behavior->GetDocumentMgr(&document) == TF_E_DISCONNECTED && !document &&
       behavior->Abort() == TF_E_DISCONNECTED && behavior->Show(FALSE) == S_OK;
+  BOOL handled = TRUE;
+  valid = valid && integrated && integrated->OnKeyDown(VK_TAB,0,&handled) == TF_E_DISCONNECTED && !handled &&
+      integrated->OnKeyDown(VK_TAB,0,nullptr) == E_POINTER;
   if (behavior) {
     for (int request = 0; request < 2; ++request) {
       BSTR description = nullptr;

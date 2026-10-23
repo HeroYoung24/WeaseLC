@@ -10,6 +10,8 @@
 #include "../../WeaselServer/CorrectionBroker.h"
 #include "../LocalDeployment/FixedAutomaticTransport.h"
 #include <CorrectionDiagnostics.h>
+#include <ctffunc.h>
+#include "CompositionProjection.h"
 #pragma comment(lib, "dbghelp.lib")
 static bool SaveOwnedHint(HWND window, const wchar_t* filename) {
   RECT rect{}; if (!GetClientRect(window, &rect) || IsRectEmpty(&rect)) return false;
@@ -102,7 +104,7 @@ class AutomaticHostEdit final : public ITfEditSession {
   ULONG refs_ = 1;
   std::function<HRESULT(TfEditCookie)> body_;
 };
-static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool local, const ModelConfig* brokerModel = nullptr) {
+static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool local, const ModelConfig* brokerModel = nullptr, bool hostReview = false) {
   auto handler = AddVectoredExceptionHandler(1, AutomaticException);
   struct Cleanup { void* handler; ~Cleanup() { if (handler) RemoveVectoredExceptionHandler(handler); } } cleanup{handler};
   std::cout << std::unitbuf;
@@ -428,6 +430,10 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
   }
   if (!brokerModel) {
     #include "VisualChecks.inc"
+    if (hostReview) {
+      #include "CompositionSyncChecks.inc"
+      std::cout << "Host review: known production limitation reproduced in 2 synthetic scopes; staged alternative is TEST ONLY\n";
+    }
   }
   #include "BrokerChecks.inc"
   const RECT work{-1920, 0, 0, 1080};
