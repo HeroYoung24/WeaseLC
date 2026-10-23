@@ -248,16 +248,29 @@ class WeaselTSF : public ITfTextInputProcessorEx,
     WPARAM key = 0;
     LPARAM flags = 0;
     LONG time = 0;
-    bool Matches(ITfContext* target, WPARAM value, LPARAM message) const {
+    bool Matches(ITfContext* target, WPARAM value, LPARAM message, LONG messageTime) const {
       return context && correction::SameIdentity(context, target) && key == value && flags == message &&
-          time == GetMessageTime();
+          time == messageTime;
     }
-    void Set(ITfContext* target, WPARAM value, LPARAM message) {
-      context = target; key = value; flags = message; time = GetMessageTime();
+    void Set(ITfContext* target, WPARAM value, LPARAM message, LONG messageTime) {
+      context = target; key = value; flags = message; time = messageTime;
     }
     void Reset() { context = nullptr; }
   };
   PendingKey _pendingKeyDown, _pendingKeyUp;
+  LONG _KeyMessageTime() const {
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+    if (_probeMessageTimeEnabled) return _probeMessageTime;
+#endif
+    return GetMessageTime();
+  }
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+ public:
+  void ProbeMessageTime(LONG value) { _probeMessageTime = value; _probeMessageTimeEnabled = true; }
+ private:
+  LONG _probeMessageTime = 0;
+  bool _probeMessageTimeEnabled = false;
+#endif
   HRESULT _HandleKey(ITfContext*, WPARAM, LPARAM, BOOL*, bool test, bool up);
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   using ProbeKeySink = void(WINAPI*)(WPARAM, LPARAM, BOOL*, void*);

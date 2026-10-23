@@ -97,6 +97,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
       sink_->OnLockGranted(pending);
       lock_ = 0;
     }
+    if (onAfterLock) { auto callback = std::move(onAfterLock); onAfterLock = {}; callback(); }
     return S_OK;
   }
   STDMETHODIMP GetStatus(TS_STATUS* status) override {
@@ -149,9 +150,11 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
                        ULONG length, TS_TEXTCHANGE* change) override {
     if (!WriteLocked()) return TS_E_NOLOCK;
     if (!RangeValid(start, end) || (!value && length) || !change) return E_INVALIDARG;
-    text.replace(start, end - start, value ? value : L"", length);
+    if (!acknowledgeWithoutWrite)
+      text.replace(start, end - start, value ? value : L"", length);
     *change = {start, end, start + static_cast<LONG>(length)};
     selection_.acpStart = selection_.acpEnd = change->acpNewEnd;
+    if (onSetText) { auto callback = std::move(onSetText); onSetText = {}; callback(); }
     return S_OK;
   }
   STDMETHODIMP InsertTextAtSelection(DWORD flags, const WCHAR* value, ULONG length,
@@ -255,6 +258,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   unsigned candidateStarts = 0;
   unsigned candidateEnds = 0;
   bool refuseWrites = false;  // synthetic refusal; never affects a real host
+  bool acknowledgeWithoutWrite = false;  // owned-host fault: S_OK without persistence
   DWORD dynamicStatus = 0;
   unsigned textReads = 0;
   // Fault injection belongs only to this owned host, never the installed TIP.
@@ -264,6 +268,8 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   BOOL textClipped = FALSE;
   bool layoutAvailable = true;
   std::function<void()> onGetSelection;
+  std::function<void()> onAfterLock;
+  std::function<void()> onSetText;
   LONG SelectionEnd() const { return selection_.acpEnd; }
   // Simulate a host's own mouse/paste events outside TSF locks. Only this
   // scratch document changes; standard sink notifications update tracked ranges.

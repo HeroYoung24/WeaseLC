@@ -34,12 +34,25 @@ class AutomaticEdit : public CEditSession {
       : CEditSession(owner, context), apply_(apply) {}
   STDMETHODIMP DoEditSession(TfEditCookie cookie) override {
     if (!_IsCurrent()) return TF_E_DISCONNECTED;
-    try { return _pTextService->Automatic().Edit(cookie, _pContext, apply_, &applied); }
+    try { return _pTextService->Automatic().Edit(cookie, _pContext, apply_, &applied, &verification); }
     catch (...) { _pTextService->Automatic().Cancel(); return applied ? S_OK : E_FAIL; }
   }
   bool applied = false;
+  AutomaticCorrection::WriteVerification verification;
  private:
   bool apply_;
+};
+class AutomaticVerify : public CEditSession {
+ public:
+  AutomaticVerify(WeaselTSF* owner, ITfContext* context, const AutomaticCorrection::WriteVerification& verification)
+      : CEditSession(owner, context), verification_(verification) {}
+  STDMETHODIMP DoEditSession(TfEditCookie cookie) override {
+    if (!_IsCurrent()) return TF_E_DISCONNECTED;
+    try { return _pTextService->Automatic().VerifyWrite(cookie, _pContext, verification_); }
+    catch (...) { return E_FAIL; }
+  }
+ private:
+  AutomaticCorrection::WriteVerification verification_;
 };
 void Close(HANDLE& handle) { if (handle && handle != INVALID_HANDLE_VALUE) CloseHandle(handle); handle = nullptr; }
 }  // namespace
@@ -339,7 +352,7 @@ void AutomaticCorrection::LayoutChanged(ITfContext* context, bool destroyed) {
   if (destroyed) { Cancel(); return; }
   positionValid_ = false; Hide(); nextValidation_ = 0;
 }
-HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool apply, bool* applied) {
+HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool apply, bool* applied, WriteVerification* verification) {
   if (applied) *applied = false;
   if (!Validate(cookie, context)) { Cancel(); return S_FALSE; }
   ReadPosition(context, cookie);
@@ -400,12 +413,41 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
     restoreComposition(); return S_FALSE;
   }
   const HRESULT hr = change->SetText(cookie, TF_ST_CORRECTION, item.replacement, item.replacementUnits);
+  // An acknowledged write consumes this key once, even if verification fails:
+  // retrying or falling through could duplicate a write already made by a host.
+  // This flag is NOT evidence that the host retained the replacement.
   if (SUCCEEDED(hr) && applied) *applied = true;
+  bool written = false;
+  if (SUCCEEDED(hr)) {
+    Report(correction::AutomaticStage::TabWriteUnconfirmed);
+    written = hr == S_OK && ReadExact(change, cookie, std::wstring(item.replacement, item.replacementUnits));
+    if (written) Report(correction::AutomaticStage::TabRestoreUnconfirmed);
+  }
   restoreComposition();
   if (FAILED(hr)) return hr;
   selection.range = restore;
-  if (owner_->_IsEditSessionCurrent(generation)) context->SetSelection(cookie, 1, &selection);
+  const HRESULT restored = owner_->_IsEditSessionCurrent(generation) ? context->SetSelection(cookie, 1, &selection) : TF_E_DISCONNECTED;
+  if (written && restored == S_OK && owner_->_IsEditSessionCurrent(generation) && Focused(context) &&
+      ReadExact(change, cookie, std::wstring(item.replacement, item.replacementUnits))) {
+    Report(correction::AutomaticStage::TabPersistenceUnconfirmed);
+    if (verification) {
+      verification->range = change;
+      verification->text.assign(item.replacement, item.replacementUnits);
+      verification->generation = generation;
+    }
+  }
+  // An in-lock read may still be a TSF cache. Request() verifies again only
+  // AFTER this write session returns, under a separate synchronous READ lock.
   return S_OK;
+}
+HRESULT AutomaticCorrection::VerifyWrite(TfEditCookie cookie, ITfContext* context, const WriteVerification& verification) {
+  if (!verification.range || verification.text.empty() || verification.text.size() > 32 ||
+      !owner_->_IsEditSessionCurrent(verification.generation) || !Focused(context) ||
+      !owner_->_CorrectionSafeScope(context, cookie, verification.range)) return S_FALSE;
+  const bool retained = ReadExact(verification.range, cookie, verification.text);
+  if (!owner_->_IsEditSessionCurrent(verification.generation) || !Focused(context)) return S_FALSE;
+  Report(retained ? correction::AutomaticStage::TabApplied : correction::AutomaticStage::TabPersistenceUnconfirmed);
+  return retained ? S_OK : S_FALSE;
 }
 bool AutomaticCorrection::Request(bool apply, ITfContext* context) {
   if (requesting_ || !context_ || !correction::SameIdentity(context_, context)) return false;
@@ -417,6 +459,19 @@ bool AutomaticCorrection::Request(bool apply, ITfContext* context) {
   const HRESULT hr = context->RequestEditSession(Client(), session,
       TF_ES_SYNC | (apply ? TF_ES_READWRITE : TF_ES_READ), &edit);
   if (FAILED(hr)) Report(correction::AutomaticStage::RequestDenied, {correction::FocusStage::Ready, hr});
+  if (apply && session->applied && hr == S_OK && edit == S_OK && session->verification.range) {
+    // Verification is diagnostic only. Allocation/host failures after an
+    // acknowledged write must never turn this key into a second normal edit.
+    try {
+      com_ptr<AutomaticVerify> verify;
+      verify.Attach(new AutomaticVerify(owner_, context, session->verification));
+      HRESULT verified = E_FAIL;
+      const HRESULT requested = context->RequestEditSession(Client(), verify, TF_ES_SYNC | TF_ES_READ, &verified);
+      if (requested != S_OK || verified != S_OK)
+        Report(correction::AutomaticStage::TabPersistenceUnconfirmed,
+            {correction::FocusStage::Ready, requested != S_OK ? requested : verified});
+    } catch (...) { Report(correction::AutomaticStage::TabPersistenceUnconfirmed); }
+  }
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   if (testing_ && apply && !session->applied) fprintf(stderr, "Automatic write request/edit: %08lx/%08lx\n", hr, edit);
 #endif
@@ -510,7 +565,7 @@ bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, boo
     *eaten = TRUE; return true;
   }
   if (!Request(true, context)) { Cancel(); return false; }
-  downTab_ = true; *eaten = TRUE; Report(correction::AutomaticStage::TabApplied); return true;
+  downTab_ = true; *eaten = TRUE; return true;
 } catch (...) { Cancel(); return false; }
 bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
   if (reply.magic != 0x31524357 || reply.version != 1 || reply.count > 8) return false;

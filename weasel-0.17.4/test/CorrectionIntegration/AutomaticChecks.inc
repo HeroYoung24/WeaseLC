@@ -261,6 +261,42 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
       invalidate(service.Get()); document->Pop(TF_POPF_ALL); continue;
     }
 
+    // Some hosts can acknowledge a write without retaining it. Do not report
+    // that as a verified correction or replay an already acknowledged key.
+    using Diagnostic = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, AutomaticDiagnostic*);
+    const auto diagnostic = reinterpret_cast<Diagnostic>(GetProcAddress(module, "WeaselProbeAutomaticDiagnostic"));
+    for (const bool lostAfterLock : {false, true}) {
+      check(diagnostic && configureNow() && Commit(apply, service.Get(), context.Get(), client, L"这里有错子。") &&
+          inject(service.Get(), &reply) == S_OK &&
+          edit([&](TfEditCookie ec) { return preedit(service.Get(), context.Get(), ec, L"ni"); }),
+          "acknowledged-no-write host prepared with active pinyin");
+      const auto unchanged = store->text;
+      store->acknowledgeWithoutWrite = !lostAfterLock;
+      bool lossNotified = false;
+      if (lostAfterLock) store->onSetText = [&]() {
+        store->onAfterLock = [&]() {
+          lossNotified = store->UserReplace(0, static_cast<LONG>(store->text.size()), unchanged) == S_OK;
+        };
+      };
+      keys->OnTestKeyDown(context.Get(), VK_TAB, 0, &eaten);
+      keys->OnKeyDown(context.Get(), VK_TAB, 0, &eaten);
+      store->acknowledgeWithoutWrite = false;
+      store->onAfterLock = {};
+      store->onSetText = {};
+      AutomaticDiagnostic writeState;
+      check(eaten && store->text == unchanged && !state().first && (!lostAfterLock || lossNotified),
+          "acknowledged no-op is consumed once without rewriting or losing pinyin");
+      if (diagnostic) diagnostic(service.Get(), &writeState);
+      std::cout << "Write verification fixture after-lock=" << lostAfterLock << " stage=" << static_cast<unsigned>(writeState.stage) << '\n';
+      check(diagnostic && writeState.stage ==
+          (lostAfterLock ? AutomaticStage::TabPersistenceUnconfirmed : AutomaticStage::TabWriteUnconfirmed),
+          "readback distinguishes an unretained write from a notified post-lock revert");
+      keys->OnKeyUp(context.Get(), VK_TAB, 0, &eaten);
+      check(eaten && noKey(), "unconfirmed write releases Tab for normal navigation after key-up");
+      check(Commit(apply, service.Get(), context.Get(), client, L"你好"),
+          "normal commits continue after an unconfirmed write");
+    }
+
     preferences.timing = 0;
     for (const std::wstring sentence : {L"这里有错子.", L"这里有错子"}) {
       const auto beforeVariant = store->text;
@@ -274,6 +310,9 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
       keys->OnKeyDown(context.Get(), VK_TAB, 0, &eaten);
       check(eaten && store->text == beforeVariant + corrected + L"ni",
           "Tab corrects punctuation variant and preserves pinyin");
+      AutomaticDiagnostic confirmed;
+      check(diagnostic && diagnostic(service.Get(), &confirmed) == S_OK && confirmed.stage == AutomaticStage::TabApplied,
+          "successful correction is read back after restoring composition and selection");
       keys->OnKeyUp(context.Get(), VK_TAB, 0, &eaten);
       check(Commit(apply, service.Get(), context.Get(), client, L"你好") &&
           store->text == beforeVariant + corrected + L"你好", "input continues after punctuation variant correction");

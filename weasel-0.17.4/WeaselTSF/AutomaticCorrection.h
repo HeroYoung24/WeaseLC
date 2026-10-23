@@ -20,7 +20,13 @@ class AutomaticCorrection {
   void Position(const RECT& caret);
   void Refresh();
   bool Key(ITfContext*, WPARAM, LPARAM, bool test, bool up, BOOL* eaten);
-  HRESULT Edit(TfEditCookie, ITfContext*, bool apply, bool* applied);
+  struct WriteVerification {
+    com_ptr<ITfRange> range;
+    std::wstring text;
+    ULONGLONG generation = 0;
+  };
+  HRESULT Edit(TfEditCookie, ITfContext*, bool apply, bool* applied, WriteVerification*);
+  HRESULT VerifyWrite(TfEditCookie, ITfContext*, const WriteVerification&);
   bool Focused(ITfContext* target = nullptr) const;
   void Poll();
 #ifdef WEASELC_LOCAL_TEST_BUILD

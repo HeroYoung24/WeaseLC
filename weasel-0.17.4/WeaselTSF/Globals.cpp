@@ -13,6 +13,7 @@ static const GUID c_guidProfile = WEASELC_TEST_PROFILE;
 #elif defined(WEASEL_CORRECTION_PROBE_BUILD)
 #ifdef _M_IX86
 #pragma comment(linker, "/EXPORT:WeaselProbeSetKeySink=_WeaselProbeSetKeySink@12")
+#pragma comment(linker, "/EXPORT:WeaselProbeSetKeyMessageTime=_WeaselProbeSetKeyMessageTime@8")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticConfigure=_WeaselProbeAutomaticConfigure@16")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticInject=_WeaselProbeAutomaticInject@8")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticState=_WeaselProbeAutomaticState@12")

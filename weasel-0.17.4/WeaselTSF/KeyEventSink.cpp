@@ -86,6 +86,10 @@ HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
   com_ptr<WeaselTSF> keepAlive = this;
   if (!eaten) return E_POINTER;
   *eaten = FALSE;
+  // Capture the host message identity BEFORE any callback/IPC/edit work can
+  // pump another Windows message. The paired actual callback is still for
+  // this original message, not the most recently pumped one.
+  const LONG messageTime = _KeyMessageTime();
 #ifdef WEASELC_LOCAL_TEST_BUILD
   // Prove entry independently of Capture. Never record the key or modifiers.
   static thread_local ULONGLONG nextDiagnostic = 0;
@@ -103,7 +107,7 @@ HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
   }
   auto& pending = up ? _pendingKeyUp : _pendingKeyDown;
   (up ? _pendingKeyDown : _pendingKeyUp).Reset();
-  if (pending.Matches(context, key, flags)) {
+  if (pending.Matches(context, key, flags, messageTime)) {
     if (!test) pending.Reset();
     *eaten = TRUE;
     return S_OK;
@@ -116,7 +120,7 @@ HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
   _ProcessKeyEvent(key, flags, eaten);
   _UpdateComposition(context);
   if (test && *eaten && _IsEditSessionCurrent(generation))
-    pending.Set(context, key, flags);
+    pending.Set(context, key, flags, messageTime);
   return S_OK;
 }
 
@@ -141,6 +145,11 @@ STDAPI WeaselTSF::OnPreservedKey(ITfContext* pContext,
 }
 
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeSetKeyMessageTime(
+    ITfTextInputProcessorEx* service, LONG value) {
+  if (!service) return E_POINTER;
+  static_cast<WeaselTSF*>(service)->ProbeMessageTime(value); return S_OK;
+}
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeSetKeySink(
     ITfTextInputProcessorEx* service, void(WINAPI* sink)(WPARAM, LPARAM, BOOL*, void*), void* state) {
   if (!service) return E_POINTER;

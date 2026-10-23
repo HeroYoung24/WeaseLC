@@ -629,6 +629,15 @@ static bool TestTextEdits(HMODULE module, REFCLSID clsid) {
 static void WINAPI CountSyntheticKey(WPARAM, LPARAM, BOOL* eaten, void* state) {
   ++*static_cast<unsigned*>(state); *eaten = TRUE;
 }
+struct PumpedKeyClock {
+  ITfTextInputProcessorEx* service;
+  HRESULT(WINAPI* clock)(ITfTextInputProcessorEx*, LONG);
+  unsigned calls = 0;
+};
+static void WINAPI AdvanceSyntheticMessageTime(WPARAM, LPARAM, BOOL* eaten, void* state) {
+  auto& observed = *static_cast<PumpedKeyClock*>(state);
+  ++observed.calls; observed.clock(observed.service, 200); *eaten = TRUE;
+}
 static bool TestInterruptedInput(HMODULE module, REFCLSID clsid) {
   using Exercise = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, ITfContext*, ITfContextView*, ITfComposition*, TfEditCookie, DWORD, BOOL);
   using Bound = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, ITfContext*, HRESULT(WINAPI*)(ITfContext*, TfEditCookie), ITfEditSession**);
@@ -684,6 +693,26 @@ static bool TestInterruptedInput(HMODULE module, REFCLSID clsid) {
     check(calls==2, "query from another context cannot suppress new input");
     setKeys(service.Get(), nullptr, nullptr);
     service->Deactivate();
+  }
+  // A host may pump messages inside backend dispatch or composition updates.
+  // Inject only a clock; never send physical input or activate a system TIP.
+  for (bool release : {false, true}) {
+    ComPtr<IClassFactory> factory; ComPtr<ITfTextInputProcessorEx> service; ComPtr<ITfKeyEventSink> keys;
+    get(clsid,IID_IClassFactory,reinterpret_cast<void**>(factory.GetAddressOf()));
+    factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf())); service.As(&keys);
+    auto clock = reinterpret_cast<HRESULT(WINAPI*)(ITfTextInputProcessorEx*,LONG)>(GetProcAddress(module,"WeaselProbeSetKeyMessageTime"));
+    if (!clock) return false;
+    CompositionRange range; CompositionContext context(range);
+    PumpedKeyClock observed{service.Get(),clock}; setKeys(service.Get(),AdvanceSyntheticMessageTime,&observed);
+    BOOL eaten = FALSE; clock(service.Get(),100);
+    if (release) keys->OnTestKeyUp(&context,'1',1,&eaten); else keys->OnTestKeyDown(&context,'1',1,&eaten);
+    clock(service.Get(),100); // Actual callback belongs to the ORIGINAL host key message.
+    if (release) keys->OnKeyUp(&context,'1',1,&eaten); else keys->OnKeyDown(&context,'1',1,&eaten);
+    check(observed.calls==1 && eaten,"message pumping during a query cannot dispatch the original key twice");
+    clock(service.Get(),300); // A later identical physical message must still dispatch.
+    if (release) keys->OnKeyUp(&context,'1',1,&eaten); else keys->OnKeyDown(&context,'1',1,&eaten);
+    check(observed.calls==2 && eaten,"different message timestamp still processes a later identical key");
+    setKeys(service.Get(),nullptr,nullptr); service->Deactivate();
   }
   // Host mouse/selection events, with the real text-edit sink and no global
   // keyboard or mouse injection. The cleanup may run after new composition.
