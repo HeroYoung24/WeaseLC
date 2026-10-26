@@ -260,7 +260,8 @@ int wmain(int argc, wchar_t** argv) {
   }
   if (argc == 2 && !wcscmp(argv[1], L"/correction-worker-selftest")) return RunAutomaticFixtureWorker();
   const bool tabHostReview = argc == 3 && !wcscmp(argv[2], L"--tab-host-review");
-  const bool automatic = tabHostReview || (argc == 3 && !wcscmp(argv[2], L"--automatic"));
+  const bool memoryReview = argc == 3 && !wcscmp(argv[2], L"--word-memory-review");
+  const bool automatic = tabHostReview || memoryReview || (argc == 3 && !wcscmp(argv[2], L"--automatic"));
   const bool automaticLocal = argc == 4 && !wcscmp(argv[2], L"--automatic-local");
   const bool automaticBroker = argc == 5 && !wcscmp(argv[2], L"--automatic-broker-http");
   if (argc != 2 && argc != 5 && argc != 6 && !automatic && !automaticLocal) return 2;
@@ -279,7 +280,7 @@ int wmain(int argc, wchar_t** argv) {
   if (CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED) != S_OK) return 1;
   HMODULE module = LoadLibraryW(argv[1]);
   bool valid = module && ((automatic || automaticLocal || automaticBroker) ? RunAutomaticChecks(module,
-      automaticLocal ? argv[3] : L"", automaticLocal, automaticBroker ? &brokerModel : nullptr, tabHostReview) : Run(module, live, local, holdout,
+      automaticLocal ? argv[3] : L"", automaticLocal, automaticBroker ? &brokerModel : nullptr, tabHostReview, memoryReview) : Run(module, live, local, holdout,
       (live || local) ? argv[3] : L"", (live || local) ? argv[4] : L"", live ? argv[5] : L""));
   bool released = module != nullptr;
   if (module) {

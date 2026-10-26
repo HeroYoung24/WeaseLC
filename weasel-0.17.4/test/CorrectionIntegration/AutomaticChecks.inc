@@ -105,7 +105,8 @@ class AutomaticHostEdit final : public ITfEditSession {
   ULONG refs_ = 1;
   std::function<HRESULT(TfEditCookie)> body_;
 };
-static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool local, const ModelConfig* brokerModel = nullptr, bool hostReview = false) {
+static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool local, const ModelConfig* brokerModel = nullptr, bool hostReview = false,
+                               bool memoryReview = false) {
   auto handler = AddVectoredExceptionHandler(1, AutomaticException);
   struct Cleanup { void* handler; ~Cleanup() { if (handler) RemoveVectoredExceptionHandler(handler); } } cleanup{handler};
   std::cout << std::unitbuf;
@@ -141,6 +142,13 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
   AutomaticReply reply; reply.count = 1;
   auto& item = reply.items[0]; item.start = 3; item.originalUnits = 2; item.replacementUnits = 2; item.score = .95;
   wcscpy_s(item.original, L"错子"); wcscpy_s(item.replacement, L"错字");
+  if (memoryReview) {
+    #include "WordMemoryChecks.inc"
+    invalidate(service.Get()); service.Reset();
+    check(manager->Deactivate() == S_OK, "memory-only host deactivated without TIP activation");
+    std::cout << "Memory analysis checks = " << checks << ", failures = " << failed << '\n';
+    return !failed;
+  }
   const HWND foreground = GetForegroundWindow();
   const InputScope fieldScopes[] = {IS_TEXT, IS_TEXT, IS_PASSWORD, IS_DEFAULT, IS_PRIVATE,
       IS_NUMERIC_PIN, IS_ALPHANUMERIC_PIN, IS_ALPHANUMERIC_PIN_SET};

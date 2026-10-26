@@ -970,6 +970,11 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticDiagnostic(
   if (!service || !result) return E_INVALIDARG;
   *result = static_cast<WeaselTSF*>(service)->Automatic().DiagnosticTest(); return S_OK;
 }
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticCachedUnits(
+    ITfTextInputProcessorEx* service, DWORD* units) {
+  if (!service || !units) return E_INVALIDARG;
+  *units = static_cast<WeaselTSF*>(service)->Automatic().CachedUnitsTest(); return S_OK;
+}
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticCandidate(
     ITfTextInputProcessorEx* service, DWORD mode, RECT* position) {
   if (!service || !position || mode > 4) return E_INVALIDARG;

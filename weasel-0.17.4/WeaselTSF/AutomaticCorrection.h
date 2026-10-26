@@ -51,6 +51,7 @@ class AutomaticCorrection {
   void FocusTest(bool focused) { testFocused_ = focused; }
   DWORD ProcessTest() const { return process_ ? GetProcessId(process_) : 0; }
   correction::AutomaticDiagnostic DiagnosticTest() const { return diagnostic_; }
+  DWORD CachedUnitsTest() const { return static_cast<DWORD>(text_.size()); }
   bool CandidateTest(DWORD mode, RECT& position);
 #endif
  private:

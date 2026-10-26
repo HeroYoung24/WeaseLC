@@ -1,5 +1,11 @@
 # 当前开发进度（2026-10-26）
 
+## 最新定位：Word“未进入记忆”是校验/失败清缓存，尚无统一禁读证据
+
+重新核对现场与生产调用链：两次5单元上屏已交付；2/3单元LastCapture证明Word范围GetText确曾S_OK且一致，retained=0。输入范围属性失败时Word兼容分支又依赖不可用的Document.Permission（383缺128），并非Word明确发布禁读结果。Capture旧范围不通过时Cancel后仅留新片段；Validate/Observe失败及Poll推理失败亦Cancel清零text_；属性恢复不自动补读，固定语料拒绝碎片还会再次清缓存。Captured阶段2在Validate之前，不能当成已验证捕获。
+
+仅新增探测构建缓存长度读数和`--word-memory-review`：自有真实TSF锁下复现3→0、属性恢复后文档6但缓存3、推理失败清缓存，合法NoChange保留累计；双架构各20项及DLL卸载通过。生产逻辑/安装未改，纠错与模型不启用。详见[重新定位报告](docs/WORD_CONTEXT_MEMORY_ANALYSIS_2026-10-26.md)。后续先分阶段记录属性类型/输入类型和清理原因，再拆分推理建议与文本追踪状态，不能直接放宽未知权限。
+
 ## 最新收尾：Edge 真实4B整组反馈正常，连续标点回归完成，运行时已关闭
 
 用户针对真实4B的普通句/连续标点/无错句整组问题回复“现在好了”，未逐条展开。新鲜末尾元数据HTTP200/Suggestions、8单元/812ms，随后TabApplied，固定开关为0；观察器窗口已结束，不能声称有每个样本的完整轨迹。Edge A/B/C Fixed已独立确认实际替换与拼音/输入恢复正常；Word基础通过但提示仍卡在Permission getter E_FAIL，不算Word修复通过。
