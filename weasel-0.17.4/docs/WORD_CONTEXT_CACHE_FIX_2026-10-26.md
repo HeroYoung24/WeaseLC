@@ -65,3 +65,5 @@ x64 / Win32 各：
 ## 当前安装准备
 
 修复提交 f5f11f1；六文件更新包 `output/LocalTest/UpdatePatch-20261026-233611` 已完整只读校验，尚未安装。准备时发现ChatGPT、explorer、msedge加载旧测试DLL，已请用户保存工作并释放占用。再次继续必须重新扫描，不沿用旧PID；安装仍d7a3fbe，尚未获得本修复的Word实测结果。恢复状态 `output/LocalTest/word-cache-fix-state-20261026.json`。
+
+用户随后要求暂不安装/测试，修复完成先暂停。已按此停止，不再请求现在释放DLL。新包保留，等用户明确恢复测试再进行下一步；此前授权不能覆盖这条最新暂停要求。
