@@ -4,6 +4,7 @@
 #include <CorrectionBrokerProcess.h>
 #include <CorrectionBrokerSupervisor.h>
 #include <CorrectionServiceControl.h>
+#include <KeyDispatchDiagnostic.h>
 #include "../../WeaselServer/CorrectionBroker.h"
 #include "../../WeaselDeployer/CorrectionPreferences.h"
 #include "../LocalDeployment/FixedAutomaticTransport.h"
@@ -182,6 +183,20 @@ int wmain(int argc, wchar_t** argv) {
     check(call.SendMetadata(Self(),notice) &&
         RegGetValueW(HKEY_CURRENT_USER,key.c_str(),L"LastScopeAfterEnd",RRF_RT_REG_BINARY,nullptr,saved,&bytes)==ERROR_SUCCESS &&
         !memcmp(trace,saved,sizeof(trace)),"scope trace rejects unknown phase without replacing evidence");
+  }
+  for (const auto kind : {BrokerMetadata::KeyDownDispatch,BrokerMetadata::KeyUpDispatch,BrokerMetadata::IntegratedDispatch}) {
+    BrokerRequest notice;notice.operation=BrokerOperation::Metadata;notice.metadata=kind;
+    KeyDispatchDiagnostic sample;sample.callbacks=17;sample.dispatches=9;sample.reuses=8;
+    sample.unhandled=1;sample.actualMisses=1;sample.reasons=DifferentFlags;
+    notice.metadataBytes=sizeof(sample);memcpy(notice.data,&sample,sizeof(sample));
+    const wchar_t* names[]{L"LastKeyDownDispatch",L"LastKeyUpDispatch",L"LastIntegratedDispatch"};
+    const auto name=names[static_cast<unsigned>(kind)-static_cast<unsigned>(BrokerMetadata::KeyDownDispatch)];
+    const auto path=root+L"\\Diagnostics";KeyDispatchDiagnostic saved;DWORD bytes=sizeof(saved);
+    const bool sent=call.SendMetadata(Self(),notice);const auto deadline=GetTickCount64()+1000;
+    while(RegGetValueW(HKEY_CURRENT_USER,path.c_str(),name,RRF_RT_REG_BINARY,nullptr,&saved,&bytes)!=ERROR_SUCCESS &&
+        GetTickCount64()<deadline){bytes=sizeof(saved);Sleep(5);}
+    check(sent && bytes==sizeof(sample) && !memcmp(&sample,&saved,sizeof(sample)),
+        "bounded dispatch counters relay on the correct closed metadata channel");
   }
   check(run() && reply.status == BrokerStatus::Ok && reply.result.count == 1, "fixed response through production parser and broker");
   check(healthSnapshot() && health.modelState == static_cast<DWORD>(State::Suggestions),

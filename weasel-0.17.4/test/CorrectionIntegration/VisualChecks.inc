@@ -33,6 +33,12 @@ if (!local) {
           check(integrated->OnKeyDown(offered, 0, &handled) == S_OK && !handled,
               "integrated candidate never claims an unprocessed key without a hint");
         }
+        using Dispatch = HRESULT(WINAPI*)(ITfTextInputProcessorEx*,DWORD,KeyDispatchDiagnostic*);
+        const auto dispatch = reinterpret_cast<Dispatch>(GetProcAddress(module,"WeaselProbeGetKeyDispatch"));
+        KeyDispatchDiagnostic observed;
+        check(dispatch && dispatch(visualService.Get(),2,&observed)==S_OK && observed.callbacks==6 &&
+            observed.unhandled==6 && observed.dispatches==0,
+            "integrated dispatch counts remain separate from ordinary backend dispatch");
       }
       auto state = [&]() { DWORD ready = 0; HWND hint = nullptr; status(visualService.Get(), &ready, &hint); return std::make_pair(ready != 0, hint); };
       auto edit = [&](std::function<HRESULT(TfEditCookie)> body) {

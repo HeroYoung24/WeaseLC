@@ -9,7 +9,8 @@ enum class BrokerOperation : DWORD { Settings = 1, Check, Metadata, Health };
 enum class BrokerStatus : DWORD {
   Ok, Unavailable, Disabled, SettingsChanged, Busy, InvalidRequest, ModelFailure
 };
-enum class BrokerMetadata : DWORD { Key, Commit, Gate, Capture, Automatic, Scope, ScopeTrace };
+enum class BrokerMetadata : DWORD { Key, Commit, Gate, Capture, Automatic, Scope, ScopeTrace,
+                                  KeyDownDispatch, KeyUpDispatch, IntegratedDispatch };
 #pragma pack(push, 1)
 struct BrokerSettings {
   ULONGLONG revision = 0;
@@ -59,7 +60,8 @@ inline DWORD MetadataSize(BrokerMetadata kind) {
     case BrokerMetadata::Key: case BrokerMetadata::Commit: case BrokerMetadata::Gate: return 32;
     case BrokerMetadata::Capture: case BrokerMetadata::Automatic: return 24;
     case BrokerMetadata::Scope: return 20;
-    case BrokerMetadata::ScopeTrace: return 40;
+    case BrokerMetadata::ScopeTrace: case BrokerMetadata::KeyDownDispatch:
+    case BrokerMetadata::KeyUpDispatch: case BrokerMetadata::IntegratedDispatch: return 40;
     default: return 0;
   }
 }

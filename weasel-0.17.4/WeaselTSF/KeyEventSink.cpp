@@ -86,6 +86,14 @@ HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
   com_ptr<WeaselTSF> keepAlive = this;
   if (!eaten) return E_POINTER;
   *eaten = FALSE;
+#if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
+  const unsigned channel = up ? 1 : 0;
+  if (_traceKeyDispatch) ++_keyDispatch[channel].callbacks;
+  struct Completed {
+    WeaselTSF* owner; unsigned channel; BOOL* eaten; ULONGLONG generation;
+    ~Completed() { owner->CompleteKeyDispatch(channel, *eaten, generation); }
+  } completed{this, channel, eaten, _GetEditGeneration()};
+#endif
   // Capture the host message identity BEFORE any callback/IPC/edit work can
   // pump another Windows message. The paired actual callback is still for
   // this original message, not the most recently pumped one.
@@ -108,21 +116,53 @@ HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
   auto& pending = up ? _pendingKeyUp : _pendingKeyDown;
   (up ? _pendingKeyDown : _pendingKeyUp).Reset();
   if (pending.Matches(context, key, flags, messageTime)) {
+#if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
+    if (_traceKeyDispatch) ++_keyDispatch[channel].reuses;
+#endif
     if (!test) pending.Reset();
     *eaten = TRUE;
     return S_OK;
   }
+#if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
+  if (_traceKeyDispatch && !test) {
+    auto& trace = _keyDispatch[channel]; ++trace.actualMisses;
+    trace.reasons |= correction::KeyPairReasons(pending.context != nullptr,
+        correction::SameIdentity(pending.context, context), pending.key == key,
+        pending.flags == flags, pending.time == messageTime);
+  }
+#endif
   pending.Reset();
   // A new document must retire the old Rime composition before dispatching
   // this key, rather than clearing the just-processed response afterwards.
   _BindEditContext(context);
   const auto generation = _GetEditGeneration();
+#if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
+  if (_traceKeyDispatch) ++_keyDispatch[channel].dispatches;
+#endif
   _ProcessKeyEvent(key, flags, eaten);
   _UpdateComposition(context);
   if (test && *eaten && _IsEditSessionCurrent(generation))
     pending.Set(context, key, flags, messageTime);
   return S_OK;
 }
+
+#if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
+void WeaselTSF::CompleteKeyDispatch(unsigned channel, BOOL eaten, ULONGLONG generation) noexcept {
+  if (!_traceKeyDispatch || channel >= _countof(_keyDispatch)) return;
+  auto& observed = _keyDispatch[channel];
+  if (!eaten) ++observed.unhandled;
+  if (!_IsEditSessionCurrent(generation)) ++observed.invalidations;
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  // A short, explicit test budget. Delivery is best effort, never a reason to
+  // retry a key or block input waiting for the diagnostic backend.
+  if (observed.callbacks > 512) return;
+  GetSystemTimeAsFileTime(&observed.time);
+  const correction::BrokerMetadata kind[]{correction::BrokerMetadata::KeyDownDispatch,
+      correction::BrokerMetadata::KeyUpDispatch, correction::BrokerMetadata::IntegratedDispatch};
+  correction::RelayCorrectionMetadata(kind[channel], &observed, sizeof(observed));
+#endif
+}
+#endif
 
 STDAPI WeaselTSF::OnTestKeyDown(ITfContext* context, WPARAM key, LPARAM flags, BOOL* eaten) {
   return _HandleKey(context, key, flags, eaten, true, false);
@@ -145,6 +185,11 @@ STDAPI WeaselTSF::OnPreservedKey(ITfContext* pContext,
 }
 
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeGetKeyDispatch(
+    ITfTextInputProcessorEx* service, DWORD channel, correction::KeyDispatchDiagnostic* result) {
+  if (!service || !result || channel > 2) return E_INVALIDARG;
+  *result = static_cast<WeaselTSF*>(service)->ProbeKeyDispatch(channel); return S_OK;
+}
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeSetKeyMessageTime(
     ITfTextInputProcessorEx* service, LONG value) {
   if (!service) return E_POINTER;

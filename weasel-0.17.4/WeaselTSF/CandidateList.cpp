@@ -220,7 +220,14 @@ STDMETHODIMP CCandidateList::OnKeyDown(WPARAM wParam,
   *pIsEaten = FALSE;
   if (!_tsf) return TF_E_DISCONNECTED;
   com_ptr<WeaselTSF> keepAlive = _tsf;
+#if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
+  const auto generation = keepAlive->_GetEditGeneration();
+  keepAlive->BeginIntegratedDispatch();
+#endif
   keepAlive->Automatic().IntegratedKey(wParam, lParam, pIsEaten);
+#if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
+  keepAlive->CompleteKeyDispatch(2, *pIsEaten, generation);
+#endif
   return S_OK;
 }
 

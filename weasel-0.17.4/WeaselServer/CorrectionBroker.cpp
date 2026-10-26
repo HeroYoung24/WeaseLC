@@ -134,7 +134,8 @@ struct CorrectionBroker::Impl {
       if(phase>2)return;
       PrepareDiagnostics();Record(entries[phase],request.data,request.metadataBytes);return;
     }
-    const wchar_t* names[]{L"LastKey",L"LastCommit",L"LastGate",L"LastCapture",L"LastAutomatic",L"LastScope"};
+    const wchar_t* names[]{L"LastKey",L"LastCommit",L"LastGate",L"LastCapture",L"LastAutomatic",L"LastScope",
+        nullptr,L"LastKeyDownDispatch",L"LastKeyUpDispatch",L"LastIntegratedDispatch"};
     PrepareDiagnostics();
     Record(names[static_cast<unsigned>(request.metadata)], request.data, request.metadataBytes);
   }

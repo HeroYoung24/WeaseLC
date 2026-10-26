@@ -1,5 +1,6 @@
 #pragma once
 #include <CorrectionFocus.h>
+#include <KeyDispatchDiagnostic.h>
 
 #include "Globals.h"
 #include <WeaselIPC.h>
@@ -272,6 +273,25 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   bool _probeMessageTimeEnabled = false;
 #endif
   HRESULT _HandleKey(ITfContext*, WPARAM, LPARAM, BOOL*, bool test, bool up);
+#if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
+ public:
+  const correction::KeyDispatchDiagnostic& ProbeKeyDispatch(unsigned channel) const { return _keyDispatch[channel]; }
+  bool TraceKeyDispatch() const { return _traceKeyDispatch; }
+  void CompleteKeyDispatch(unsigned channel, BOOL eaten, ULONGLONG generation) noexcept;
+  void BeginIntegratedDispatch() { if (_traceKeyDispatch) ++_keyDispatch[2].callbacks; }
+ private:
+  correction::KeyDispatchDiagnostic _keyDispatch[3];
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  bool _traceKeyDispatch = true;
+#else
+  // Opt in only for a deliberately launched synthetic-input test process.
+  // Ordinary test hosts incur no extra diagnostic IPC per key.
+  bool _traceKeyDispatch = []() {
+    WCHAR value[2]{};
+    return GetEnvironmentVariableW(L"WEASELC_TRACE_KEYS", value, _countof(value)) == 1 && value[0] == L'1';
+  }();
+#endif
+#endif
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   using ProbeKeySink = void(WINAPI*)(WPARAM, LPARAM, BOOL*, void*);
   ProbeKeySink _probeKeySink = nullptr;

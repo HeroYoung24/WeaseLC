@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include "../../include/KeyDispatchDiagnostic.h"
 #include <initguid.h>
 #include "../../include/CorrectionScope.h"
 
@@ -638,6 +639,9 @@ static void WINAPI AdvanceSyntheticMessageTime(WPARAM, LPARAM, BOOL* eaten, void
   auto& observed = *static_cast<PumpedKeyClock*>(state);
   ++observed.calls; observed.clock(observed.service, 200); *eaten = TRUE;
 }
+static void WINAPI RejectSyntheticKey(WPARAM, LPARAM, BOOL* eaten, void* state) {
+  ++*static_cast<unsigned*>(state); *eaten = FALSE;
+}
 static bool TestInterruptedInput(HMODULE module, REFCLSID clsid) {
   using Exercise = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, ITfContext*, ITfContextView*, ITfComposition*, TfEditCookie, DWORD, BOOL);
   using Bound = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, ITfContext*, HRESULT(WINAPI*)(ITfContext*, TfEditCookie), ITfEditSession**);
@@ -813,6 +817,46 @@ static bool TestInterruptedInput(HMODULE module, REFCLSID clsid) {
         "release pairing, auto-repeat, actual-only events and lifecycle resets do not swallow input");
     service->Deactivate(); setKeys(service.Get(),nullptr,nullptr);
     check(a.references==1 && b.references==1,"pending key context references released on reset");
+  }
+  using Dispatch = HRESULT(WINAPI*)(ITfTextInputProcessorEx*,DWORD,correction::KeyDispatchDiagnostic*);
+  const auto dispatch = reinterpret_cast<Dispatch>(GetProcAddress(module,"WeaselProbeGetKeyDispatch"));
+  auto clock = reinterpret_cast<HRESULT(WINAPI*)(ITfTextInputProcessorEx*,LONG)>(GetProcAddress(module,"WeaselProbeSetKeyMessageTime"));
+  if (!dispatch || !clock) return false;
+  for (unsigned mode = 0; mode != 7; ++mode) {
+    ComPtr<IClassFactory> factory; ComPtr<ITfTextInputProcessorEx> service; ComPtr<ITfKeyEventSink> keys;
+    get(clsid,IID_IClassFactory,reinterpret_cast<void**>(factory.GetAddressOf()));
+    factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf()));service.As(&keys);
+    CompositionRange first, second;CompositionContext a(first),b(second);
+    unsigned calls=0;BOOL eaten=FALSE;
+    setKeys(service.Get(),mode==6 ? RejectSyntheticKey : CountSyntheticKey,&calls);clock(service.Get(),100);
+    if(mode!=5) keys->OnTestKeyDown(&a,'1',1,&eaten);
+    if(mode==0) keys->OnTestKeyDown(&a,'1',1,&eaten);
+    if(mode==2) clock(service.Get(),200);
+    keys->OnKeyDown(mode==3 ? &b : &a,mode==4 ? '2' : '1',mode==1 ? 0x40000001 : 1,&eaten);
+    correction::KeyDispatchDiagnostic observed;
+    const DWORD reasons[]{0,correction::DifferentFlags,correction::DifferentMessageTime,
+        correction::DifferentContext,correction::DifferentKey,correction::NoPendingKey,correction::NoPendingKey};
+    check(dispatch(service.Get(),0,&observed)==S_OK && observed.callbacks==(mode==0 ? 3u : mode==5 ? 1u : 2u) &&
+        observed.dispatches==calls && observed.reuses==(mode==0 ? 2u : 0u) && observed.reasons==reasons[mode] &&
+        observed.actualMisses==(mode==0 ? 0u : 1u) && observed.unhandled==(mode==6 ? 2u : 0u),
+        "dispatch metadata distinguishes pairing, rejection and equality failures without recording keys");
+    check(dispatch(service.Get(),3,&observed)==E_INVALIDARG && dispatch(service.Get(),0,nullptr)==E_INVALIDARG,
+        "dispatch metadata rejects invalid channel and null output");
+    setKeys(service.Get(),nullptr,nullptr);service->Deactivate();
+    check(a.references==1 && b.references==1,"dispatch observation adds no context or service references");
+  }
+  {
+    ComPtr<IClassFactory> factory;ComPtr<ITfTextInputProcessorEx> service;ComPtr<ITfKeyEventSink> keys;
+    get(clsid,IID_IClassFactory,reinterpret_cast<void**>(factory.GetAddressOf()));
+    factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf()));service.As(&keys);
+    CompositionRange range;CompositionContext context(range);unsigned calls=0;BOOL eaten=FALSE;
+    setKeys(service.Get(),CountSyntheticKey,&calls);clock(service.Get(),100);
+    keys->OnTestKeyUp(&context,'1',1,&eaten);keys->OnKeyUp(&context,'1',1,&eaten);
+    correction::KeyDispatchDiagnostic down,up;
+    check(dispatch(service.Get(),1,&up)==S_OK && dispatch(service.Get(),0,&down)==S_OK &&
+        up.callbacks==2 && up.dispatches==1 && up.reuses==1 && up.actualMisses==0 && down.callbacks==0,
+        "key-up observations cannot overwrite or increment key-down observations");
+    setKeys(service.Get(),nullptr,nullptr);service->Deactivate();
   }
   std::cout << "Interrupted input checks = " << checks << ", failures = " << failed << '\n';
   return failed==0;

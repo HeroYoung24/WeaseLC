@@ -11,6 +11,7 @@
 #include "../LocalDeployment/FixedAutomaticTransport.h"
 #include <CorrectionDiagnostics.h>
 #include <ctffunc.h>
+#include <KeyDispatchDiagnostic.h>
 #include "CompositionProjection.h"
 #pragma comment(lib, "dbghelp.lib")
 static bool SaveOwnedHint(HWND window, const wchar_t* filename) {

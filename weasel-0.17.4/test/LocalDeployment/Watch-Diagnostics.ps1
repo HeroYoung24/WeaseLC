@@ -20,7 +20,7 @@ $previous='';$events=0;$clock=[Diagnostics.Stopwatch]::StartNew()
 Write-Output "Metadata only; leave the test editor in front. Output: $output"
 while($clock.Elapsed.TotalSeconds -lt $Seconds){
   $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path)
-  $automatic=$null;$scope=$null;$capture=$null;$worker=$null;$broker=$null;$frontend=[ordered]@{};$scopeTrace=[ordered]@{}
+  $automatic=$null;$scope=$null;$capture=$null;$worker=$null;$broker=$null;$frontend=[ordered]@{};$scopeTrace=[ordered]@{};$keyDispatch=[ordered]@{}
   try{
     $a=Read-Metadata $key 'LastAutomatic' 24
     $s=Read-Metadata $key 'LastScope' 20
@@ -47,8 +47,17 @@ while($clock.Elapsed.TotalSeconds -lt $Seconds){
         $scopeTrace[$name]=$entry
       }
     }
+    foreach($name in @('LastKeyDownDispatch','LastKeyUpDispatch','LastIntegratedDispatch')) {
+      $v=Read-Metadata $key $name 40;$keyDispatch[$name]=$null
+      if($v) {
+        $entry=[ordered]@{}
+        $fields=@('callbacks','dispatches','reuses','unhandled','actualMisses','reasons','invalidations')
+        for($i=0;$i -lt $fields.Count;$i++){$entry[$fields[$i]]=[BitConverter]::ToUInt32($v,4+4*$i)}
+        $entry.utc=Get-Time $v 32;$keyDispatch[$name]=$entry
+      }
+    }
   }finally{if($key){$key.Dispose()}}
-  $state=[ordered]@{automatic=$automatic;scope=$scope;capture=$capture;worker=$worker;broker=$broker;frontend=$frontend;scopeTrace=$scopeTrace}
+  $state=[ordered]@{automatic=$automatic;scope=$scope;capture=$capture;worker=$worker;broker=$broker;frontend=$frontend;scopeTrace=$scopeTrace;keyDispatch=$keyDispatch}
   $signature=$state | ConvertTo-Json -Depth 5 -Compress
   if($signature -cne $previous){
     [ordered]@{observedUtc=[DateTime]::UtcNow.ToString('o');state=$state} | ConvertTo-Json -Depth 6 -Compress | Add-Content -LiteralPath $output -Encoding UTF8
