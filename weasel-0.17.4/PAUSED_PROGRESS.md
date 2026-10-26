@@ -1,5 +1,11 @@
 # 当前开发进度（2026-10-26）
 
+## 最新收尾：Edge 真实4B整组反馈正常，连续标点回归完成，运行时已关闭
+
+用户针对真实4B的普通句/连续标点/无错句整组问题回复“现在好了”，未逐条展开。新鲜末尾元数据HTTP200/Suggestions、8单元/812ms，随后TabApplied，固定开关为0；观察器窗口已结束，不能声称有每个样本的完整轨迹。Edge A/B/C Fixed已独立确认实际替换与拼音/输入恢复正常；Word基础通过但提示仍卡在Permission getter E_FAIL，不算Word修复通过。
+
+固定连续标点源码修补f919e91：双架构各141离线、442自动/同步故障回归及DLL卸载通过，构建成功，未安装。收尾纠错/自动/固定均Off，专用后端/协调器和4B退出，ready/18963监听均无，自有测试进程为0；200安装文件/原版基线一致。安装保留d7a3fbe，用户Word/Edge未强行关闭。详见 [实装报告](docs/WORD_EDGE_DEPLOYMENT_TEST_2026-10-26.md)，状态 `output/LocalTest/word-edge-live-test-state-20261026.json`。后续先Word属性与捕获时序；Edge纠错本身撤销及更多环境仍待测。不重复部署或继续调参。
+
 ## 最新实装：d7a3fbe 已安装，Edge 固定 Tab 三框通过，Word 权限属性失败
 
 用户已授权继续实装/测试，解除前轮等待限制。包 `UpdatePatch-20261026-212756` 实际回退演练及更新成功，200 文件/原输入法基线一致。新 Word 实际加载 d7a3fbe DLL；用户确认 Off 数字选词/句号/空格选词/中断退格/搜狗均正常。Fixed 仍无提示：Word 能力位383，直接只读元数据确认 Document.Permission getter 返回 E_FAIL，ReadOnly=false、ProtectionType=-1；仅有2/3单元新捕获且未累计，夹具请求 InvalidRequest，不能称为完全读不到文字或 UI/模型超时。未放宽保护。
