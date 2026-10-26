@@ -146,11 +146,13 @@ int wmain(int argc, wchar_t** argv) {
     return failures ? 1 : 0;
   }
   if (argc != 1) return 2;
-  for (const auto& text : {L"这里有错子", L"这里有错子。", L"这里有错子."})
-    Check(FixedAutomaticVerdict(text) == FixedVerdict::Suggest, "fixed corpus supports word and both full stops");
+  for (const auto& text : {L"这里有错子", L"这里有错子。", L"这里有错子.", L"这里有错子，，，", L"这里有错子。。。",
+      L"这里有错子..", L"这里有错子？！", L"这里有错子……", L"这里有错子，，。。！？；："})
+    Check(FixedAutomaticVerdict(text) == FixedVerdict::Suggest, "fixed corpus preserves bounded repeated and mixed punctuation");
   for (const auto& text : {L"这", L"这里", L"这里有", L"这里有错"})
     Check(FixedAutomaticVerdict(text) == FixedVerdict::NoChange, "fixed prefix preserves word-by-word context");
-  for (const auto& text : {L"", L" 这里有错子。", L"这里有错子..", L"这里有错字。", L"其他文字"})
+  for (const auto& text : {L"", L" 这里有错子。", L"这里有错字。", L"其他文字", L"这里有错子，，，，，，，，，",
+      L"这里有错子abc", L"这里有错子 后文", L"这里有错子\n", L"这里有错子\t", L"这里有错子🙂"})
     Check(FixedAutomaticVerdict(text) == FixedVerdict::Reject, "fixed corpus remains restricted to compiled samples");
   RequestQueue queue(250, 1000);
   CheckRequest queued; queued.safeText = true; queued.text = L"合成";

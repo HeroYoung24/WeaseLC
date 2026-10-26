@@ -301,7 +301,7 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     }
 
     preferences.timing = 0;
-    for (const std::wstring sentence : {L"这里有错子.", L"这里有错子"}) {
+    for (const std::wstring sentence : {L"这里有错子.", L"这里有错子", L"这里有错子，，，", L"这里有错子。。。"}) {
       const auto beforeVariant = store->text;
       auto corrected = sentence; corrected.replace(3, 2, L"错字");
       check(configureNow() && Commit(apply, service.Get(), context.Get(), client, sentence) &&
