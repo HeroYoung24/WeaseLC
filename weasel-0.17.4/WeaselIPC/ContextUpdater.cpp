@@ -52,7 +52,7 @@ void ContextUpdater::_StoreText(Text& target,
     if (k[2] == L"cursor") {
       std::vector<std::wstring> vec;
       split(vec, value, L",");
-      if (vec.size() < 2)
+      if (vec.size() < 3)
         return;
 
       weasel::TextAttribute attr;

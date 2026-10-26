@@ -79,8 +79,9 @@ STDAPI WeaselTSF::OnSetFocus(BOOL fForeground) {
   return S_OK;
 }
 
-// Query and actual callbacks may be duplicated, omitted or interleaved. Reuse
-// a processed query only for this exact key message and context.
+// Query timestamps distinguish repeated queries from a later identical query.
+// The paired actual callback acknowledges the most recent processed query once;
+// its GetMessageTime can change while the host processes another message.
 HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
                                BOOL* eaten, bool test, bool up) {
   com_ptr<WeaselTSF> keepAlive = this;
@@ -94,9 +95,8 @@ HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
     ~Completed() { owner->CompleteKeyDispatch(channel, *eaten, generation); }
   } completed{this, channel, eaten, _GetEditGeneration()};
 #endif
-  // Capture the host message identity BEFORE any callback/IPC/edit work can
-  // pump another Windows message. The paired actual callback is still for
-  // this original message, not the most recently pumped one.
+  // Capture before callbacks pump messages. This is a query deduplication hint,
+  // not a stable TSF key identity shared by query and actual callbacks.
   const LONG messageTime = _KeyMessageTime();
 #ifdef WEASELC_LOCAL_TEST_BUILD
   // Prove entry independently of Capture. Never record the key or modifiers.
@@ -115,12 +115,12 @@ HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
   }
   auto& pending = up ? _pendingKeyUp : _pendingKeyDown;
   (up ? _pendingKeyDown : _pendingKeyUp).Reset();
-  if (pending.Matches(context, key, flags, messageTime)) {
+  if (pending.Matches(context, key, flags, messageTime, test)) {
 #if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
     if (_traceKeyDispatch) ++_keyDispatch[channel].reuses;
 #endif
+    *eaten = pending.handled;
     if (!test) pending.Reset();
-    *eaten = TRUE;
     return S_OK;
   }
 #if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
@@ -141,8 +141,12 @@ HRESULT WeaselTSF::_HandleKey(ITfContext* context, WPARAM key, LPARAM flags,
 #endif
   _ProcessKeyEvent(key, flags, eaten);
   _UpdateComposition(context);
-  if (test && *eaten && _IsEditSessionCurrent(generation))
-    pending.Set(context, key, flags, messageTime);
+  // A processed-but-unhandled query can still change backend state (notably
+  // release keys). If a host also forwards actual, retain its original result
+  // instead of dispatching it a second time. Key-up/down and lifecycle changes
+  // retire the opposite receipt; a new query must still match its timestamp.
+  if (test && _IsEditSessionCurrent(generation))
+    pending.Set(context, key, flags, messageTime, *eaten);
   return S_OK;
 }
 

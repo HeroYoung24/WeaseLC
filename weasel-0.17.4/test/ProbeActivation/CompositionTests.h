@@ -718,6 +718,45 @@ static bool TestInterruptedInput(HMODULE module, REFCLSID clsid) {
     check(observed.calls==2 && eaten,"different message timestamp still processes a later identical key");
     setKeys(service.Get(),nullptr,nullptr); service->Deactivate();
   }
+  // A TSF host can retrieve another Windows message between query and actual.
+  // The processed query must be acknowledged once even if that clock changes.
+  for (bool release : {false, true}) for (bool handled : {false, true}) {
+    ComPtr<IClassFactory> factory;ComPtr<ITfTextInputProcessorEx> service;ComPtr<ITfKeyEventSink> keys;
+    get(clsid,IID_IClassFactory,reinterpret_cast<void**>(factory.GetAddressOf()));
+    factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf()));service.As(&keys);
+    const auto clock=reinterpret_cast<HRESULT(WINAPI*)(ITfTextInputProcessorEx*,LONG)>(GetProcAddress(module,"WeaselProbeSetKeyMessageTime"));
+    if(!clock)return false;
+    CompositionRange range;CompositionContext context(range);unsigned calls=0;BOOL eaten=FALSE;
+    setKeys(service.Get(),handled ? CountSyntheticKey : RejectSyntheticKey,&calls);clock(service.Get(),100);
+    if(release)keys->OnTestKeyUp(&context,'1',1,&eaten);else keys->OnTestKeyDown(&context,'1',1,&eaten);
+    clock(service.Get(),200);
+    if(release)keys->OnKeyUp(&context,'1',1,&eaten);else keys->OnKeyDown(&context,'1',1,&eaten);
+    check(calls==1 && !!eaten==handled,
+        "host clock changes between query and actual preserve the single dispatch and original handled result");
+    setKeys(service.Get(),nullptr,nullptr);service->Deactivate();
+  }
+  for (unsigned mode=0;mode!=3;++mode) {
+    ComPtr<IClassFactory> factory;ComPtr<ITfTextInputProcessorEx> service;ComPtr<ITfKeyEventSink> keys;
+    get(clsid,IID_IClassFactory,reinterpret_cast<void**>(factory.GetAddressOf()));
+    factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,reinterpret_cast<void**>(service.GetAddressOf()));service.As(&keys);
+    const auto clock=reinterpret_cast<HRESULT(WINAPI*)(ITfTextInputProcessorEx*,LONG)>(GetProcAddress(module,"WeaselProbeSetKeyMessageTime"));
+    CompositionRange range;CompositionContext context(range);unsigned calls=0;BOOL eaten=FALSE;
+    setKeys(service.Get(),CountSyntheticKey,&calls);clock(service.Get(),100);
+    keys->OnTestKeyDown(&context,'1',1,&eaten);
+    if(mode==0){
+      clock(service.Get(),200);keys->OnKeyUp(&context,'1',1,&eaten);
+      clock(service.Get(),300);keys->OnKeyDown(&context,'1',1,&eaten);
+      check(calls==3 && eaten,"orphaned query followed by release cannot swallow the next actual-only press");
+    }else{
+      clock(service.Get(),200);const LPARAM flags=mode==2 ? LPARAM(0x40000001) : LPARAM(1);
+      keys->OnTestKeyDown(&context,'1',flags,&eaten);
+      clock(service.Get(),300);keys->OnKeyDown(&context,'1',flags,&eaten);
+      check(calls==2 && eaten,"new identical query and repeat flag each start a new one-use receipt");
+      clock(service.Get(),400);keys->OnKeyDown(&context,'1',flags,&eaten);
+      check(calls==3 && eaten,"consumed receipt cannot suppress a later actual-only key with identical flags");
+    }
+    setKeys(service.Get(),nullptr,nullptr);service->Deactivate();
+  }
   // Host mouse/selection events, with the real text-edit sink and no global
   // keyboard or mouse injection. The cleanup may run after new composition.
   for (unsigned mode = 0; mode != 6; ++mode) {
@@ -834,11 +873,13 @@ static bool TestInterruptedInput(HMODULE module, REFCLSID clsid) {
     if(mode==2) clock(service.Get(),200);
     keys->OnKeyDown(mode==3 ? &b : &a,mode==4 ? '2' : '1',mode==1 ? 0x40000001 : 1,&eaten);
     correction::KeyDispatchDiagnostic observed;
-    const DWORD reasons[]{0,correction::DifferentFlags,correction::DifferentMessageTime,
-        correction::DifferentContext,correction::DifferentKey,correction::NoPendingKey,correction::NoPendingKey};
+    const DWORD reasons[]{0,correction::DifferentFlags,0,
+        correction::DifferentContext,correction::DifferentKey,correction::NoPendingKey,0};
+    const DWORD reuses=mode==0 ? 2u : (mode==2 || mode==6) ? 1u : 0u;
+    const DWORD expectedCalls=(mode==0 || mode==2 || mode==5 || mode==6) ? 1u : 2u;
     check(dispatch(service.Get(),0,&observed)==S_OK && observed.callbacks==(mode==0 ? 3u : mode==5 ? 1u : 2u) &&
-        observed.dispatches==calls && observed.reuses==(mode==0 ? 2u : 0u) && observed.reasons==reasons[mode] &&
-        observed.actualMisses==(mode==0 ? 0u : 1u) && observed.unhandled==(mode==6 ? 2u : 0u),
+        calls==expectedCalls && observed.dispatches==calls && observed.reuses==reuses && observed.reasons==reasons[mode] &&
+        observed.actualMisses==(reuses ? 0u : 1u) && observed.unhandled==(mode==6 ? 2u : 0u),
         "dispatch metadata distinguishes pairing, rejection and equality failures without recording keys");
     check(dispatch(service.Get(),3,&observed)==E_INVALIDARG && dispatch(service.Get(),0,nullptr)==E_INVALIDARG,
         "dispatch metadata rejects invalid channel and null output");

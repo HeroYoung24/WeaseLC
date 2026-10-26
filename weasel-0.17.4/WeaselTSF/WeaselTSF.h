@@ -249,12 +249,13 @@ class WeaselTSF : public ITfTextInputProcessorEx,
     WPARAM key = 0;
     LPARAM flags = 0;
     LONG time = 0;
-    bool Matches(ITfContext* target, WPARAM value, LPARAM message, LONG messageTime) const {
+    BOOL handled = FALSE;
+    bool Matches(ITfContext* target, WPARAM value, LPARAM message, LONG messageTime, bool query) const {
       return context && correction::SameIdentity(context, target) && key == value && flags == message &&
-          time == messageTime;
+          (!query || time == messageTime);
     }
-    void Set(ITfContext* target, WPARAM value, LPARAM message, LONG messageTime) {
-      context = target; key = value; flags = message; time = messageTime;
+    void Set(ITfContext* target, WPARAM value, LPARAM message, LONG messageTime, BOOL result) {
+      context = target; key = value; flags = message; time = messageTime; handled = result;
     }
     void Reset() { context = nullptr; }
   };

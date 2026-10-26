@@ -4,6 +4,7 @@
 #include "ResponseParser.h"
 #include "EditSession.h"
 #include <ResponseSlot.h>
+#include <ResponseParser.h>
 
 STDAPI WeaselTSF::DoEditSession(TfEditCookie ec) {
   // Internal requests now own their context in CServerResponseEditSession.
@@ -41,6 +42,21 @@ HRESULT WeaselTSF::_ApplyServerResponse(TfEditCookie ec, ITfContext* target,
 
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeSnapshotChecks() {
+  // Optional parser outputs are independent. Missing config must not be
+  // dereferenced merely because a caller requested context, and a cursor
+  // record must contain all three coordinates before accessing the third.
+  weasel::Context context;
+  weasel::ResponseParser contextOnly(nullptr,&context);
+  contextOnly.Feed(L"action=config,ctx");
+  contextOnly.Feed(L"config.inline_preedit=1");
+  contextOnly.Feed(L"ctx.preedit.cursor=0,1");
+  if(!context.preedit.attributes.empty())return E_FAIL;
+  contextOnly.Feed(L"ctx.preedit.cursor=0,1,1");
+  if(context.preedit.attributes.size()!=1 || context.preedit.attributes[0].range.cursor!=1)return E_FAIL;
+  weasel::Config config;config.inline_preedit=FALSE;
+  weasel::ResponseParser configOnly(nullptr,nullptr,nullptr,&config);
+  configOnly.Feed(L"action=config");configOnly.Feed(L"config.inline_preedit=1");
+  if(!config.inline_preedit)return E_FAIL;
   std::wstring buffer = L"action=commit,ctx\ncommit=甲\nctx.preedit=甲\n.\n";
   weasel::ResponseSlot slot;
   auto pull = [&](const weasel::ResponseHandler& parser) {
