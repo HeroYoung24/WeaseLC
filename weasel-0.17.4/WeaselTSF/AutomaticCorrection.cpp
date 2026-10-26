@@ -15,6 +15,7 @@
 
 namespace {
 constexpr ULONGLONG kLifetime = 10000;
+constexpr ULONGLONG kScopeWait = 500;
 bool Same(ITfRange* a, ITfRange* b, TfEditCookie cookie, TfAnchor aa, TfAnchor bb) {
   LONG difference = 1;
   return (aa == TF_ANCHOR_START ? a->CompareStart(cookie, b, bb, &difference)
@@ -111,16 +112,78 @@ void AutomaticCorrection::Cancel() {
 #ifdef WEASELC_LOCAL_TEST_BUILD
   scopeReadTraceContext_.Release();
 #endif
-  ++revision_; ready_ = false; checked_ = false;
-  StopWorker(); Hide();
+  DiscardSuggestion(false);
+  scopePending_ = false; scopeWaitUntil_ = 0; lastAddedUnits_ = 0;
   context_.Release(); range_.Release();
   expectedSelection_.Release(); expectedPreedit_.clear(); expectedComposing_ = false;
   positionValid_ = false;
   measuredDpi_ = 0; measuredSize_ = {};
   if (!text_.empty()) SecureZeroMemory(text_.data(), text_.size() * sizeof(WCHAR));
-  text_.clear(); label_.clear(); item_ = {};
+  text_.clear();
   caret_ = {};
   if (window_) KillTimer(window_, 1);
+}
+void AutomaticCorrection::DiscardSuggestion(bool completed) {
+  ++revision_; ready_ = false; checked_ = completed;
+  StopWorker(); Hide(); label_.clear(); item_ = {};
+  measuredDpi_ = 0; measuredSize_ = {};
+}
+void AutomaticCorrection::InferenceFailed(correction::AutomaticStage stage) {
+  DiscardSuggestion(true); Report(stage);
+  // Keep only a still-validated tracked range. A failure is a completed attempt,
+  // not an idle retry loop; a new commit creates the next check opportunity.
+  if (context_ && !Request(false, context_)) Cancel();
+}
+bool AutomaticCorrection::TrackIdleSelection(ITfContext* context, TfEditCookie cookie) {
+  if (!context_ || !range_ || !correction::SameIdentity(context_, context) ||
+      owner_->_IsComposing() || expectedComposing_) return false;
+  const auto revision = revision_;
+  TF_SELECTION selected{}; ULONG count = 0; BOOL empty = FALSE;
+  const auto hr = context->GetSelection(cookie, TF_DEFAULT_SELECTION, 1, &selected, &count);
+  com_ptr<ITfRange> selection; selection.Attach(selected.range);
+  if (hr != S_OK || count != 1 || !selection || selected.style.fInterimChar ||
+      selection->IsEmpty(cookie, &empty) != S_OK || !empty ||
+      !Same(range_, selection, cookie, TF_ANCHOR_END, TF_ANCHOR_END)) return false;
+  if (expectedSelection_ && (!Same(expectedSelection_, selection, cookie, TF_ANCHOR_START, TF_ANCHOR_START) ||
+      !Same(expectedSelection_, selection, cookie, TF_ANCHOR_END, TF_ANCHOR_END))) return false;
+  if (selection->SetGravity(cookie, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD) != S_OK || revision != revision_) return false;
+  expectedSelection_ = selection;
+  return true;
+}
+bool AutomaticCorrection::CanWaitForScope(const correction::ScopeDiagnostic& details) const {
+  bool eligible = correction::MayWaitForWordScope(details);
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  if (testing_ && testPendingScope_) eligible = details.stage == correction::ScopeStage::PropertyValue &&
+      details.error == E_FAIL && details.variantType == VT_EMPTY;
+#endif
+  return eligible;
+}
+bool AutomaticCorrection::WaitForScope(const correction::ScopeDiagnostic& details, ITfContext* context, TfEditCookie cookie) {
+  const bool eligible = CanWaitForScope(details);
+  if (!eligible || (scopeWaitUntil_ && GetTickCount64() >= scopeWaitUntil_) || !TrackIdleSelection(context, cookie)) return false;
+  if (!scopeWaitUntil_) {
+    scopeWaitUntil_ = GetTickCount64() + kScopeWait;
+    DiscardSuggestion(checked_);
+  }
+  scopePending_ = true; positionValid_ = false; Hide();
+  Report(correction::AutomaticStage::WaitingScope);
+  return true;
+}
+bool AutomaticCorrection::Arm() {
+  if (!EnsureWindow()) return false;
+  nextSettings_ = GetTickCount64() + 500;
+  nextValidation_ = 0;
+  return SetTimer(window_, 1, 40, nullptr) != 0;
+}
+void AutomaticCorrection::VerifiedCapture() {
+  Report(correction::AutomaticStage::Captured);
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  correction::CaptureDiagnostic captured;
+  captured.totalUnits = static_cast<DWORD>(text_.size());
+  captured.addedUnits = lastAddedUnits_;
+  captured.retainedUnits = captured.totalUnits - captured.addedUnits;
+  correction::SavePipelineDiagnostic(L"LastCapture", captured);
+#endif
 }
 #ifdef WEASELC_LOCAL_TEST_BUILD
 bool AutomaticCorrection::ConsumeScopeReadTrace(ITfContext* context) {
@@ -189,15 +252,21 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   // insertion point. Never pull earlier document contents into the model.
   std::wstring accumulated;
   com_ptr<ITfRange> previous;
+  ULONGLONG carriedDeadline = 0;
   if (correction::SameIdentity(context_, context) && range_ && committed && SettingsCurrent() &&
-      GetTickCount64() - started_ < kLifetime && text_.size() + text.size() <= 1024) {
+      GetTickCount64() - started_ < kLifetime && text_.size() + text.size() <= 1024 &&
+      (!scopeWaitUntil_ || GetTickCount64() < scopeWaitUntil_)) {
     const auto revision = revision_;
     const auto old = text_;
     com_ptr<ITfRange> oldRange = range_;
-    if (owner_->_CorrectionSafeScope(context, cookie, oldRange) &&
-        Same(oldRange, committed, cookie, TF_ANCHOR_END, TF_ANCHOR_START) &&
-        ReadExact(oldRange, cookie, old) && revision == revision_ && oldRange->Clone(&previous) == S_OK)
+    correction::ScopeDiagnostic details;
+    const bool allowed = owner_->_CorrectionSafeScope(context, cookie, oldRange, nullptr, &details);
+    const bool waiting = !allowed && CanWaitForScope(details);
+    if ((allowed || waiting) && Same(oldRange, committed, cookie, TF_ANCHOR_END, TF_ANCHOR_START) &&
+        (allowed ? ReadExact(oldRange, cookie, old) : true) && revision == revision_ && oldRange->Clone(&previous) == S_OK) {
       accumulated = old;
+      carriedDeadline = scopeWaitUntil_ ? scopeWaitUntil_ : waiting ? GetTickCount64() + kScopeWait : 0;
+    }
   }
   Cancel();
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
@@ -233,7 +302,6 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   gate.stage = 6;
   correction::SaveFrontendDiagnostic(L"LastGate", gate);
 #endif
-  Report(correction::AutomaticStage::Captured);
   context_ = context;
   if (previous && !accumulated.empty()) {
     range_ = previous;
@@ -247,27 +315,27 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
       range_->SetGravity(cookie, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD) != S_OK) { Report(correction::AutomaticStage::RangeMismatch); Cancel(); return; }
   text_ = std::move(accumulated);
   started_ = GetTickCount64();
-  if (!Validate(cookie, context)) { Cancel(); return; }
-#ifdef WEASELC_LOCAL_TEST_BUILD
-  // Validate has read back the exact owned range under the host's edit lock.
-  correction::CaptureDiagnostic captured;
-  captured.totalUnits = static_cast<DWORD>(text_.size());
-  captured.addedUnits = static_cast<DWORD>(text.size());
-  captured.retainedUnits = captured.totalUnits - captured.addedUnits;
-  correction::SavePipelineDiagnostic(L"LastCapture", captured);
-#endif
-  if (!EnsureWindow()) { Report(correction::AutomaticStage::LayoutUnavailable); Cancel(); return; }
+  lastAddedUnits_ = static_cast<DWORD>(text.size());
+  scopeWaitUntil_ = carriedDeadline;
+  const bool recovering = scopeWaitUntil_ != 0;
+  if (!Validate(cookie, context)) {
+    if (!scopePending_) Cancel();
+    else if (!Arm()) { Report(correction::AutomaticStage::LayoutUnavailable); Cancel(); }
+    return;
+  }
+  if (!recovering) VerifiedCapture();
+  if (!Arm()) { Report(correction::AutomaticStage::LayoutUnavailable); Cancel(); return; }
   RecordInput(context, cookie);
-  if (!context_) return;
-  nextSettings_ = started_ + 500;
-  nextValidation_ = started_;
-  if (!SetTimer(window_, 1, 40, nullptr)) { Report(correction::AutomaticStage::LayoutUnavailable); Cancel(); }
 } catch (...) { Cancel(); }
 bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
+  scopePending_ = false;  // Only the exact eligible failure below may preserve it.
   if (!context_ || !correction::SameIdentity(context, context_) || !range_) {
     Report(correction::AutomaticStage::RangeMismatch); return false;
   }
   if (GetTickCount64() - started_ >= Lifetime()) { Report(correction::AutomaticStage::Expired); return false; }
+  if (scopeWaitUntil_ && GetTickCount64() >= scopeWaitUntil_) {
+    Report(correction::AutomaticStage::ScopeWaitExpired); return false;
+  }
   if (!Focused()) return false;
   if (!SettingsCurrent()) { Report(correction::AutomaticStage::SettingsChanged); return false; }
   const auto revision = revision_;
@@ -286,6 +354,7 @@ bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
     if (!testing_)
 #endif
       correction::SaveScopeDiagnostic(details);
+    if (revision == revision_ && WaitForScope(details, context, cookie)) return false;
     Report(scope == correction::ProbeStatus::ProtectedField ? correction::AutomaticStage::ProtectedField :
         correction::AutomaticStage::ScopeUnavailable); return false;
   }
@@ -315,13 +384,22 @@ bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
         composition->CompareEnd(cookie, selected, TF_ANCHOR_END, &end) != S_OK || end < 0) { Report(correction::AutomaticStage::SelectionMoved); return false; }
     if (expectedSelection_ && !ReadExact(composition, cookie, expectedPreedit_)) { Report(correction::AutomaticStage::TextChanged); return false; }
   } else if (!Same(target, selected, cookie, TF_ANCHOR_END, TF_ANCHOR_END)) { Report(correction::AutomaticStage::SelectionMoved); return false; }
-  return revision == revision_;
+  if (revision != revision_) return false;
+  if (scopeWaitUntil_) { scopeWaitUntil_ = 0; VerifiedCapture(); }
+  return true;
 }
 void AutomaticCorrection::Observe(ITfContext* context, TfEditCookie cookie) try {
-  if (context_ && !Validate(cookie, context)) Cancel();
+  if (context_ && !Validate(cookie, context) && !scopePending_) Cancel();
 } catch (...) { Cancel(); }
 void AutomaticCorrection::RecordInput(ITfContext* context, TfEditCookie cookie) try {
   if (!context_ || !correction::SameIdentity(context_, context)) return;
+  if (scopeWaitUntil_) {
+    // While metadata is unknown, never read preedit text or accept a newly
+    // started composition as the old insertion point. Normal input still runs.
+    if (!TrackIdleSelection(context, cookie)) { Cancel(); return; }
+    if (!Validate(cookie, context)) { if (!scopePending_) Cancel(); return; }
+    ReadPosition(context, cookie); return;
+  }
   const auto revision = revision_;
   com_ptr<ITfContext> held = context_;
   TF_SELECTION selection{}; ULONG count = 0;
@@ -343,7 +421,7 @@ void AutomaticCorrection::RecordInput(ITfContext* context, TfEditCookie cookie) 
   }
   if (revision != revision_) return;
   expectedSelection_ = selected; expectedPreedit_ = std::move(preedit); expectedComposing_ = composing;
-  if (!Validate(cookie, context)) { Cancel(); return; }
+  if (!Validate(cookie, context)) { if (!scopePending_) Cancel(); return; }
   ReadPosition(context, cookie);
 } catch (...) { Cancel(); }
 void AutomaticCorrection::ReadPosition(ITfContext* context, TfEditCookie cookie) {
@@ -370,7 +448,7 @@ void AutomaticCorrection::LayoutChanged(ITfContext* context, bool destroyed) {
 }
 HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool apply, bool* applied, WriteVerification* verification) {
   if (applied) *applied = false;
-  if (!Validate(cookie, context)) { Cancel(); return S_FALSE; }
+  if (!Validate(cookie, context)) { if (!scopePending_) Cancel(); return S_FALSE; }
   ReadPosition(context, cookie);
   // A layout/candidate can disappear between timer ticks or between the TSF
   // query and actual key callbacks. Recheck presentation under this edit lock.
@@ -597,7 +675,8 @@ bool AutomaticCorrection::Request(bool apply, ITfContext* context) {
   if (testing_ && apply && !session->applied) fprintf(stderr, "Automatic write request/edit: %08lx/%08lx\n", hr, edit);
 #endif
   // SYNC only: a refused lock must never leave a delayed document write queued.
-  return apply ? session->applied : hr == S_OK && edit == S_OK;
+  return apply ? session->applied : (hr == S_OK && edit == S_OK) ||
+      (scopePending_ && context_ && GetTickCount64() < scopeWaitUntil_);
 }
 void AutomaticCorrection::Position(const RECT& caret) {
   // Candidate position alone does not prove that the host caret is visible.
@@ -605,6 +684,7 @@ void AutomaticCorrection::Position(const RECT& caret) {
   Refresh();
 }
 void AutomaticCorrection::Refresh() {
+  if (scopeWaitUntil_) { Hide(); return; }
   if (ready_ && GetTickCount64() - started_ >= Lifetime()) { Cancel(); return; }
   if (!ready_ || !window_) { Hide(); return; }
   if (!positionValid_) { Report(correction::AutomaticStage::LayoutUnavailable); Hide(); return; }
@@ -825,11 +905,13 @@ void AutomaticCorrection::Poll() {
   struct Guard { bool& flag; ~Guard() { flag = false; } } guard{polling_};
   const auto now = GetTickCount64();
   if (!Focused()) { ResetKeys(); Cancel(); return; }
+  if (scopeWaitUntil_ && now >= scopeWaitUntil_) { Report(correction::AutomaticStage::ScopeWaitExpired); Cancel(); return; }
   if (now - started_ >= Lifetime()) { Report(correction::AutomaticStage::Expired); Cancel(); return; }
   if (now >= nextValidation_) {
     if (!Request(false, context_)) { Cancel(); return; }
     nextValidation_ = now + 120;
   }
+  if (scopePending_) return;  // Quarantined commits never reach the model.
   if (now >= nextSettings_) {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
     if (!testing_ || testingBroker_)
@@ -839,41 +921,42 @@ void AutomaticCorrection::Poll() {
   }
   if (!checked_ && !ready_ && !process_ && !brokerCall_.Active() && now - started_ >= preferences_.automatic.debounce) {
     if (!Request(false, context_)) { Cancel(); return; }
-    if (!StartWorker()) { Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
+    if (scopeWaitUntil_) return;  // Scope may have changed since the first read lock.
+    if (!StartWorker()) { InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
     Report(correction::AutomaticStage::WorkerStarted);
   }
   if (brokerCall_.Active()) {
     correction::BrokerReply reply;
     const int state = brokerCall_.Poll(reply);
-    if (state < 0) { Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
+    if (state < 0) { InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
     if (state == 1) {
       const bool valid = reply.status == correction::BrokerStatus::Ok &&
           reply.settings.revision == brokerRevision_ &&
           (reply.modelState == static_cast<DWORD>(correction::State::Suggestions) ||
            reply.modelState == static_cast<DWORD>(correction::State::NoSuggestion) ||
            reply.modelState == static_cast<DWORD>(correction::State::Filtered));
-      if (!valid) { SecureZeroMemory(&reply, sizeof(reply)); Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
+      if (!valid) { SecureZeroMemory(&reply, sizeof(reply)); InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
       const bool accepted = AcceptReply(reply.result);
       SecureZeroMemory(&reply, sizeof(reply));
-      if (!accepted) { Report(correction::AutomaticStage::InvalidReply); Cancel(); return; }
+      if (!accepted) { InferenceFailed(correction::AutomaticStage::InvalidReply); return; }
       if (!Request(false, context_)) { Cancel(); return; }
     }
   }
   if (process_) {
     DWORD available = 0;
-    if (!PeekNamedPipe(output_, nullptr, 0, nullptr, &available, nullptr)) { Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
+    if (!PeekNamedPipe(output_, nullptr, 0, nullptr, &available, nullptr)) { InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
     if (available < sizeof(correction::AutomaticReply) && WaitForSingleObject(process_, 0) == WAIT_OBJECT_0) {
       // The process may have written/exited between the first peek and wait.
-      if (!PeekNamedPipe(output_, nullptr, 0, nullptr, &available, nullptr) || available < sizeof(correction::AutomaticReply)) { Report(correction::AutomaticStage::WorkerFailed); Cancel(); return; }
+      if (!PeekNamedPipe(output_, nullptr, 0, nullptr, &available, nullptr) || available < sizeof(correction::AutomaticReply)) { InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
     }
-    if (available > sizeof(correction::AutomaticReply)) { Report(correction::AutomaticStage::InvalidReply); Cancel(); return; }
+    if (available > sizeof(correction::AutomaticReply)) { InferenceFailed(correction::AutomaticStage::InvalidReply); return; }
     if (available == sizeof(correction::AutomaticReply)) {
       correction::AutomaticReply reply; DWORD read = 0;
       const bool received = ReadFile(output_, &reply, sizeof(reply), &read, nullptr) && read == sizeof(reply);
       StopWorker();
       if (!received || !AcceptReply(reply)) {
         Report(correction::AutomaticStage::InvalidReply);
-        SecureZeroMemory(&reply, sizeof(reply)); Cancel(); return;
+        SecureZeroMemory(&reply, sizeof(reply)); InferenceFailed(correction::AutomaticStage::InvalidReply); return;
       }
       if (!Request(false, context_)) {
         SecureZeroMemory(&reply, sizeof(reply)); Cancel(); return;
@@ -933,13 +1016,15 @@ bool AutomaticCorrection::CandidateTest(DWORD mode, RECT& position) {
 }
 void AutomaticCorrection::ConfigureTest(const correction::Preferences& preferences, TfClientId client, const std::wstring& worker) {
   Cancel(); ResetKeys(); testing_ = true; testFocused_ = true;
+  testPendingScope_ = false;
   strictCandidateTest_ = false;
   testingBroker_ = worker.compare(0, 7, L"broker:") == 0;
   preferences_ = preferences; testClient_ = client; testWorker_ = testingBroker_ ? worker.substr(7) : worker;
 }
 bool AutomaticCorrection::InjectTest(const correction::AutomaticReply& reply) {
-  if (!testing_ || testingBroker_ || !context_ || !AcceptReply(reply)) return false;
+  if (!testing_ || testingBroker_ || scopeWaitUntil_ || !context_ || !AcceptReply(reply)) return false;
   if (!Request(false, context_)) { Cancel(); return false; }
+  if (scopeWaitUntil_) return false;
   Refresh(); return true;
 }
 
@@ -974,6 +1059,20 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticCachedUnits(
     ITfTextInputProcessorEx* service, DWORD* units) {
   if (!service || !units) return E_INVALIDARG;
   *units = static_cast<WeaselTSF*>(service)->Automatic().CachedUnitsTest(); return S_OK;
+}
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticScopeWait(
+    ITfTextInputProcessorEx* service, DWORD operation) {
+  if (!service || operation > 3) return E_INVALIDARG;
+  auto& automatic = static_cast<WeaselTSF*>(service)->Automatic();
+  if (operation == 3) automatic.RevalidateTest();
+  else if (operation == 2) automatic.ExpirePendingTest();
+  else automatic.PendingScopeTest(operation != 0);
+  return S_OK;
+}
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticScopeDeadline(
+    ITfTextInputProcessorEx* service, ULONGLONG* deadline) {
+  if (!service || !deadline) return E_INVALIDARG;
+  *deadline = static_cast<WeaselTSF*>(service)->Automatic().ScopeDeadlineTest(); return S_OK;
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticCandidate(
     ITfTextInputProcessorEx* service, DWORD mode, RECT* position) {

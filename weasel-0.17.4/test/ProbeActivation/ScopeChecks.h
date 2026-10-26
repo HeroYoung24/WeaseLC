@@ -187,6 +187,16 @@ static bool TestCorrectionScope() {
   const auto rejected=InspectInputScope(&context,1,&range,ScopeUse::LocalCommit,nullptr,incomplete);
   check(!rejected && rejected.stage==ScopeStage::WordMetadataUnavailable && rejected.scope==(WordRange|WordView|WordPane|WordObject),
       "Word metadata failure preserves closed evidence flags instead of another generic scope failure");
+  ScopeDiagnostic pending; pending.stage=ScopeStage::WordMetadataUnavailable;pending.error=E_FAIL;
+  pending.variantType=VT_EMPTY;pending.scope=WordVerified&~WordUnrestricted;
+  check(MayWaitForWordScope(pending) && !static_cast<bool>(pending),"Word quarantine eligibility is not permission to read or correct");
+  for(DWORD evidence:{DWORD(WordRange),DWORD(WordView),DWORD(WordPane),DWORD(WordObject),DWORD(WordDocument),DWORD(WordWritable),DWORD(WordUnprotected),DWORD(WordStableFocus)}) {
+    auto incompletePending=pending;incompletePending.scope&=~evidence;
+    check(!MayWaitForWordScope(incompletePending),"every independent Word metadata capability is required before temporary retention");
+  }
+  for(auto stage:{ScopeStage::ProtectedScope,ScopeStage::ReadOnly,ScopeStage::PropertyValue,ScopeStage::UnsupportedScope}) {
+    auto forbidden=pending;forbidden.stage=stage;check(!MayWaitForWordScope(forbidden),"unknown generic or forbidden input scope cannot enter Word quarantine");
+  }
   property.result=TF_E_NOLOCK;check(!verifiedDocument(),"Word metadata cannot override missing edit lock");
   property.result=E_ACCESSDENIED;check(!verifiedDocument(),"Word metadata cannot override denied scope");
   property.result=S_OK;property.type=VT_UNKNOWN;input.scopes={IS_PRIVATE};

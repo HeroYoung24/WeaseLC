@@ -59,10 +59,15 @@ for (unsigned scenario = 0; scenario < 3; ++scenario) {
     AutomaticDiagnostic observed;
     do { poll(service.Get()); memoryDiagnostic(service.Get(), &observed); if (observed.stage == AutomaticStage::WorkerFailed) break; Sleep(10); }
     while (GetTickCount64() < deadline);
-    check(observed.stage == AutomaticStage::WorkerFailed && units() == 0 && host->text == prefix,
-        "failed inference/transport path also clears context without removing host text");
-    check(Commit(apply, service.Get(), context.Get(), client, L"这里有") && units() == 3 && host->text == prefix + L"这里有",
-        "after worker failure the next capture starts over rather than rereading old document text");
+    check(observed.stage == AutomaticStage::WorkerFailed && units() == prefix.size() && host->text == prefix,
+        "failed inference retires its result but retains validated owned context");
+    poll(service.Get());
+    DWORD process = 0; environment(service.Get(), TRUE, &process);
+    check(!process && units() == prefix.size(), "failed inference is not retried while input is idle");
+    check(Commit(apply, service.Get(), context.Get(), client, L"这里有") && units() == prefix.size() + 3 && host->text == prefix + L"这里有",
+        "after worker failure new input extends the retained context without history reads");
   }
   invalidate(service.Get()); document->Pop(TF_POPF_ALL);
 }
+
+#include "WordPendingChecks.inc"

@@ -52,6 +52,10 @@ class AutomaticCorrection {
   DWORD ProcessTest() const { return process_ ? GetProcessId(process_) : 0; }
   correction::AutomaticDiagnostic DiagnosticTest() const { return diagnostic_; }
   DWORD CachedUnitsTest() const { return static_cast<DWORD>(text_.size()); }
+  void PendingScopeTest(bool enabled) { testPendingScope_ = enabled; }
+  void ExpirePendingTest() { if (scopeWaitUntil_) scopeWaitUntil_ = 1; }
+  void RevalidateTest() { nextValidation_ = 0; }
+  ULONGLONG ScopeDeadlineTest() const { return scopeWaitUntil_; }
   bool CandidateTest(DWORD mode, RECT& position);
 #endif
  private:
@@ -61,6 +65,13 @@ class AutomaticCorrection {
   bool Request(bool apply, ITfContext*);
   bool StartWorker();
   void StopWorker();
+  void DiscardSuggestion(bool completed);
+  void InferenceFailed(correction::AutomaticStage);
+  bool WaitForScope(const correction::ScopeDiagnostic&, ITfContext*, TfEditCookie);
+  bool CanWaitForScope(const correction::ScopeDiagnostic&) const;
+  bool TrackIdleSelection(ITfContext*, TfEditCookie);
+  bool Arm();
+  void VerifiedCapture();
   bool AcceptReply(const correction::AutomaticReply&);
   void Hide();
   TfClientId Client() const;
@@ -82,6 +93,9 @@ class AutomaticCorrection {
   correction::Preferences preferences_;
   correction::AutomaticReply::Item item_{};
   ULONGLONG revision_ = 0, started_ = 0, nextSettings_ = 0, nextValidation_ = 0;
+  ULONGLONG scopeWaitUntil_ = 0;
+  DWORD lastAddedUnits_ = 0;
+  bool scopePending_ = false;
   ULONGLONG brokerRevision_ = 0, brokerRequestId_ = 0;
   correction::BrokerCall brokerCall_;
   HWND window_ = nullptr;
@@ -100,6 +114,7 @@ class AutomaticCorrection {
   bool testingBroker_ = false;
   bool testFocused_ = true;
   bool strictCandidateTest_ = false;
+  bool testPendingScope_ = false;
   TfClientId testClient_ = TF_CLIENTID_NULL;
   std::wstring testWorker_;
 #endif

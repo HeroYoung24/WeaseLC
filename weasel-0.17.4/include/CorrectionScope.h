@@ -128,6 +128,12 @@ inline bool ProtectedScope(const ScopeDiagnostic& result) {
   return result.stage == ScopeStage::PasswordStyle || result.stage == ScopeStage::ProtectedScope ||
       result.stage == ScopeStage::KeyboardDisabled || result.stage == ScopeStage::EmptyContext;
 }
+// This permits only a bounded quarantine of our own just-generated commits.
+// It is NOT permission to GetText, submit to a model, show or apply a hint.
+inline bool MayWaitForWordScope(const ScopeDiagnostic& result) {
+  return result.stage == ScopeStage::WordMetadataUnavailable && result.error == E_FAIL &&
+      result.variantType == VT_EMPTY && result.scope == (WordVerified & ~WordUnrestricted);
+}
 inline const wchar_t* ScopeStageText(ScopeStage stage, bool chinese) {
   const wchar_t* zh[] = {L"尚无范围记录",L"允许的输入范围",L"无目标范围",L"密码输入框",L"范围属性查询失败",
     L"宿主未提供范围属性",L"范围属性读取失败",L"范围属性类型不可用",L"范围接口不可用",
