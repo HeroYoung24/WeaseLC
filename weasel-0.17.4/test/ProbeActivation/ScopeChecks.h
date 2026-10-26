@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include "DocumentScopeChecks.h"
 
 class ScopeFixture : public ITfInputScope {
  public:
@@ -177,6 +178,21 @@ static bool TestCorrectionScope() {
   check(verifiedLocal().stage==ScopeStage::ProtectedScope,"explicit private scope defeats native verification");
   property.result=E_FAIL;property.type=VT_EMPTY;context.flags=TF_SD_READONLY;
   check(verifiedLocal().stage==ScopeStage::ReadOnly,"readonly status defeats native verification");context.flags=0;
+  const auto word=+[](ITfContext*,ITfRange*)->DWORD{return WordVerified;};
+  auto verifiedDocument=[&]{return InspectInputScope(&context,1,&range,ScopeUse::LocalCommit,nullptr,word);};
+  check(verifiedDocument().stage==ScopeStage::WordDocument,"verified Word metadata allows only tracked local commits on empty E_FAIL");
+  check(InspectInputScope(&context,1,&range,ScopeUse::NearbyText,nullptr,word).stage==ScopeStage::PropertyValue,
+      "Word verification grants no arbitrary history access");
+  const auto incomplete=+[](ITfContext*,ITfRange*)->DWORD{return WordRange|WordView|WordPane|WordObject;};
+  const auto rejected=InspectInputScope(&context,1,&range,ScopeUse::LocalCommit,nullptr,incomplete);
+  check(!rejected && rejected.stage==ScopeStage::WordMetadataUnavailable && rejected.scope==(WordRange|WordView|WordPane|WordObject),
+      "Word metadata failure preserves closed evidence flags instead of another generic scope failure");
+  property.result=TF_E_NOLOCK;check(!verifiedDocument(),"Word metadata cannot override missing edit lock");
+  property.result=E_ACCESSDENIED;check(!verifiedDocument(),"Word metadata cannot override denied scope");
+  property.result=S_OK;property.type=VT_UNKNOWN;input.scopes={IS_PRIVATE};
+  check(verifiedDocument().stage==ScopeStage::ProtectedScope,"explicit private scope defeats Word metadata");
+  property.result=E_FAIL;property.type=VT_EMPTY;context.flags=TF_SD_READONLY;
+  check(verifiedDocument().stage==ScopeStage::ReadOnly,"readonly TSF context defeats Word metadata");context.flags=0;
   property.result=S_OK;property.type=VT_UNKNOWN;input.scopes={IS_TEXT};
   FocusView view;context.activeView=&view;
   view.window=CreateWindowExW(0,L"EDIT",L"",WS_POPUP|ES_PASSWORD,0,0,100,100,nullptr,nullptr,nullptr,nullptr);
@@ -184,5 +200,5 @@ static bool TestCorrectionScope() {
   if(view.window)DestroyWindow(view.window);context.activeView=nullptr;
   check(input.refs==1 && property.refs==1 && context.references==1 && range.references==1 && view.refs==1 && context.disabled.refs==1 && context.empty.refs==1,
       "scope checks balance all COM references without reading text");
-  std::cout<<"Scope checks = "<<checks<<", failures = "<<failures<<'\n';return failures==0;
+  std::cout<<"Scope checks = "<<checks<<", failures = "<<failures<<'\n';return TestDocumentScope() && failures==0;
 }

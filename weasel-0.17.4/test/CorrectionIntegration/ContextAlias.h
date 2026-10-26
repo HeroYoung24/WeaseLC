@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 // A test-owned tear-off interface over the same real TSF context. No TIP
 // activation: every edit lock/range still belongs to the scratch document.
 class OwnedContextAlias final : public ITfContext {
@@ -12,7 +13,10 @@ class OwnedContextAlias final : public ITfContext {
   }
   STDMETHODIMP_(ULONG) AddRef() override { return ++refs_; }
   STDMETHODIMP_(ULONG) Release() override { auto n=--refs_;if(!n)delete this;return n; }
-  STDMETHODIMP RequestEditSession(TfClientId c,ITfEditSession* s,DWORD f,HRESULT* r) override { return context_->RequestEditSession(c,s,f,r); }
+  STDMETHODIMP RequestEditSession(TfClientId c,ITfEditSession* s,DWORD f,HRESULT* r) override {
+    return editInterceptor ? editInterceptor(c,s,f,r) : context_->RequestEditSession(c,s,f,r);
+  }
+  std::function<HRESULT(TfClientId,ITfEditSession*,DWORD,HRESULT*)> editInterceptor;
   STDMETHODIMP InWriteSession(TfClientId c,BOOL* v) override { return context_->InWriteSession(c,v); }
   STDMETHODIMP GetSelection(TfEditCookie c,ULONG i,ULONG n,TF_SELECTION* s,ULONG* f) override { return context_->GetSelection(c,i,n,s,f); }
   STDMETHODIMP SetSelection(TfEditCookie c,ULONG n,const TF_SELECTION* s) override { return context_->SetSelection(c,n,s); }

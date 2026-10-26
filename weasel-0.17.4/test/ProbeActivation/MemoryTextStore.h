@@ -81,6 +81,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   STDMETHODIMP RequestLock(DWORD flags, HRESULT* result) override {
     if (!result) return E_POINTER;
     if (!sink_) return E_FAIL;
+    if (denyWriteLocks && (flags & TS_LF_READWRITE) == TS_LF_READWRITE) { --denyWriteLocks; *result = E_FAIL; return S_OK; }
     if (refuseWrites && (flags & TS_LF_READWRITE) == TS_LF_READWRITE) { *result = E_FAIL; return S_OK; }
     if (lock_) {
       if (flags & TS_LF_SYNC) *result = TS_E_SYNCHRONOUS;
@@ -258,6 +259,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   unsigned candidateStarts = 0;
   unsigned candidateEnds = 0;
   bool refuseWrites = false;  // synthetic refusal; never affects a real host
+  unsigned denyWriteLocks = 0;  // one-shot failure, allowing the later recovery lock
   bool acknowledgeWithoutWrite = false;  // owned-host fault: S_OK without persistence
   DWORD dynamicStatus = 0;
   unsigned textReads = 0;

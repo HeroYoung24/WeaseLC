@@ -433,7 +433,7 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     #include "VisualChecks.inc"
     if (hostReview) {
       #include "CompositionSyncChecks.inc"
-      std::cout << "Host review: known production limitation reproduced in 2 synthetic scopes; staged alternative is TEST ONLY\n";
+      std::cout << "Host review: production staged correction and failure boundaries; real applications still require acceptance\n";
     }
   }
   #include "BrokerChecks.inc"

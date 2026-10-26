@@ -7,6 +7,7 @@
 #include <cmath>
 #include <vector>
 #include <cstdio>
+#include <functional>
 #include <CorrectionProbe.h>
 #include <CorrectionHintView.h>
 #include <CorrectionDeployment.h>
@@ -53,6 +54,20 @@ class AutomaticVerify : public CEditSession {
   }
  private:
   AutomaticCorrection::WriteVerification verification_;
+};
+class AutomaticStep : public CEditSession {
+ public:
+  AutomaticStep(WeaselTSF* owner, ITfContext* context, std::function<HRESULT(TfEditCookie)> body)
+      : CEditSession(owner, context), body_(std::move(body)) {}
+  STDMETHODIMP DoEditSession(TfEditCookie cookie) override {
+    if (!_IsCurrent() || !body_) return TF_E_DISCONNECTED;
+    return body_(cookie);
+  }
+  // Do not retain stack captures if a nonconforming host keeps this session.
+  // A late callback must be inert even if it still has the same generation.
+  void Retire() { body_ = {}; }
+ private:
+  std::function<HRESULT(TfEditCookie)> body_;
 };
 void Close(HANDLE& handle) { if (handle && handle != INVALID_HANDLE_VALUE) CloseHandle(handle); handle = nullptr; }
 }  // namespace
@@ -274,7 +289,8 @@ bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
     Report(scope == correction::ProbeStatus::ProtectedField ? correction::AutomaticStage::ProtectedField :
         correction::AutomaticStage::ScopeUnavailable); return false;
   }
-  if(details.stage==correction::ScopeStage::NativePlainText)correction::SaveScopeDiagnostic(details);
+  if(details.stage==correction::ScopeStage::NativePlainText || details.stage==correction::ScopeStage::WordDocument)
+    correction::SaveScopeDiagnostic(details);
   if (revision != revision_ || !ReadExact(target, cookie, text) || revision != revision_) {
     Report(correction::AutomaticStage::TextChanged); return false;
   }
@@ -378,40 +394,47 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
   com_ptr<ITfRange> restore; restore.Attach(selection.range);
   if (selected != S_OK || count != 1 || !restore) return S_FALSE;
   if (revision != revision_ || !Validate(cookie, context)) return S_FALSE;
-  // TSF requires SetText to be covered by the caller's existing composition.
-  // Extend its start for this one write lock, then restore a tracked start anchor.
-  // The preedit text and Rime session are never finalized or reconstructed.
-  com_ptr<ITfComposition> composition;
-  com_ptr<ITfRange> preeditStart;
   if (owner_->_IsComposing()) {
-    composition = owner_->_pComposition;
-    if (composition->GetRange(&preeditStart) != S_OK || !preeditStart ||
-        preeditStart->Collapse(cookie, TF_ANCHOR_START) != S_OK ||
-        preeditStart->SetGravity(cookie, TF_GRAVITY_FORWARD, TF_GRAVITY_FORWARD) != S_OK ||
-        revision != revision_) return S_FALSE;
+    // A browser can synchronize only the final live preedit at lock exit.
+    // Expanding and shrinking it inside one lock hides prefix edits from that
+    // synchronization. End TSF composition now, keep both its text and Rime's
+    // input buffer, and let Request run the write/resume under separate locks.
+    if (!verification) return E_POINTER;
+    auto composition = owner_->_pComposition;
+    WriteVerification pending;
+    pending.range = change; pending.source = target; pending.selection = restore;
+    pending.original.assign(item.original, item.originalUnits);
+    pending.text.assign(item.replacement, item.replacementUnits);
+    pending.sourceText = text_; pending.preeditText = expectedPreedit_;
+    pending.offset = item.start;
+    pending.generation = owner_->_GetEditGeneration();
+    if (!composition || composition->GetRange(&pending.preedit) != S_OK || !pending.preedit ||
+        !ReadExact(pending.preedit, cookie, pending.preeditText)) return S_FALSE;
+    if (revision != revision_ || !owner_->_IsEditSessionCurrent(pending.generation) ||
+        !owner_->_IsCurrentComposition(composition) || !Focused(context)) return S_FALSE;
+    Cancel(); pending.revision = revision_;
+    owner_->_ClearCompositionDisplayAttributes(cookie, context, composition);
+    if (!Focused(context) || !owner_->_IsEditSessionCurrent(pending.generation) ||
+        revision_ != pending.revision || !owner_->_IsCurrentComposition(composition)) return S_FALSE;
+    const auto ended = owner_->_EndTrackedComposition(cookie, composition);
+    if (ended != S_OK) return ended;
+    owner_->_FinalizeComposition(composition);
+    pending.detached = true;
+    *verification = std::move(pending);
+    // Consume exactly once after a successful first mutation, even if a later
+    // host lock fails. Falling through to normal Tab would add a second action.
+    if (applied) *applied = true;
+    Report(correction::AutomaticStage::TabRestoreUnconfirmed);
+    return S_OK;
   }
-  // Retire every suggestion before mutating the host. Preserve the current
-  // composition and caret through tracked TSF ranges; no synthetic key events.
+  // No preedit: retain the existing single-write path, with a temporary TSF
+  // correction composition and a separate post-lock verification.
   const auto generation = owner_->_GetEditGeneration();
   Cancel();
   const auto writeRevision = revision_;
-  auto restoreComposition = [&]() {
-    if (!composition || composition->ShiftStart(cookie, preeditStart) == S_OK) return;
-    // If a host refuses restoration, end without erasing any host text. Retire
-    // only that same composition so later keys cannot overwrite earlier text.
-    composition->EndComposition(cookie);
-    if (owner_->_IsCurrentComposition(composition)) {
-      owner_->_FinalizeComposition(composition);
-      owner_->m_client.ClearComposition(); owner_->_cand->EndUI();
-    }
-  };
-  if (composition && composition->ShiftStart(cookie, change) != S_OK) { restoreComposition(); return S_FALSE; }
   // A host may reenter us while changing composition properties. No write may
   // escape the document/lifecycle checked before that callback.
-  if (!Focused(context) || revision_ != writeRevision || !owner_->_IsEditSessionCurrent(generation) ||
-      (composition && !owner_->_IsCurrentComposition(composition))) {
-    restoreComposition(); return S_FALSE;
-  }
+  if (!Focused(context) || revision_ != writeRevision || !owner_->_IsEditSessionCurrent(generation)) return S_FALSE;
   const HRESULT hr = change->SetText(cookie, TF_ST_CORRECTION, item.replacement, item.replacementUnits);
   // An acknowledged write consumes this key once, even if verification fails:
   // retrying or falling through could duplicate a write already made by a host.
@@ -423,7 +446,6 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
     written = hr == S_OK && ReadExact(change, cookie, std::wstring(item.replacement, item.replacementUnits));
     if (written) Report(correction::AutomaticStage::TabRestoreUnconfirmed);
   }
-  restoreComposition();
   if (FAILED(hr)) return hr;
   selection.range = restore;
   const HRESULT restored = owner_->_IsEditSessionCurrent(generation) ? context->SetSelection(cookie, 1, &selection) : TF_E_DISCONNECTED;
@@ -440,10 +462,82 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
   // AFTER this write session returns, under a separate synchronous READ lock.
   return S_OK;
 }
+HRESULT AutomaticCorrection::ContinueWrite(TfEditCookie cookie, ITfContext* context,
+                                           WriteVerification& pending, bool resume) {
+  if (!pending.detached || !pending.range || !pending.source || !pending.selection || !pending.preedit ||
+      !owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision ||
+      owner_->_IsComposing() || !Focused(context) || !SettingsCurrent()) return S_FALSE;
+  if (!owner_->_CorrectionSafeScope(context, cookie, pending.source) ||
+      !owner_->_CorrectionSafeScope(context, cookie, pending.preedit)) return S_FALSE;
+  if (!ReadExact(pending.source, cookie, pending.sourceText)) {
+    if (pending.written) Report(correction::AutomaticStage::TabPersistenceUnconfirmed);
+    return S_FALSE;
+  }
+  if (!ReadExact(pending.preedit, cookie, pending.preeditText)) return S_FALSE;
+  TF_SELECTION selected{}; ULONG count = 0;
+  const auto got = context->GetSelection(cookie, TF_DEFAULT_SELECTION, 1, &selected, &count);
+  com_ptr<ITfRange> selection; selection.Attach(selected.range);
+  if (got != S_OK || count != 1 || !selection || selected.style.fInterimChar ||
+      !Same(selection, pending.selection, cookie, TF_ANCHOR_START, TF_ANCHOR_START) ||
+      !Same(selection, pending.selection, cookie, TF_ANCHOR_END, TF_ANCHOR_END) ||
+      !owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision || !Focused(context)) return S_FALSE;
+  if (resume) {
+    // Start over the existing tracked text, NOT at the current caret. No input
+    // is reinserted and no Rime key/candidate/learning event is replayed.
+    com_ptr<ITfContextComposition> compositions;
+    com_ptr<ITfComposition> composition;
+    if (context->QueryInterface(IID_ITfContextComposition, reinterpret_cast<void**>(&compositions)) != S_OK || !compositions)
+      return E_NOINTERFACE;
+    const auto started = compositions->StartComposition(cookie, pending.preedit, owner_, &composition);
+    if (started != S_OK || !composition) return started == S_OK ? E_FAIL : started;
+    if (!owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision ||
+        !Focused(context) || owner_->_IsComposing()) {
+      owner_->_EndTrackedComposition(cookie, composition); return TF_E_DISCONNECTED;
+    }
+    owner_->_SetComposition(composition, context);
+    owner_->_SetCompositionDisplayAttributes(cookie, context, pending.preedit);
+    selected.range = pending.selection;
+    if (!owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision || !Focused(context) ||
+        !owner_->_IsCurrentComposition(composition) ||
+        context->SetSelection(cookie, 1, &selected) != S_OK ||
+        !owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision ||
+        !owner_->_IsCurrentComposition(composition) || !Focused(context)) {
+      owner_->_EndTrackedComposition(cookie, composition); owner_->_FinalizeComposition(composition);
+      return E_FAIL;
+    }
+    pending.resumed = true;
+    return S_OK;
+  }
+  if (!ReadExact(pending.range, cookie, pending.original)) return S_FALSE;
+  if (!owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision ||
+      owner_->_IsComposing() || !Focused(context)) return S_FALSE;
+  // Default TSF correction composition is now possible: our preedit is absent.
+  // Never retry an acknowledged write, including S_FALSE or a failed readback.
+  const auto written = pending.range->SetText(cookie, TF_ST_CORRECTION,
+      pending.text.data(), static_cast<LONG>(pending.text.size()));
+  if (written != S_OK) return written;
+  Report(correction::AutomaticStage::TabWriteUnconfirmed);
+  if (!ReadExact(pending.range, cookie, pending.text)) return S_FALSE;
+  pending.written = true;
+  Report(correction::AutomaticStage::TabRestoreUnconfirmed);
+  pending.sourceText.replace(pending.offset, pending.original.size(), pending.text);
+  selected.range = pending.selection;
+  if (!owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision || !Focused(context)) return S_FALSE;
+  return context->SetSelection(cookie, 1, &selected);
+}
 HRESULT AutomaticCorrection::VerifyWrite(TfEditCookie cookie, ITfContext* context, const WriteVerification& verification) {
   if (!verification.range || verification.text.empty() || verification.text.size() > 32 ||
       !owner_->_IsEditSessionCurrent(verification.generation) || !Focused(context) ||
       !owner_->_CorrectionSafeScope(context, cookie, verification.range)) return S_FALSE;
+  if (verification.detached) {
+    com_ptr<ITfRange> live;
+    auto composition = owner_->_pComposition;
+    if (!verification.resumed || !composition || !correction::SameIdentity(owner_->_pCompositionContext, context) ||
+        composition->GetRange(&live) != S_OK || !live ||
+        !Same(live, verification.preedit, cookie, TF_ANCHOR_START, TF_ANCHOR_START) ||
+        !Same(live, verification.preedit, cookie, TF_ANCHOR_END, TF_ANCHOR_END) ||
+        !ReadExact(live, cookie, verification.preeditText)) return S_FALSE;
+  }
   const bool retained = ReadExact(verification.range, cookie, verification.text);
   if (!owner_->_IsEditSessionCurrent(verification.generation) || !Focused(context)) return S_FALSE;
   Report(retained ? correction::AutomaticStage::TabApplied : correction::AutomaticStage::TabPersistenceUnconfirmed);
@@ -459,7 +553,34 @@ bool AutomaticCorrection::Request(bool apply, ITfContext* context) {
   const HRESULT hr = context->RequestEditSession(Client(), session,
       TF_ES_SYNC | (apply ? TF_ES_READWRITE : TF_ES_READ), &edit);
   if (FAILED(hr)) Report(correction::AutomaticStage::RequestDenied, {correction::FocusStage::Ready, hr});
-  if (apply && session->applied && hr == S_OK && edit == S_OK && session->verification.range) {
+  if (apply && session->verification.detached) {
+    auto& pending = session->verification;
+    auto step = [&](bool resume) {
+      com_ptr<AutomaticStep> next;
+      next.Attach(new AutomaticStep(owner_, context, [&](TfEditCookie cookie) {
+        return ContinueWrite(cookie, context, pending, resume);
+      }));
+      HRESULT result = E_FAIL;
+      HRESULT requested = E_FAIL;
+      try { requested = context->RequestEditSession(Client(), next, TF_ES_SYNC | TF_ES_READWRITE, &result); }
+      catch (...) { next->Retire(); throw; }
+      next->Retire();
+      return requested == S_OK && result == S_OK;
+    };
+    bool written = false;
+    try { written = step(false); step(true); } catch (...) {}
+    if (!pending.resumed && owner_->_IsEditSessionCurrent(pending.generation) && !owner_->_IsComposing()) {
+      // If resumption is refused, leave host text intact and release only this
+      // backend preedit. Never queue a late write or clear a newer composition.
+      owner_->m_client.ClearComposition(); owner_->_cand->EndUI();
+    }
+    if ((!written || !pending.resumed) && pending.written &&
+        diagnostic_.stage != correction::AutomaticStage::TabPersistenceUnconfirmed)
+      Report(correction::AutomaticStage::TabRestoreUnconfirmed);
+    if (!pending.written) pending.range.Release();
+  }
+  if (apply && session->applied && hr == S_OK && edit == S_OK && session->verification.range &&
+      (!session->verification.detached || session->verification.resumed)) {
     // Verification is diagnostic only. Allocation/host failures after an
     // acknowledged write must never turn this key into a second normal edit.
     try {

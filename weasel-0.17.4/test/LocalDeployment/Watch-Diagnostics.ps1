@@ -29,6 +29,12 @@ while($clock.Elapsed.TotalSeconds -lt $Seconds){
     $b=Read-Metadata $key 'LastBrokerCheck' 52
     if($a){$automatic=[ordered]@{stage=[BitConverter]::ToUInt32($a,4);focus=[BitConverter]::ToUInt32($a,8);hresult=('0x{0:X8}' -f [BitConverter]::ToUInt32($a,12));utc=Get-Time $a 16}}
     if($s){$scope=[ordered]@{stage=[BitConverter]::ToUInt32($s,4);hresult=('0x{0:X8}' -f [BitConverter]::ToUInt32($s,8));inputScope=[BitConverter]::ToInt32($s,12);variantType=[BitConverter]::ToUInt32($s,16)}}
+    if($scope -and $scope.stage -in @(20,21)){
+      # Closed capability bits, never document text or object/window addresses.
+      $scope.wordEvidence=$scope.inputScope
+      $scope.inputScope=$null
+      $scope.wordVerified=($scope.wordEvidence -eq 511 -and $scope.stage -eq 20)
+    }
     if($c){$capture=[ordered]@{totalUnits=[BitConverter]::ToUInt32($c,4);addedUnits=[BitConverter]::ToUInt32($c,8);retainedUnits=[BitConverter]::ToUInt32($c,12);utc=Get-Time $c 16}}
     if($w){$worker=[ordered]@{stage=[BitConverter]::ToUInt32($w,4);units=[BitConverter]::ToUInt32($w,8);provider=[BitConverter]::ToUInt32($w,12);state=[BitConverter]::ToUInt32($w,16);nativeError=[BitConverter]::ToUInt32($w,20);httpStatus=[BitConverter]::ToUInt32($w,24);elapsedMs=[BitConverter]::ToUInt32($w,28);utc=Get-Time $w 32}}
     if($b){$broker=[ordered]@{status=[BitConverter]::ToUInt32($b,4);units=[BitConverter]::ToUInt32($b,8);state=[BitConverter]::ToUInt32($b,12);nativeError=[BitConverter]::ToUInt32($b,16);httpStatus=[BitConverter]::ToUInt32($b,20);elapsedMs=[BitConverter]::ToUInt32($b,24);requestId=[BitConverter]::ToUInt64($b,28);settingsRevision=[BitConverter]::ToUInt64($b,36);utc=Get-Time $b 44}}

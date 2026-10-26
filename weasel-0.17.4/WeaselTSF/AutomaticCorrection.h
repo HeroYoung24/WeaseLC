@@ -25,9 +25,16 @@ class AutomaticCorrection {
     com_ptr<ITfRange> range;
     std::wstring text;
     ULONGLONG generation = 0;
+    // Apartment-local transaction. Never serialized or queued asynchronously.
+    com_ptr<ITfRange> source, selection, preedit;
+    std::wstring original, sourceText, preeditText;
+    ULONGLONG revision = 0;
+    size_t offset = 0;
+    bool detached = false, written = false, resumed = false;
   };
   HRESULT Edit(TfEditCookie, ITfContext*, bool apply, bool* applied, WriteVerification*);
   HRESULT VerifyWrite(TfEditCookie, ITfContext*, const WriteVerification&);
+  HRESULT ContinueWrite(TfEditCookie, ITfContext*, WriteVerification&, bool resume);
   bool Focused(ITfContext* target = nullptr) const;
   void Poll();
 #ifdef WEASELC_LOCAL_TEST_BUILD

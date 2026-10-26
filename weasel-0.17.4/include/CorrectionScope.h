@@ -4,13 +4,14 @@
 #include <inputscope.h>
 #include <atlcomcli.h>
 #include "CorrectionNativeScope.h"
+#include "CorrectionDocumentScope.h"
 
 namespace correction {
 enum class ScopeStage : DWORD {
   NotRun, Ready, MissingTarget, PasswordStyle, PropertyQuery, MissingProperty,
   PropertyValue, ValueType, ScopeInterface, ScopeQuery, EmptyScopes,
   TooManyScopes, UnsupportedScope, ProtectedScope, KeyboardUnavailable,
-  KeyboardDisabled, EmptyContext, ReadOnly, StatusUnavailable, NativePlainText
+  KeyboardDisabled, EmptyContext, ReadOnly, StatusUnavailable, NativePlainText, WordDocument, WordMetadataUnavailable
 };
 enum class ScopeUse { NearbyText, LocalCommit };
 struct ScopeDiagnostic {
@@ -19,7 +20,7 @@ struct ScopeDiagnostic {
   HRESULT error = S_OK;
   LONG scope = 0;
   DWORD variantType = VT_EMPTY;
-  explicit operator bool() const { return stage == ScopeStage::Ready || stage == ScopeStage::NativePlainText; }
+  explicit operator bool() const { return stage == ScopeStage::Ready || stage == ScopeStage::NativePlainText || stage == ScopeStage::WordDocument; }
 };
 static_assert(sizeof(ScopeDiagnostic) == 20, "Scope diagnostic wire size");
 // A default scope is usable only for this IME's tracked local commits, never as
@@ -53,7 +54,8 @@ inline ScopeDiagnostic CommittedInputState(ITfContext* context) {
 }
 inline ScopeDiagnostic InspectInputScope(ITfContext* context, TfEditCookie cookie, ITfRange* range,
                                           ScopeUse use = ScopeUse::NearbyText,
-                                          NativeScopeVerifier native = NativeTextRangeVerified) {
+                                          NativeScopeVerifier native = NativeTextRangeVerified,
+                                          DocumentScopeVerifier document = WordDocumentRangeEvidence) {
   ScopeDiagnostic result;
   if (!context || !range) { result.stage = ScopeStage::MissingTarget; result.error = E_POINTER; return result; }
   CComPtr<ITfContextView> view;
@@ -88,6 +90,17 @@ inline ScopeDiagnostic InspectInputScope(ITfContext* context, TfEditCookie cooki
   if(use==ScopeUse::LocalCommit && result.stage==ScopeStage::PropertyValue &&
       result.error==E_FAIL && result.variantType==VT_EMPTY && native && native(context,range)) {
     result.stage=ScopeStage::NativePlainText;result.error=S_OK;return result;
+  }
+  if(use==ScopeUse::LocalCommit && result.stage==ScopeStage::PropertyValue &&
+      result.error==E_FAIL && result.variantType==VT_EMPTY && document) {
+    // Missing attributes are not permission by themselves. A focused, writable,
+    // unprotected Word document is an independently checked capability. Never
+    // use it for arbitrary context/history or to override an explicit scope.
+    const auto evidence = document(context,range);
+    if (evidence == WordVerified) {
+      result.stage=ScopeStage::WordDocument;result.scope=evidence;result.error=S_OK;return result;
+    }
+    if (evidence & WordPane) {result.stage=ScopeStage::WordMetadataUnavailable;result.scope=evidence;}
   }
   if (result.stage != ScopeStage::NotRun || !input) return result;
   InputScope* scopes = nullptr; UINT count = 0;
@@ -124,6 +137,8 @@ inline const wchar_t* ScopeStageText(ScopeStage stage, bool chinese) {
     L"Scope interface unavailable",L"Scope query failed",L"Empty scope list",L"Oversized scope list",
     L"Scope not in text allowlist",L"Private/password/PIN field",L"Keyboard state unavailable",L"Keyboard disabled",L"Empty input context",L"Read-only field",L"Host status unavailable",L"Verified native plaintext editor"};
   const auto index = static_cast<unsigned>(stage);
+  if (stage == ScopeStage::WordDocument) return chinese ? L"已核验可编辑 Word 文档" : L"Verified editable Word document";
+  if (stage == ScopeStage::WordMetadataUnavailable) return chinese ? L"Word 文档保护状态未通过核验" : L"Word document protection not verified";
   if (index > static_cast<unsigned>(ScopeStage::NativePlainText)) return chinese ? L"未知" : L"unknown";
   return chinese ? zh[index] : en[index];
 }
