@@ -80,6 +80,8 @@ x64/Win32各：
 
 本轮源码修复完成后准备包，不直接改动已安装f5f11f1。当前测试纠错/固定响应Off，无真实模型、无专用后端运行，Word窗口由用户自行处理。
 
+源码提交`f8f22e6dd0cbfa92734efe3a2829e5ccae138355`；六文件包`output/LocalTest/UpdatePatch-20261027-150517`已完整只读校验，未应用。升级前独立v3设置快照`output/LocalTest/word-irm-settings-before-20261027.bin`（SHA256 `A671E045D4CF08E26BB07740BD727C241233B8D2F37B639719A07797EC0EDDFD`）已保存，未更改实际设置。恢复状态`output/LocalTest/word-irm-compat-state-20261027.json`。收尾确认自有测试进程/专用运行时/18963监听/模型ready均无，原版基线一致，安装DLL仍为f5f11f1的E5C2BA47…。
+
 ## 依据
 
 - [Office Permission对象](https://learn.microsoft.com/en-us/office/vba/api/office.permission)：IRM用途以及客户端缺失时可能报错。

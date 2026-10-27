@@ -1,5 +1,7 @@
 # 本机独立测试
 
+**2026-10-27最新源码：** Word特定Permission getter异常已分阶段确认，新增默认关闭、需明确选择的本机自有提交兼容模式。修复f8f22e6、包`UpdatePatch-20261027-150517`只读校验通过，未安装；实际安装仍f5f11f1，纠错Off。下一轮必须成套更新六文件（协调器协议v3），先Word基础，再于合成文档明确开启兼容、先核对整句捕获再提示/Tab。设置v4回退需恢复升级前v3快照；快照和状态见`output/LocalTest/word-irm-compat-state-20261027.json`。[定位、边界与回归报告](../../docs/WORD_IRM_COMPATIBILITY_FIX_2026-10-27.md)。下文旧状态仅作历史。
+
 **最新：接口对照已确认 GetValue 在三时机、四种范围均不可用，范围身份/锁/枚举正常；诊断版已回退。** 已实现 LocalCommit 专用的严格原生多行纯文本兼容验证，双架构各 50 策略/15 真实控件/81 TSF 对照通过，正式构建通过；新兼容版未部署。纠错关闭、专用进程退出、原版基线一致；已发现 ChatGPT/Explorer 占用旧 DLL，部分系统进程不可枚举。释放后使用新的兼容包，先采 NativePlainText、nativeFlags 和 LastCapture，再提示/Tab。[最新报告](../../docs/NATIVE_PLAINTEXT_COMPATIBILITY_2026-10-19.md)。以下为历史。
 
 **当前：fe82f97 真实提示仍被范围 GetValue/E_FAIL 阻断，本轮已注销回退。** 基本输入正常；新增 ScopeTrace 接口对照版已构建但未部署，双架构各 81 接口/26 协调器检查通过。用户已关闭测试记事本，专用进程退出，原版基线一致，普通测试设置保留且纠错关闭；仅 ChatGPT 加载旧 DLL。恢复应释放模块后清理/安装新接口对照包，先比较范围身份、锁、结束组合前后/只读 cookie，不重复旧整句提示测试。[专项调查](../../docs/SCOPE_EFAIL_INVESTIGATION_2026-10-19.md)。以下为历史。

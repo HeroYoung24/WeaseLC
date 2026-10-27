@@ -2,6 +2,8 @@
 
 ## 最新源码：Word IRM getter异常已具体定位，显式本机兼容完成
 
+源码f8f22e6已提交本地main，未推送。六文件包`UpdatePatch-20261027-150517`校验通过但未安装；独立v3设置快照`output/LocalTest/word-irm-settings-before-20261027.bin`保存，恢复入口`output/LocalTest/word-irm-compat-state-20261027.json`。实际设置仍Off，安装仍f5f11f1，自有测试/专用运行时/模型端口/ready均无，原版基线一致。
+
 测试Word只读元数据得到Permission名字解析S_OK、Invoke DISP_E_EXCEPTION、scode E_FAIL、VT_EMPTY，Readonly=false/ProtectionType=-1。并非提交没到内存，是程序依赖不可用IRM状态拒绝有效缓存；500ms等待不能解决持续缺证据。新增默认false的Word本机兼容设置，只有明确开启、本地自动模式、其他Word能力完整且匹配这一特定异常时允许自有相邻提交；不宣称IRM无限制，私密/只读/保护/焦点/选区/回读仍核验。三语言UI说明版权限制边界；设置v4、协调器v3成套配套，40字节具体错误诊断有界记录。双架构120缓存、442自动、92范围/23元数据、104按键/26焦点、145离线、43协调器、219界面、23链路及DLL卸载/Release构建通过。
 
 尚未安装本次源码、未实机验收兼容效果，安装仍f5f11f1、纠错Off/专用运行时关闭。下一轮先备份独立设置、释放占用、成套更新，Off基础后在合成Word明确开启兼容，先捕获再提示/Tab；旧版本回退还需恢复v3设置，不把二进制回退当配置降级。详见[定位与修复报告](docs/WORD_IRM_COMPATIBILITY_FIX_2026-10-27.md)。以下为上一轮实测与更早历史。
