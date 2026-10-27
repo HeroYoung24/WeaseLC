@@ -66,3 +66,9 @@ Node虚拟DOM契约17项通过，覆盖隐私哨兵、密码/只读getter拒读�
 用户回复“已释放，可测试”后重扫无测试模块占用，Word也未运行。新包实际回退演练及正式应用均成功，无错误、原版基线一致；当前安装已更新为e5ce10d，前述“未安装”是历史准备状态。升级前独立设置另存包内`settings-before.bin`，未迁移实际v3配置。
 
 正常用户专用后端启动后的首次检查未就绪；随后x64/Win32私有会话均nihao→你好通过，注册查询启用正常。后端/协调器PID35556/20296（仅本轮记录，恢复时重扫），已开启Fixed及600秒无正文观察器，没有启动模型。空白Word PID11856已打开，等待普通输入/Shift/中断反馈，不安排Word错字提示或替换。已安装x64 TSF SHA256 `32FEE72A73CD5A9DFD8E9C89122F2F5C03DB0E4849D1B8389AB7E6A07C1F84E8`；仍须在用户选择测试项后核对Word实际加载模块与新鲜InputOnlyHost诊断。
+
+## Word普通输入退化实机通过，转Edge基础
+
+用户反馈普通中文/数字选词句号、半截拼音鼠标中断与退格、Shift和搜狗“一切正常”。Word PID11856实际加载DLL哈希与新包一致；Fixed启用后的新鲜AutomaticStage30（InputOnlyHost）确认，期间无新LastCapture或协调器Check记录。证据`output/LocalTest/word-input-only-live-evidence-20261027.json`。这证明本轮Word明确退化路径被执行，不是将接口失败算成无错。
+
+已切Off并打开Edge本地新版夹具，等待A/B/C普通输入、中断恢复、无候选/纠错时Tab导航反馈。仍未启动模型。Word窗口由用户保留/自行处理；没有进一步读取其正文或测试纠错。

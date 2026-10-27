@@ -1,5 +1,9 @@
 # 当前开发进度（2026-10-27）
 
+## Word普通输入退化已实机通过，等待Edge基础输入
+
+用户四项“一切正常”；实际Word加载e5ce10d DLL哈希匹配，新鲜AutomaticStage30且无新捕获/协调器Check，证据`output/LocalTest/word-input-only-live-evidence-20261027.json`。Word纠错路线按用户决策结束。已切Off并打开Edge新版合成测试页，等待A/B/C输入、中断、正常Tab反馈，之后重点前文纠错撤销/重做及D/E保护。专用运行时仍开，模型未启动；恢复`output/LocalTest/word-input-only-state-20261027.json`。
+
 ## 新包已安装，等待Word仅普通输入反馈，随后Edge
 
 用户已释放后重扫占用为空；UpdatePatch-20261027-154152实际回退演练/更新通过，当前安装e5ce10d，原版基线一致。双架构私有nihao检查通过（初次后端检查未就绪，后续均通过），配置仍v3，已保存包内settings-before.bin。现普通用户专用后端/协调器运行、Fixed启用，无真实模型；空白Word已打开，等待普通输入/选词句号/鼠标中断/Shift与搜狗反馈。**不再安排Word错字提示/替换**；反馈后核对实际DLL及新鲜InputOnlyHost，再进入Edge基础和真正的纠错历史/保护字段验收。恢复`output/LocalTest/word-input-only-state-20261027.json`，安装实况见[本轮报告](docs/WORD_INPUT_ONLY_AND_EDGE_HISTORY_2026-10-27.md)末节。下方“未部署/等待释放”为历史。
