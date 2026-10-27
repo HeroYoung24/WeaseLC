@@ -72,3 +72,7 @@ Node虚拟DOM契约17项通过，覆盖隐私哨兵、密码/只读getter拒读�
 用户反馈普通中文/数字选词句号、半截拼音鼠标中断与退格、Shift和搜狗“一切正常”。Word PID11856实际加载DLL哈希与新包一致；Fixed启用后的新鲜AutomaticStage30（InputOnlyHost）确认，期间无新LastCapture或协调器Check记录。证据`output/LocalTest/word-input-only-live-evidence-20261027.json`。这证明本轮Word明确退化路径被执行，不是将接口失败算成无错。
 
 已切Off并打开Edge本地新版夹具，等待A/B/C普通输入、中断恢复、无候选/纠错时Tab导航反馈。仍未启动模型。Word窗口由用户保留/自行处理；没有进一步读取其正文或测试纠错。
+
+## Edge基础通过，进入Fixed实际替换回归
+
+用户确认A/B/C输入、中断恢复、普通Tab导航和搜狗均正常，页面保留。Edge PID22348实际加载新DLL哈希匹配，专用后端和协调器在运行。已开启Fixed并为此阶段新建600秒无正文观察器，旧Word阶段观察器停止。下一步先A/B/C提示、实际改文、ni保留、下一次选词及跨区中断，再单独验前文纠错的撤销/重做与D/E。尚无本轮新版Fixed人工结果，未启动真实模型。

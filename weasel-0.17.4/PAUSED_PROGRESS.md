@@ -1,5 +1,9 @@
 # 当前开发进度（2026-10-27）
 
+## Edge新版基础已通过，Fixed待反馈
+
+用户确认A/B/C中文、中断退格、普通Tab及搜狗正常，Edge实际加载e5ce10d DLL已匹配。现Fixed已开启，新的600秒无正文观察器运行，旧Word观察器停止；等待A/B/C提示/实际替换/ni保留/下一次选词及中断结果，再单独做真正纠错的撤销/重做与密码/只读字段。未启动模型，不把旧版Fixed通过当作当前新版结果。恢复状态仍`output/LocalTest/word-input-only-state-20261027.json`。
+
 ## Word普通输入退化已实机通过，等待Edge基础输入
 
 用户四项“一切正常”；实际Word加载e5ce10d DLL哈希匹配，新鲜AutomaticStage30且无新捕获/协调器Check，证据`output/LocalTest/word-input-only-live-evidence-20261027.json`。Word纠错路线按用户决策结束。已切Off并打开Edge新版合成测试页，等待A/B/C输入、中断、正常Tab反馈，之后重点前文纠错撤销/重做及D/E保护。专用运行时仍开，模型未启动；恢复`output/LocalTest/word-input-only-state-20261027.json`。
