@@ -1,5 +1,9 @@
 # 当前开发进度（2026-10-27）
 
+## 新包已安装，等待Word仅普通输入反馈，随后Edge
+
+用户已释放后重扫占用为空；UpdatePatch-20261027-154152实际回退演练/更新通过，当前安装e5ce10d，原版基线一致。双架构私有nihao检查通过（初次后端检查未就绪，后续均通过），配置仍v3，已保存包内settings-before.bin。现普通用户专用后端/协调器运行、Fixed启用，无真实模型；空白Word已打开，等待普通输入/选词句号/鼠标中断/Shift与搜狗反馈。**不再安排Word错字提示/替换**；反馈后核对实际DLL及新鲜InputOnlyHost，再进入Edge基础和真正的纠错历史/保护字段验收。恢复`output/LocalTest/word-input-only-state-20261027.json`，安装实况见[本轮报告](docs/WORD_INPUT_ONLY_AND_EDGE_HISTORY_2026-10-27.md)末节。下方“未部署/等待释放”为历史。
+
 ## 用户最新决策：Word仅普通输入，取消Word纠错/替换计划
 
 源码e5ce10d已提交本地main，未推送。新包`UpdatePatch-20261027-154152`完整校验但未部署，恢复入口`output/LocalTest/word-input-only-state-20261027.json`；旧Word兼容状态已标记superseded。当前ChatGPT/explorer仍加载旧DLL，等待用户释放后重扫，不强制关闭。纠错Off、专用进程0、模型ready/端口均无、原版基线一致。
