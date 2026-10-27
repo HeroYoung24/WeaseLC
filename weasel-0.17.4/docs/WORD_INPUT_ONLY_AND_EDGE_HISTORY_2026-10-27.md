@@ -58,3 +58,5 @@ Node虚拟DOM契约17项通过，覆盖隐私哨兵、密码/只读getter拒读�
 4. Fixed通过后再测冻结4B的慢响应/断连/焦点变化及后续输入恢复；混合DPI/多屏等后置。
 
 本轮仅修改源码和测试产物，不直接替换已加载DLL或修改原版/Sogou。实际安装仍f5f11f1，纠错保持Off；新版本真实应用验收仍待完成。设置升级前快照沿用上一轮保存的独立v3副本。
+
+源码提交e5ce10df441c01f7dbc384e4a04e9d07eb3bb40a。新六文件包`output/LocalTest/UpdatePatch-20261027-154152`已完整只读校验，尚未安装。恢复状态`output/LocalTest/word-input-only-state-20261027.json`。收尾复核专用进程0、模型ready/18963监听均无、原版基线一致；旧DLL当前由ChatGPT和explorer加载。待用户释放后重新扫描，不沿用PID、不强制结束应用；仅安装此新包，不安装已作废Word兼容包。
