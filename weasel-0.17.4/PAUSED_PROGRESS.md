@@ -1,5 +1,11 @@
 # 当前开发进度（2026-10-27）
 
+## 本轮验收完成并安全收尾：Word普通输入、Edge Fixed/历史/保护及真实4B A区通过
+
+用户确认真实4B的A区三项均正常，采集时固定开关0，8条新鲜HTTP200（4 Suggestions/4 NoSuggestion，312–890ms接口样本）及3次Shown/TabApplied；另有2条Cancelled，不称全请求成功或完整延迟基准。本轮B/C未重复真实模型，不外推；A/B/C基础与Fixed、A前文纠错撤销/重做、D/E、跨框和后续输入已分别人工通过。
+
+已切Off，身份核对后停本轮模型/观察器/专用后端，ready/18963监听均无，200文件/原版基线一致，原小狼毫后端保留。没有关闭用户页面、卸载测试版或删模型权重。安装仍e5ce10d，本轮无需再释放DLL或盲测Word提示。汇总`output/LocalTest/input-only-edge-acceptance-summary-20261027.json`，恢复`output/LocalTest/word-input-only-state-20261027.json`；详见[最终报告](docs/WORD_INPUT_ONLY_AND_EDGE_HISTORY_2026-10-27.md)末节。下一步优先受控慢响应/超时/断连恢复、完整DOM/逐字段归属、混合DPI等未验收项。以下“模型须保留/等待反馈”为已经结束的历史。
+
 ## 正在等待Edge A真实4B回归，模型须保留至用户反馈
 
 Fixed D/E、跨框、历史后继续输入/退格已通过。冻结原4B已校验权重/映像/回环监听，health200，启动合成预热4117ms（不是推理耗时）；已切Model，固定开关false、无思考/温度0/阈值0.90。新600秒无正文观察器运行，等待A区合成错误句实际纠正、无错句输入及鼠标恢复结果。**尚未验收真实模型，本阶段不要提前停模型/后端或切Off使待答测试失效**；收到结果后再收尾自有运行时，不关闭用户Edge页面或自动卸载。模型/启动器PID和日志、实际阶段以`output/LocalTest/word-input-only-state-20261027.json`为准。
