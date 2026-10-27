@@ -1,5 +1,9 @@
 # 当前开发进度（2026-10-27）
 
+## Edge前文纠错撤销/重做已由用户确认，转D/E与跨框保护
+
+用户确认Ctrl+Z可从后输入内容退到“错字”再回到“错子”，Ctrl+Y反向恢复，前文纠错本身的历史功能通过；未给具体次数/完整DOM事件，不保证一次原子撤销。随后输入/退格需在下一步补查。Fixed保持、无真实模型，新600秒观察器仍运行；下一项密码D、只读E及跨编辑区旧提示失效。证据`output/LocalTest/edge-native-history-evidence-20261027.json`，恢复`output/LocalTest/word-input-only-state-20261027.json`。
+
 ## Edge新版Fixed三框通过，正在单独验真正纠错的撤销/重做
 
 用户确认A/B/C提示、实际替换、ni保留、下一次选词及中断恢复正常；无正文日志有3次新鲜Shown/TabApplied，证据`output/LocalTest/edge-input-only-build-fixed-evidence-20261027.json`。夹具语料外仍有InvalidRequest，不宣称所有请求成功；无真实模型。现Fixed保持，新600秒观察器运行，等待A区逐次撤销到错子恢复、逐次重做及后续输入反馈，尚未通过历史/D/E保护验收。恢复`output/LocalTest/word-input-only-state-20261027.json`。
