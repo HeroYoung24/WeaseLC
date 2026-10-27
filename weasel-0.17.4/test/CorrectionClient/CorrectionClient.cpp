@@ -392,8 +392,11 @@ int wmain(int argc, wchar_t** argv) {
   Check(DecodePreferences(json::serialize(legacy), decoded) && !decoded.automatic.enabled,
       "v2 migration keeps automatic capture disabled");
   preferences.automatic.wordLocalCompatibility = true;
-  Check(DecodePreferences(EncodePreferences(preferences), decoded) && decoded.automatic.wordLocalCompatibility,
-      "explicit Word compatibility round trips");
+  Check(DecodePreferences(EncodePreferences(preferences), decoded) && !decoded.automatic.wordLocalCompatibility,
+      "retired Word compatibility is never saved as enabled");
+  auto retiredWord=json::parse(encoded);retiredWord.at("automatic").at("word_local_compatibility")=true;
+  Check(DecodePreferences(json::serialize(retiredWord),decoded) && !decoded.automatic.wordLocalCompatibility,
+      "previous v4 Word opt-in is ignored under input-only policy");
   auto v3 = json::parse(EncodePreferences(preferences)); v3.at("version") = 3;
   Check(DecodePreferences(json::serialize(v3), decoded) && !decoded.automatic.wordLocalCompatibility,
       "v3 never silently opts into Word compatibility");

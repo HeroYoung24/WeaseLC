@@ -10,6 +10,8 @@
 #pragma comment(lib, "oleacc.lib")
 
 namespace correction {
+// Historical Word metadata diagnostics. Automatic correction now rejects the
+// Word host before reaching these getters (CorrectionHostPolicy.h).
 enum WordDocumentEvidence : DWORD {
   WordRange = 1, WordView = 2, WordPane = 4, WordObject = 8,
   WordDocument = 16, WordWritable = 32, WordUnprotected = 64,

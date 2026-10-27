@@ -86,7 +86,6 @@
 #define IDC_AUTO_DEBOUNCE               1051
 #define IDC_AUTO_STATE                  1052
 #define IDC_AUTO_PREVIEW                1053
-#define IDC_AUTO_WORD_LOCAL             1054
 #define IDC_SCHEMA_LIST                 1000
 #define IDC_SCHEMA_DESCRIPTION          1001
 #define IDC_GET_SCHEMATA                1002

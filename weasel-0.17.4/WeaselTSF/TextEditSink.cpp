@@ -75,6 +75,7 @@ bool ReadSide(ITfRange* selected, TfEditCookie cookie, bool before,
 correction::ProbeResult ProbeContext(ITfContext* context,
                                     TfEditCookie cookie) {
   correction::ProbeResult result;
+  if (correction::InputOnlyHost()) {result.status=correction::ProbeStatus::ScopeUnavailable;return result;}
   result.status = correction::ProbeStatus::SelectionUnavailable;
   TF_SELECTION selection = {};
   ULONG fetched = 0;
@@ -100,6 +101,11 @@ correction::ProbeResult ProbeContext(ITfContext* context,
 bool WeaselTSF::_CorrectionSafeScope(ITfContext* context, TfEditCookie cookie, ITfRange* range,
                                     correction::ProbeStatus* reason, correction::ScopeDiagnostic* details) {
   correction::ProbeStatus status = correction::ProbeStatus::ScopeUnavailable;
+  if (_automatic->InputOnlyHost()) {
+    if(reason)*reason=status;
+    if(details){*details={};details->stage=correction::ScopeStage::InputOnlyHost;}
+    return false;
+  }
   auto document = correction::WordDocumentRangeEvidence;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   static thread_local DWORD evidence = 0;
@@ -107,7 +113,7 @@ bool WeaselTSF::_CorrectionSafeScope(ITfContext* context, TfEditCookie cookie, I
   if (evidence) document = +[](ITfContext*,ITfRange*)->DWORD { return evidence; };
 #endif
   const bool safe = IsOrdinaryTextScope(context, cookie, range, status, details, correction::ScopeUse::LocalCommit,
-      _automatic->WordLocalCompatibility(), document);
+      false, document);
   if (reason) *reason = safe ? correction::ProbeStatus::Readable : status;
   return safe;
 }

@@ -5,6 +5,7 @@
 #include <atlcomcli.h>
 #include "CorrectionNativeScope.h"
 #include "CorrectionDocumentScope.h"
+#include "CorrectionHostPolicy.h"
 
 namespace correction {
 enum class ScopeStage : DWORD {
@@ -12,7 +13,7 @@ enum class ScopeStage : DWORD {
   PropertyValue, ValueType, ScopeInterface, ScopeQuery, EmptyScopes,
   TooManyScopes, UnsupportedScope, ProtectedScope, KeyboardUnavailable,
   KeyboardDisabled, EmptyContext, ReadOnly, StatusUnavailable, NativePlainText, WordDocument, WordMetadataUnavailable,
-  WordLocalCommit
+  WordLocalCommit, InputOnlyHost
 };
 enum class ScopeUse { NearbyText, LocalCommit };
 struct ScopeDiagnostic {
@@ -59,6 +60,7 @@ inline ScopeDiagnostic InspectInputScope(ITfContext* context, TfEditCookie cooki
                                           DocumentScopeVerifier document = WordDocumentRangeEvidence,
                                           bool allowWordLocalCommit = false) {
   ScopeDiagnostic result;
+  if (InputOnlyHost()) {result.stage=ScopeStage::InputOnlyHost;return result;}
   if (!context || !range) { result.stage = ScopeStage::MissingTarget; result.error = E_POINTER; return result; }
   CComPtr<ITfContextView> view;
   HWND window = nullptr;
@@ -150,6 +152,7 @@ inline const wchar_t* ScopeStageText(ScopeStage stage, bool chinese) {
     L"Scope not in text allowlist",L"Private/password/PIN field",L"Keyboard state unavailable",L"Keyboard disabled",L"Empty input context",L"Read-only field",L"Host status unavailable",L"Verified native plaintext editor"};
   const auto index = static_cast<unsigned>(stage);
   if (stage == ScopeStage::WordDocument) return chinese ? L"已核验可编辑 Word 文档" : L"Verified editable Word document";
+  if (stage == ScopeStage::InputOnlyHost) return chinese ? L"此应用仅普通输入，不启用自动纠错" : L"Normal input only in this application";
   if (stage == ScopeStage::WordLocalCommit) return chinese ? L"Word 本机兼容：仅本输入法上屏文字" : L"Word local compatibility: own commits only";
   if (stage == ScopeStage::WordMetadataUnavailable) return chinese ? L"Word 文档保护状态未通过核验" : L"Word document protection not verified";
   if (index > static_cast<unsigned>(ScopeStage::NativePlainText)) return chinese ? L"未知" : L"unknown";

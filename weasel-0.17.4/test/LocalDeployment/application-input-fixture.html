@@ -3,35 +3,73 @@
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-weaselc-local-fixture'; connect-src 'none'; form-action 'none'; base-uri 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WeaseLC 多环境输入测试 2026-10-22</title>
+<title>WeaseLC 多环境输入与撤销测试</title>
 <style>
   body{font:18px/1.55 system-ui,sans-serif;max-width:950px;margin:24px auto;padding:0 20px;color:#182534;background:#f5f7fa}
   section{background:white;border:1px solid #bdc8d5;border-radius:10px;padding:16px;margin:14px 0}
   label{display:block;font-weight:600;margin-bottom:8px} input,textarea,[contenteditable]{box-sizing:border-box;width:100%;font:24px/1.6 system-ui,sans-serif;border:2px solid #7c8b9b;border-radius:6px;padding:10px;background:white;color:#142132}
   textarea{height:140px;resize:vertical}[contenteditable]{min-height:115px} input:focus,textarea:focus,[contenteditable]:focus{outline:3px solid #76b8f5;outline-offset:2px}
   p{margin:6px 0}small{color:#43536a} pre{font:14px/1.45 monospace;white-space:pre-wrap;max-height:180px;overflow:auto}
+  button,select{font:16px system-ui;padding:7px 10px;margin:5px 8px 5px 0} .status{font-size:16px;color:#264667}
 </style>
 <h1>WeaseLC 多环境输入测试</h1>
 <p>仅输入合成测试文字，不填写真实信息。本页离线运行，不提交、不联网、不保存文本。</p>
 <p>先检查：nihao → 你好、半截 ni 后点击其他区域、退格、Shift及无提示时的Tab导航。</p>
 <p>纠错阶段：拼音输入“这里有错子。”，等待后再输入 ni，观察提示、Tab纠正及拼音保留。</p>
+<section><label for="phase">本组记录阶段</label><select id="phase"><option value="basic">基础输入</option><option value="fixed">固定响应</option><option value="model">本地模型</option></select><button type="button" id="clear-events">清空事件记录</button><p><small>此处只给记录加标签，不切换输入法或纠错设置。每组开始前清空记录，测试过程中保持编辑区焦点。</small></p></section>
 <section><label for="plain">A · 多行普通文本框</label><textarea id="plain" aria-label="A 多行普通文本框" spellcheck="false" autocomplete="off"></textarea></section>
 <section><label for="single">B · 单行普通文本框</label><input id="single" aria-label="B 单行普通文本框" type="text" spellcheck="false" autocomplete="off"></section>
 <section><label id="rich-label">C · 富文本编辑区</label><div id="rich" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="rich-label" spellcheck="false"></div></section>
 <section><label for="secret">D · 密码字段（仅输入假数据，如 abc123）</label><input id="secret" aria-label="D 合成密码字段" type="password" autocomplete="off"><small>预期没有纠错提示，Tab正常离开；不要输入真实密码。</small></section>
 <section><label for="readonly">E · 只读字段</label><input id="readonly" aria-label="E 只读字段" readonly value="只读合成文字，不能改写"></section>
-<section><label>输入事件摘要</label><p id="summary" role="status">等待输入；只记录事件类型、焦点和计数，不记录输入内容。</p><pre id="events" aria-label="事件摘要"></pre></section>
+<section><label>撤销/重做验收方法（仅 A 区，合成文字）</label><p>先完成 Tab 纠错并将 ni 选词上屏。逐次按 Ctrl+Z，记录每次变化，直到“错子”恢复；再逐次 Ctrl+Y，检查“错字”能否恢复，最后继续输入及退格。</p><p><strong>仅撤掉、恢复末尾的“你”，不能算前文纠错撤销/重做通过。</strong> 同时检查没有重复、丢字、旧提示重现或输入卡住。浏览器可能把多个动作分组，请记录实际次数，不预设必须一次撤销。</p></section>
+<section><label>输入事件摘要</label><p id="summary" role="status">等待输入；记录事件类型和计数，不记录输入正文。</p><p id="field-state" class="status" role="status">A/B/C 只显示合成错字是否存在及字符数；D/E 不读取字段内容。</p><pre id="events" aria-label="事件摘要"></pre></section>
 <script nonce="weaselc-local-fixture">
-  const records=[];let count=0;
-  for(const name of ['compositionstart','compositionend','input','focusin','focusout','keydown']){
+  const records=[];let count=0,undo=0,redo=0;
+  const fields=new Set(['plain','single','rich','secret','readonly']);
+  const inputTypes=new Set(['insertText','insertCompositionText','insertFromComposition','deleteCompositionText',
+    'deleteContentBackward','deleteContentForward','insertParagraph','insertLineBreak','insertFromPaste',
+    'deleteByCut','historyUndo','historyRedo']);
+  function keyLabel(event){
+    if(['Tab','Escape','Backspace','Enter'].includes(event.key))return event.key;
+    if(event.ctrlKey||event.metaKey){
+      const key=String(event.key).toLowerCase();
+      if(key==='z')return event.shiftKey?'redo shortcut':'undo shortcut';
+      if(key==='y')return 'redo shortcut';
+    }
+    return '';
+  }
+  function sampleState(target){
+    if(!['plain','single','rich'].includes(target.id))return 'protected-field: content not read';
+    const text=target.id==='rich'?target.textContent:target.value;
+    return `units=${text.length} sample=${text.includes('错子')?'original':text.includes('错字')?'corrected':'other'}`;
+  }
+  function render(){
+    document.getElementById('summary').textContent=`事件 ${count}；historyUndo ${undo}；historyRedo ${redo}。这些计数不代表纠错已通过。`;
+    document.getElementById('events').textContent=records.join('\n');
+  }
+  for(const name of ['compositionstart','compositionend','beforeinput','input','focusin','focusout','keydown']){
     document.addEventListener(name,event=>{
-      if(!['plain','single','rich','secret','readonly'].includes(event.target.id))return;
-      if(name==='keydown'&&!['Tab','Escape','Backspace','Enter'].includes(event.key))return;
-      count++;records.push(`${count} ${event.target.id} ${name}${name==='keydown'?' '+event.key:''}`);
-      if(records.length>18)records.shift();
-      document.getElementById('summary').textContent=`事件 ${count}；当前焦点：${document.activeElement.id||'其他区域'}`;
-      document.getElementById('events').textContent=records.join('\n');
+      if(!event.target||!fields.has(event.target.id))return;
+      const key=name==='keydown'?keyLabel(event):'';
+      if(name==='keydown'&&!key)return;
+      const input=name==='beforeinput'||name==='input';
+      const type=input?(inputTypes.has(event.inputType)?event.inputType:'other'):'';
+      if(name==='input'&&type==='historyUndo')undo++;
+      if(name==='input'&&type==='historyRedo')redo++;
+      const phaseValue=document.getElementById('phase').value;
+      const phase=['basic','fixed','model'].includes(phaseValue)?phaseValue:'basic';
+      const state=sampleState(event.target);
+      count++;records.push(`${count} ${phase} ${event.target.id} ${name}${key?' '+key:''}${type?' '+type:''} composing=${!!event.isComposing} trusted=${!!event.isTrusted} ${state}`);
+      if(records.length>128)records.shift();
+      document.getElementById('field-state').textContent=`${event.target.id}: ${state}`;
+      render();
     });
   }
+  document.getElementById('clear-events').addEventListener('click',()=>{
+    records.length=0;count=0;undo=0;redo=0;
+    document.getElementById('field-state').textContent='记录已清空；编辑区文字和撤销历史未更改。';
+    render();
+  });
 </script>
 </html>

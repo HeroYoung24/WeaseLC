@@ -159,7 +159,7 @@ int wmain(int argc, wchar_t** argv) {
   check(snapshot() && settings.settings.enabled && settings.settings.timeoutSeconds == 30, "shared public settings snapshot");
   check(!settings.settings.wordLocalCompatibility,"Word compatibility defaults off in public snapshot");
   preferences.automatic.wordLocalCompatibility=true;Save(root,preferences);
-  check(snapshot() && settings.settings.wordLocalCompatibility==1,"Word explicit opt-in crosses settings broker");
+  check(snapshot() && settings.settings.wordLocalCompatibility==0,"retired Word opt-in cannot cross settings broker");
   preferences.automatic.wordLocalCompatibility=false;Save(root,preferences);
   check(snapshot() && !settings.settings.wordLocalCompatibility,"Word opt-out crosses settings broker");
   BrokerReply health;

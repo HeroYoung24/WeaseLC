@@ -56,7 +56,7 @@ std::string EncodePreferences(const Preferences& preferences) {
   const auto& a = preferences.automatic;
   return json::serialize(json::object{{"version", 4},
       {"mode", static_cast<unsigned>(preferences.mode)}, {"timing", preferences.timing},
-      {"automatic", {{"enabled", a.enabled}, {"tab", a.tab}, {"word_local_compatibility", a.wordLocalCompatibility}, {"side", a.side},
+      {"automatic", {{"enabled", a.enabled}, {"tab", a.tab}, {"word_local_compatibility", false}, {"side", a.side},
           {"gap", a.gap}, {"width", a.width}, {"font", a.font}, {"debounce", a.debounce}}},
       {"local", Profile(preferences.local)}, {"online", Profile(preferences.online)}});
 }
@@ -78,7 +78,7 @@ bool DecodePreferences(const std::string& encoded, Preferences& preferences) {
       const auto& saved = object.at("automatic").as_object();
       auto& a = decoded.automatic;
       a.enabled = saved.at("enabled").as_bool(); a.tab = saved.at("tab").as_bool();
-      if (version == 4) a.wordLocalCompatibility = saved.at("word_local_compatibility").as_bool();
+      if (version == 4) (void)saved.at("word_local_compatibility").as_bool(); // Validate legacy data, never enable it.
       a.side = json::value_to<unsigned>(saved.at("side"));
       a.gap = json::value_to<unsigned>(saved.at("gap"));
       a.width = json::value_to<unsigned>(saved.at("width"));

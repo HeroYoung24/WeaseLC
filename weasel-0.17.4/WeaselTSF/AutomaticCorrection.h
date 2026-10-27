@@ -37,12 +37,14 @@ class AutomaticCorrection {
   HRESULT ContinueWrite(TfEditCookie, ITfContext*, WriteVerification&, bool resume);
   bool Focused(ITfContext* target = nullptr) const;
   void Poll();
-  bool WordLocalCompatibility() const {
-    return preferences_.mode == correction::Mode::Local && preferences_.automatic.enabled &&
-        preferences_.automatic.wordLocalCompatibility;
+  bool InputOnlyHost() const {
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+    if (testing_ && testInputOnlyHost_) return true;
+#endif
+    return correction::InputOnlyHost();
   }
 #ifdef WEASELC_LOCAL_TEST_BUILD
-  bool ScopeTraceEnabled() const { return preferences_.mode==correction::Mode::Local && preferences_.automatic.enabled; }
+  bool ScopeTraceEnabled() const { return !InputOnlyHost() && preferences_.mode==correction::Mode::Local && preferences_.automatic.enabled; }
   void ScheduleScopeReadTrace(ITfContext* context) { scopeReadTraceContext_=context; }
   bool ConsumeScopeReadTrace(ITfContext* context);
 #endif
@@ -57,6 +59,7 @@ class AutomaticCorrection {
   correction::AutomaticDiagnostic DiagnosticTest() const { return diagnostic_; }
   DWORD CachedUnitsTest() const { return static_cast<DWORD>(text_.size()); }
   void PendingScopeTest(bool enabled) { testPendingScope_ = enabled; }
+  void InputOnlyHostTest(bool enabled) { testInputOnlyHost_ = enabled; }
   void ExpirePendingTest() { if (scopeWaitUntil_) scopeWaitUntil_ = 1; }
   void RevalidateTest() { nextValidation_ = 0; }
   ULONGLONG ScopeDeadlineTest() const { return scopeWaitUntil_; }
@@ -121,6 +124,7 @@ class AutomaticCorrection {
   bool testFocused_ = true;
   bool strictCandidateTest_ = false;
   bool testPendingScope_ = false;
+  bool testInputOnlyHost_ = false;
   DWORD testWordEvidence_ = 0;
   TfClientId testClient_ = TF_CLIENTID_NULL;
   std::wstring testWorker_;

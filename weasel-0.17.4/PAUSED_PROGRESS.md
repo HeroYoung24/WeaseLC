@@ -1,5 +1,11 @@
 # 当前开发进度（2026-10-27）
 
+## 用户最新决策：Word仅普通输入，取消Word纠错/替换计划
+
+本轮已实装源码进程策略：Word在任何自动范围读取/缓存/模型/提示/纠错Tab前跳过，保留普通Rime输入；旧兼容开关移除、旧true字段被忽略。新增Word退化保护和宿主撤销/重做通知回归，双架构124缓存、466自动/Tab、104按键、26焦点、100范围/23旧元数据、146离线、43协调器、216UI、23完整链路及卸载/Release构建通过。自有程序命名WINWORD验证实际进程识别，不代表真实Word验收。
+
+继续其他P0：Edge测试页补beforeinput/historyUndo/historyRedo与有界无正文记录，17夹具隐私契约通过；真实Edge撤销分组、D/E保护及跨框失效仍待验收。安装仍f5f11f1/Off，本轮尚未部署。旧Word兼容包UpdatePatch-20261027-150517已标记过期并被更新器拒绝，**不得继续安装或安排Word提示/Tab测试**。下一轮使用本轮新包，Word仅验普通输入，重点转Edge。详见[本轮决策与结果](docs/WORD_INPUT_ONLY_AND_EDGE_HISTORY_2026-10-27.md)。以下Word兼容路线均为被取代的历史。
+
 ## 最新源码：Word IRM getter异常已具体定位，显式本机兼容完成
 
 源码f8f22e6已提交本地main，未推送。六文件包`UpdatePatch-20261027-150517`校验通过但未安装；独立v3设置快照`output/LocalTest/word-irm-settings-before-20261027.bin`保存，恢复入口`output/LocalTest/word-irm-compat-state-20261027.json`。实际设置仍Off，安装仍f5f11f1，自有测试/专用运行时/模型端口/ready均无，原版基线一致。

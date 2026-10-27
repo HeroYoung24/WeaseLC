@@ -121,7 +121,7 @@ struct CorrectionBroker::Impl {
     saved.timing = value.timing; saved.tab = a.tab; saved.side = a.side; saved.gap = a.gap;
     saved.width = a.width; saved.font = a.font; saved.debounce = a.debounce;
     saved.timeoutSeconds = value.local.timeoutSeconds; saved.threshold = EffectiveThreshold(value.local);
-    saved.wordLocalCompatibility = value.automatic.wordLocalCompatibility ? 1 : 0;
+    saved.wordLocalCompatibility = 0;  // Retired wire field; cannot enable Word correction.
     if (preferences) *preferences = std::move(value);
     return BrokerStatus::Ok;
   }

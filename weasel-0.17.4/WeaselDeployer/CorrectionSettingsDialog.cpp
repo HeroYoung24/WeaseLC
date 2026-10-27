@@ -218,7 +218,7 @@ bool ReadAutomaticOptions(HWND dialog, AutomaticDialogState& state, AutomaticOpt
   options = state.working;
   options.enabled = IsDlgButtonChecked(dialog, IDC_AUTO_ENABLED) == BST_CHECKED;
   options.tab = IsDlgButtonChecked(dialog, IDC_AUTO_TAB) == BST_CHECKED;
-  options.wordLocalCompatibility = IsDlgButtonChecked(dialog, IDC_AUTO_WORD_LOCAL) == BST_CHECKED;
+  options.wordLocalCompatibility = false;
   options.side = static_cast<unsigned>(SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_GETCURSEL, 0, 0));
   struct Field { int id; unsigned low, high; unsigned* output; };
   for (auto field : {Field{IDC_AUTO_GAP, 0, 48, &options.gap}, {IDC_AUTO_WIDTH, 180, 640, &options.width},
@@ -244,7 +244,6 @@ INT_PTR CALLBACK AutomaticDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM
     const auto& options = state->working;
     CheckDlgButton(dialog, IDC_AUTO_ENABLED, options.enabled ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(dialog, IDC_AUTO_TAB, options.tab ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(dialog, IDC_AUTO_WORD_LOCAL, options.wordLocalCompatibility ? BST_CHECKED : BST_UNCHECKED);
     for (const auto* label : {state->owner.Text(L"右侧（默认）", L"Right (default)"),
          state->owner.Text(L"左侧", L"Left"), state->owner.Text(L"下方", L"Below")})
       SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label));
@@ -764,7 +763,6 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
       check(IsWindow(autoDialog) && !state.preferences.automatic.enabled, "invalid layout cannot be accepted");
       SetDlgItemInt(autoDialog, IDC_AUTO_WIDTH, 400, FALSE);
       CheckDlgButton(autoDialog, IDC_AUTO_ENABLED, BST_CHECKED);
-      CheckDlgButton(autoDialog, IDC_AUTO_WORD_LOCAL, BST_CHECKED);
       SendMessageW(autoDialog, WM_COMMAND, IDCANCEL, 0);
       check(!state.preferences.automatic.enabled && !state.preferences.automatic.wordLocalCompatibility &&
           !automatic.preview.Window(), "layout cancel leaves options unchanged and closes preview");
@@ -772,13 +770,10 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
           AutomaticDialogProc, reinterpret_cast<LPARAM>(&automatic));
       if (autoDialog) {
         CheckDlgButton(autoDialog, IDC_AUTO_ENABLED, BST_CHECKED);
-        check(IsDlgButtonChecked(autoDialog, IDC_AUTO_WORD_LOCAL) == BST_UNCHECKED,
-            "Word local compatibility is off until explicitly selected");
-        CheckDlgButton(autoDialog, IDC_AUTO_WORD_LOCAL, BST_CHECKED);
         SetDlgItemInt(autoDialog, IDC_AUTO_WIDTH, 400, FALSE);
         SendMessageW(autoDialog, WM_COMMAND, IDOK, 0);
         check(state.preferences.automatic.enabled && state.preferences.automatic.width == 400 &&
-            state.preferences.automatic.wordLocalCompatibility && !IsWindow(autoDialog),
+            !state.preferences.automatic.wordLocalCompatibility && !IsWindow(autoDialog),
             "layout confirmation changes parent memory only");
         state.preferences.automatic = AutomaticOptions{};
       } else check(false, "automatic layout recreated");

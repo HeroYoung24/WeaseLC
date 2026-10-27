@@ -441,6 +441,7 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     #include "VisualChecks.inc"
     if (hostReview) {
       #include "CompositionSyncChecks.inc"
+      #include "UndoRedoChecks.inc"
       std::cout << "Host review: production staged correction and failure boundaries; real applications still require acceptance\n";
     }
   }

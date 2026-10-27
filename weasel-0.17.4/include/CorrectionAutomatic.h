@@ -13,7 +13,7 @@ inline UINT AutomaticWindowDpi(HWND window) {
 struct AutomaticOptions {
   bool enabled = false;
   bool tab = true;
-  bool wordLocalCompatibility = false;  // Explicit opt-in; IRM status may be unavailable.
+  bool wordLocalCompatibility = false;  // Retired v4 field; Word is always input-only.
   unsigned side = 0;  // right, left, below
   unsigned gap = 8;   // logical pixels at 96 DPI
   unsigned width = 320;

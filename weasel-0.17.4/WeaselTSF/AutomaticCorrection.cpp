@@ -241,6 +241,7 @@ LRESULT CALLBACK AutomaticCorrection::WindowProc(HWND window, UINT message, WPAR
 }
 void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
                                   ITfRange* committed, const std::wstring& text) try {
+  if (InputOnlyHost()) {Cancel();Report(correction::AutomaticStage::InputOnlyHost);return;}
 #ifdef WEASELC_LOCAL_TEST_BUILD
   correction::FrontendDiagnostic gate;
   gate.stage = 1; gate.units = static_cast<DWORD>(text.size());
@@ -328,6 +329,7 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   RecordInput(context, cookie);
 } catch (...) { Cancel(); }
 bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
+  if (InputOnlyHost()) {Cancel();Report(correction::AutomaticStage::InputOnlyHost);return false;}
   scopePending_ = false;  // Only the exact eligible failure below may preserve it.
   if (!context_ || !correction::SameIdentity(context, context_) || !range_) {
     Report(correction::AutomaticStage::RangeMismatch); return false;
@@ -392,6 +394,7 @@ void AutomaticCorrection::Observe(ITfContext* context, TfEditCookie cookie) try 
   if (context_ && !Validate(cookie, context) && !scopePending_) Cancel();
 } catch (...) { Cancel(); }
 void AutomaticCorrection::RecordInput(ITfContext* context, TfEditCookie cookie) try {
+  if (InputOnlyHost()) {Cancel();Report(correction::AutomaticStage::InputOnlyHost);return;}
   if (!context_ || !correction::SameIdentity(context_, context)) return;
   if (scopeWaitUntil_) {
     // While metadata is unknown, never read preedit text or accept a newly
@@ -684,6 +687,7 @@ void AutomaticCorrection::Position(const RECT& caret) {
   Refresh();
 }
 void AutomaticCorrection::Refresh() {
+  if (InputOnlyHost()) {Cancel();Report(correction::AutomaticStage::InputOnlyHost);return;}
   if (scopeWaitUntil_) { Hide(); return; }
   if (ready_ && GetTickCount64() - started_ >= Lifetime()) { Cancel(); return; }
   if (!ready_ || !window_) { Hide(); return; }
@@ -738,6 +742,7 @@ void AutomaticCorrection::Refresh() {
   Report(correction::AutomaticStage::Shown);
 }
 bool AutomaticCorrection::IntegratedKey(WPARAM key, LPARAM flags, BOOL* eaten) {
+  if (InputOnlyHost()) {Cancel();ResetKeys();if(eaten)*eaten=FALSE;Report(correction::AutomaticStage::InputOnlyHost);return false;}
   // The integrated-candidate callback is an actual key offer, not a TSF Test
   // callback. Only claim the correction shortcut; ordinary candidate/navigation
   // keys remain available to the application's integration implementation.
@@ -749,6 +754,7 @@ bool AutomaticCorrection::IntegratedKey(WPARAM key, LPARAM flags, BOOL* eaten) {
 }
 bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, bool test, bool up, BOOL* eaten) try {
   if (!eaten) return false;
+  if (InputOnlyHost()) {Cancel();ResetKeys();*eaten=FALSE;Report(correction::AutomaticStage::InputOnlyHost);return false;}
   if (key != VK_TAB) {
     if (!up && (key == VK_ESCAPE || key == VK_LEFT || key == VK_RIGHT || key == VK_HOME ||
         key == VK_END || key == VK_DELETE || key == VK_BACK || key == VK_SHIFT || key == VK_CONTROL || key == VK_MENU)) Cancel();
@@ -900,6 +906,7 @@ bool AutomaticCorrection::StartWorker() {
 #endif
 }
 void AutomaticCorrection::Poll() {
+  if (InputOnlyHost()) {Cancel();Report(correction::AutomaticStage::InputOnlyHost);return;}
   if (polling_) return;
   polling_ = true;
   struct Guard { bool& flag; ~Guard() { flag = false; } } guard{polling_};
@@ -984,9 +991,9 @@ bool AutomaticCorrection::LoadBrokerPreferences() {
   value.mode = saved.enabled ? correction::Mode::Local : correction::Mode::Off;
   value.timing = saved.timing;
   auto& a = value.automatic; a.enabled = saved.enabled != 0; a.tab = saved.tab != 0;
-  a.wordLocalCompatibility = saved.wordLocalCompatibility != 0;
+  a.wordLocalCompatibility = false;  // Retired option: never reenable Word correction.
   a.side = saved.side; a.gap = saved.gap; a.width = saved.width; a.font = saved.font; a.debounce = saved.debounce;
-  if (!saved.revision || saved.enabled > 1 || saved.tab > 1 || saved.timing > 1 || saved.wordLocalCompatibility > 1 ||
+  if (!saved.revision || saved.enabled > 1 || saved.tab > 1 || saved.timing > 1 || saved.wordLocalCompatibility != 0 ||
       saved.timeoutSeconds < 2 || saved.timeoutSeconds > 60 || !std::isfinite(saved.threshold) ||
       saved.threshold < 0 || saved.threshold > 1 || !correction::ValidAutomaticOptions(a)) return false;
   value.local.timeoutSeconds = saved.timeoutSeconds;
@@ -1018,6 +1025,7 @@ bool AutomaticCorrection::CandidateTest(DWORD mode, RECT& position) {
 void AutomaticCorrection::ConfigureTest(const correction::Preferences& preferences, TfClientId client, const std::wstring& worker) {
   Cancel(); ResetKeys(); testing_ = true; testFocused_ = true;
   testPendingScope_ = false;
+  testInputOnlyHost_ = false;
   testWordEvidence_ = 0;
   strictCandidateTest_ = false;
   testingBroker_ = worker.compare(0, 7, L"broker:") == 0;
@@ -1069,9 +1077,10 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticWordEvidence
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticScopeWait(
     ITfTextInputProcessorEx* service, DWORD operation) {
-  if (!service || operation > 3) return E_INVALIDARG;
+  if (!service || operation > 5) return E_INVALIDARG;
   auto& automatic = static_cast<WeaselTSF*>(service)->Automatic();
-  if (operation == 3) automatic.RevalidateTest();
+  if (operation >= 4) automatic.InputOnlyHostTest(operation == 4);
+  else if (operation == 3) automatic.RevalidateTest();
   else if (operation == 2) automatic.ExpirePendingTest();
   else automatic.PendingScopeTest(operation != 0);
   return S_OK;

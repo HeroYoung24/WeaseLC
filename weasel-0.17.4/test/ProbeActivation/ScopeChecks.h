@@ -102,6 +102,11 @@ static bool TestCorrectionScope() {
   using namespace correction;
   unsigned checks=0,failures=0;
   auto check=[&](bool good,const char* name){++checks;if(!good)++failures;std::cout<<(good?"PASS ":"FAIL ")<<name<<'\n';};
+  for(const auto* name:{L"WINWORD.EXE",L"C:\\Office\\WinWord.ExE",L"C:/Office/WINWORD.EXE",L""})
+    check(InputOnlyExecutable(name),"Word basename or unknown image uses ordinary input only");
+  check(InputOnlyExecutable(nullptr),"unknown executable cannot enable automatic correction");
+  for(const auto* name:{L"msedge.exe",L"NotWinWord.exe",L"WINWORD.EXE.helper"})
+    check(!InputOnlyExecutable(name),"Word host policy matches exact basename rather than substrings");
   CompositionRange range; ScopeContext context(range); ScopeProperty property; ScopeFixture input;
   context.property=&property; property.value=&input;
   auto read=[&]{return InspectInputScope(&context,1,&range);};

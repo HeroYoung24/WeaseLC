@@ -204,6 +204,11 @@ static bool TestRetainedCandidate(HMODULE module, IClassFactory* factory) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+  if(argc==2 && std::wstring(argv[1])==L"--input-only-host") {
+    const auto scope=correction::InspectInputScope(nullptr,0,nullptr);
+    const bool valid=correction::InputOnlyHost() && scope.stage==correction::ScopeStage::InputOnlyHost && !scope;
+    std::cout<<"Input-only process policy before scope access = "<<valid<<'\n';return valid?0:1;
+  }
   if(argc==2 && std::wstring(argv[1])==L"--scope-policy")return TestCorrectionScope()?0:1;
   if (argc == 2 && std::wstring(argv[1]) == L"--registration-checks")
     return RegistrationTests::Run() ? 0 : 1;

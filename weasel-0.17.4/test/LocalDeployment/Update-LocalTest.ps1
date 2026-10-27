@@ -11,6 +11,7 @@ $outputRoot = Join-Path $source 'output\LocalTest'
 $patchRoot = [IO.Path]::GetFullPath($Patch).TrimEnd('\')
 if ([IO.Path]::GetDirectoryName($patchRoot) -ne $outputRoot -or
     ![IO.Path]::GetFileName($patchRoot).StartsWith('UpdatePatch-',[StringComparison]::Ordinal)) { throw 'Use a dedicated workspace UpdatePatch-* directory.' }
+if (Test-Path -LiteralPath (Join-Path $patchRoot 'superseded.json')) { throw 'This patch was superseded by a later product decision; prepare/use the current source package.' }
 $installRoot = $script:TestRoot
 $manifestPath = Join-Path $installRoot 'manifest.json'
 $allowed = @('WeaselServer.exe','WeaselDeployer.exe','weaselx64.dll',
