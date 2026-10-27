@@ -1,5 +1,9 @@
 # 当前开发进度（2026-10-27）
 
+## Edge新版Fixed三框通过，正在单独验真正纠错的撤销/重做
+
+用户确认A/B/C提示、实际替换、ni保留、下一次选词及中断恢复正常；无正文日志有3次新鲜Shown/TabApplied，证据`output/LocalTest/edge-input-only-build-fixed-evidence-20261027.json`。夹具语料外仍有InvalidRequest，不宣称所有请求成功；无真实模型。现Fixed保持，新600秒观察器运行，等待A区逐次撤销到错子恢复、逐次重做及后续输入反馈，尚未通过历史/D/E保护验收。恢复`output/LocalTest/word-input-only-state-20261027.json`。
+
 ## Edge新版基础已通过，Fixed待反馈
 
 用户确认A/B/C中文、中断退格、普通Tab及搜狗正常，Edge实际加载e5ce10d DLL已匹配。现Fixed已开启，新的600秒无正文观察器运行，旧Word观察器停止；等待A/B/C提示/实际替换/ni保留/下一次选词及中断结果，再单独做真正纠错的撤销/重做与密码/只读字段。未启动模型，不把旧版Fixed通过当作当前新版结果。恢复状态仍`output/LocalTest/word-input-only-state-20261027.json`。
