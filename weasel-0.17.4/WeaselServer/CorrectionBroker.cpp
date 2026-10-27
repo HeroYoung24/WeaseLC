@@ -121,6 +121,7 @@ struct CorrectionBroker::Impl {
     saved.timing = value.timing; saved.tab = a.tab; saved.side = a.side; saved.gap = a.gap;
     saved.width = a.width; saved.font = a.font; saved.debounce = a.debounce;
     saved.timeoutSeconds = value.local.timeoutSeconds; saved.threshold = EffectiveThreshold(value.local);
+    saved.wordLocalCompatibility = value.automatic.wordLocalCompatibility ? 1 : 0;
     if (preferences) *preferences = std::move(value);
     return BrokerStatus::Ok;
   }
@@ -135,7 +136,7 @@ struct CorrectionBroker::Impl {
       PrepareDiagnostics();Record(entries[phase],request.data,request.metadataBytes);return;
     }
     const wchar_t* names[]{L"LastKey",L"LastCommit",L"LastGate",L"LastCapture",L"LastAutomatic",L"LastScope",
-        nullptr,L"LastKeyDownDispatch",L"LastKeyUpDispatch",L"LastIntegratedDispatch"};
+        nullptr,L"LastKeyDownDispatch",L"LastKeyUpDispatch",L"LastIntegratedDispatch",L"LastWordMetadata"};
     PrepareDiagnostics();
     Record(names[static_cast<unsigned>(request.metadata)], request.data, request.metadataBytes);
   }
@@ -217,7 +218,7 @@ struct CorrectionBroker::Impl {
       SecureZeroMemory(&request, sizeof(request)); SecureZeroMemory(&reply, sizeof(reply));
     } } erase{request, reply};
     if (!Transfer(pipe, &request, sizeof(request), true, stop.value) || !access.AllowsClient(pipe) ||
-        request.magic != 0x32424357 || request.version != 2) return;
+        request.magic != 0x32424357 || request.version != 3) return;
     reply.requestId = request.requestId;
     try {
       switch (request.operation) {

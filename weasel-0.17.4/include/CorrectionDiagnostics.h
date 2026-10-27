@@ -28,7 +28,7 @@ inline ScopeDiagnostic LoadScopeDiagnostic(const wchar_t* path = kDiagnosticKey)
   DWORD bytes = sizeof(result);
   if (RegGetValueW(HKEY_CURRENT_USER, path, L"LastScope", RRF_RT_REG_BINARY,
       nullptr, &result, &bytes) != ERROR_SUCCESS || bytes != sizeof(result) || result.version != 1 ||
-      result.stage > ScopeStage::WordMetadataUnavailable || result.variantType > 0xffff) return {};
+      result.stage > ScopeStage::WordLocalCommit || result.variantType > 0xffff) return {};
   return result;
 }
 inline void SaveScopeDiagnostic(const ScopeDiagnostic& result, const wchar_t* path = kDiagnosticKey) {

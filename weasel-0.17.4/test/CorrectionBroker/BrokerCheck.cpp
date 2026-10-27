@@ -157,6 +157,11 @@ int wmain(int argc, wchar_t** argv) {
   auto snapshot = [&]() { return call.Exchange(Self(), request, settings, 1000) && settings.status == BrokerStatus::Ok; };
   auto run = [&]() { return call.Exchange(Self(), CheckRequestFor(settings), reply, 3000); };
   check(snapshot() && settings.settings.enabled && settings.settings.timeoutSeconds == 30, "shared public settings snapshot");
+  check(!settings.settings.wordLocalCompatibility,"Word compatibility defaults off in public snapshot");
+  preferences.automatic.wordLocalCompatibility=true;Save(root,preferences);
+  check(snapshot() && settings.settings.wordLocalCompatibility==1,"Word explicit opt-in crosses settings broker");
+  preferences.automatic.wordLocalCompatibility=false;Save(root,preferences);
+  check(snapshot() && !settings.settings.wordLocalCompatibility,"Word opt-out crosses settings broker");
   BrokerReply health;
   auto healthSnapshot = [&]() {
     BrokerRequest status; status.operation = BrokerOperation::Health;
@@ -165,6 +170,21 @@ int wmain(int argc, wchar_t** argv) {
         fixture.calls.load() == calls && !health.result.count;
   };
   check(healthSnapshot() && health.modelState == 0xffffffff, "health query neither invokes model nor invents a successful check");
+  {
+    BrokerRequest notice;notice.operation=BrokerOperation::Metadata;
+    notice.metadata=BrokerMetadata::WordMetadata;notice.metadataBytes=40;
+    const DWORD sample[]{1,4,0,static_cast<DWORD>(DISP_E_EXCEPTION),static_cast<DWORD>(E_FAIL),0,0,0,123,456};
+    memcpy(notice.data,sample,sizeof(sample));
+    const auto calls=fixture.calls.load();
+    const bool sent=call.SendMetadata(Self(),notice);
+    DWORD stored[10]{};DWORD bytes=sizeof(stored);
+    const auto key=root+L"\\Diagnostics";
+    const auto deadline=GetTickCount64()+1000;
+    while(RegGetValueW(HKEY_CURRENT_USER,key.c_str(),L"LastWordMetadata",RRF_RT_REG_BINARY,nullptr,stored,&bytes)!=ERROR_SUCCESS &&
+        GetTickCount64()<deadline){bytes=sizeof(stored);Sleep(5);}
+    check(sent && bytes==sizeof(sample) && !memcmp(sample,stored,sizeof(sample)) && fixture.calls==calls,
+        "numeric Word getter diagnostics cross the dedicated metadata channel without a model call");
+  }
   {
     BrokerRequest notice;notice.operation=BrokerOperation::Metadata;
     notice.metadata=BrokerMetadata::ScopeTrace;notice.metadataBytes=40;
@@ -209,6 +229,8 @@ int wmain(int argc, wchar_t** argv) {
   check(call.Exchange(Self(), invalid, reply, 1000) && reply.status == BrokerStatus::InvalidRequest, "reject oversized input");
   invalid = CheckRequestFor(settings); invalid.version = 999;
   check(!call.Exchange(Self(), invalid, reply, 1000), "reject unsupported protocol version");
+  invalid = CheckRequestFor(settings); invalid.version = 2;
+  check(!call.Exchange(Self(), invalid, reply, 1000), "older broker protocol cannot silently drop Word opt-in policy");
   for (unsigned mode : {1u, 2u, 3u}) {
     fixture.mode = mode;
     const State expected = mode == 1 ? State::Timeout : mode == 2 ? State::HttpError : State::InvalidResponse;

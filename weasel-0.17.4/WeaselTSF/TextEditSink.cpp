@@ -34,8 +34,11 @@ namespace {
 bool IsOrdinaryTextScope(ITfContext* context, TfEditCookie cookie,
                          ITfRange* selected, correction::ProbeStatus& status,
                          correction::ScopeDiagnostic* details = nullptr,
-                         correction::ScopeUse use = correction::ScopeUse::NearbyText) {
-  const auto result = correction::InspectInputScope(context, cookie, selected, use);
+                         correction::ScopeUse use = correction::ScopeUse::NearbyText,
+                         bool wordLocalCompatibility = false,
+                         correction::DocumentScopeVerifier document = correction::WordDocumentRangeEvidence) {
+  const auto result = correction::InspectInputScope(context, cookie, selected, use,
+      correction::NativeTextRangeVerified, document, wordLocalCompatibility);
   if (details) *details = result;
   status = result ? correction::ProbeStatus::Readable : correction::ProtectedScope(result)
       ? correction::ProbeStatus::ProtectedField : correction::ProbeStatus::ScopeUnavailable;
@@ -97,7 +100,14 @@ correction::ProbeResult ProbeContext(ITfContext* context,
 bool WeaselTSF::_CorrectionSafeScope(ITfContext* context, TfEditCookie cookie, ITfRange* range,
                                     correction::ProbeStatus* reason, correction::ScopeDiagnostic* details) {
   correction::ProbeStatus status = correction::ProbeStatus::ScopeUnavailable;
-  const bool safe = IsOrdinaryTextScope(context, cookie, range, status, details, correction::ScopeUse::LocalCommit);
+  auto document = correction::WordDocumentRangeEvidence;
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  static thread_local DWORD evidence = 0;
+  evidence = _automatic->WordEvidenceTest();
+  if (evidence) document = +[](ITfContext*,ITfRange*)->DWORD { return evidence; };
+#endif
+  const bool safe = IsOrdinaryTextScope(context, cookie, range, status, details, correction::ScopeUse::LocalCommit,
+      _automatic->WordLocalCompatibility(), document);
   if (reason) *reason = safe ? correction::ProbeStatus::Readable : status;
   return safe;
 }

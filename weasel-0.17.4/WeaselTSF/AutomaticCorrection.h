@@ -37,6 +37,10 @@ class AutomaticCorrection {
   HRESULT ContinueWrite(TfEditCookie, ITfContext*, WriteVerification&, bool resume);
   bool Focused(ITfContext* target = nullptr) const;
   void Poll();
+  bool WordLocalCompatibility() const {
+    return preferences_.mode == correction::Mode::Local && preferences_.automatic.enabled &&
+        preferences_.automatic.wordLocalCompatibility;
+  }
 #ifdef WEASELC_LOCAL_TEST_BUILD
   bool ScopeTraceEnabled() const { return preferences_.mode==correction::Mode::Local && preferences_.automatic.enabled; }
   void ScheduleScopeReadTrace(ITfContext* context) { scopeReadTraceContext_=context; }
@@ -56,6 +60,8 @@ class AutomaticCorrection {
   void ExpirePendingTest() { if (scopeWaitUntil_) scopeWaitUntil_ = 1; }
   void RevalidateTest() { nextValidation_ = 0; }
   ULONGLONG ScopeDeadlineTest() const { return scopeWaitUntil_; }
+  DWORD WordEvidenceTest() const { return testing_ ? testWordEvidence_ : 0; }
+  bool WordEvidenceTest(DWORD value) { if (!testing_ || value > 1023) return false; testWordEvidence_=value; return true; }
   bool CandidateTest(DWORD mode, RECT& position);
 #endif
  private:
@@ -115,6 +121,7 @@ class AutomaticCorrection {
   bool testFocused_ = true;
   bool strictCandidateTest_ = false;
   bool testPendingScope_ = false;
+  DWORD testWordEvidence_ = 0;
   TfClientId testClient_ = TF_CLIENTID_NULL;
   std::wstring testWorker_;
 #endif

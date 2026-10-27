@@ -379,7 +379,7 @@ int wmain(int argc, wchar_t** argv) {
       decoded.local.model == L"test-model" && decoded.online.minimumScore == .75 &&
       decoded.local.bearerToken.empty() && !decoded.online.onlineConsent, "separate profile roundtrip");
   Check(!DecodePreferences("invalid", decoded), "invalid preferences");
-  auto settings = json::parse(encoded); settings.at("version") = 4;
+  auto settings = json::parse(encoded); settings.at("version") = 5;
   Check(!DecodePreferences(json::serialize(settings), decoded), "future preferences rejected");
   settings = json::parse(encoded); settings.at("local").at("timeout") = 0;
   Check(!DecodePreferences(json::serialize(settings), decoded), "invalid saved timeout");
@@ -391,6 +391,16 @@ int wmain(int argc, wchar_t** argv) {
   auto legacy = json::parse(encoded); legacy.at("version") = 2; legacy.as_object().erase("automatic");
   Check(DecodePreferences(json::serialize(legacy), decoded) && !decoded.automatic.enabled,
       "v2 migration keeps automatic capture disabled");
+  preferences.automatic.wordLocalCompatibility = true;
+  Check(DecodePreferences(EncodePreferences(preferences), decoded) && decoded.automatic.wordLocalCompatibility,
+      "explicit Word compatibility round trips");
+  auto v3 = json::parse(EncodePreferences(preferences)); v3.at("version") = 3;
+  Check(DecodePreferences(json::serialize(v3), decoded) && !decoded.automatic.wordLocalCompatibility,
+      "v3 never silently opts into Word compatibility");
+  auto badWord = json::parse(encoded); badWord.at("automatic").at("word_local_compatibility") = 1;
+  Check(!DecodePreferences(json::serialize(badWord), decoded), "Word opt-in must be a boolean");
+  badWord = json::parse(encoded); badWord.at("automatic").as_object().erase("word_local_compatibility");
+  Check(!DecodePreferences(json::serialize(badWord), decoded), "v4 requires explicit Word policy field");
   for (const char* field : {"side", "gap", "width", "font", "debounce"}) {
     auto invalid = json::parse(encoded); invalid.at("automatic").at(field) = 99999;
     Check(!DecodePreferences(json::serialize(invalid), decoded), "automatic options bounds enforced");

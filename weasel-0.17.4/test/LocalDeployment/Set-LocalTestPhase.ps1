@@ -9,7 +9,7 @@ try {
   $raw = $key.GetValue('SettingsV2',$null)
   if ($raw -isnot [byte[]] -or !$raw.Length -or $raw.Length -gt 16384) { throw 'Unexpected settings value.' }
   $settings = [Text.Encoding]::UTF8.GetString($raw) | ConvertFrom-Json
-  if ($settings.version -ne 3) { throw 'Version 3 settings required.' }
+  if ($settings.version -notin @(3,4)) { throw 'Version 3/4 settings required.' }
   $settings.mode = if ($Phase -eq 'Off') {0} else {1}
   $settings.automatic.enabled = $Phase -ne 'Off'
   if ($Phase -ne 'Off') {

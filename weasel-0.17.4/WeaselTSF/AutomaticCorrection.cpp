@@ -984,8 +984,9 @@ bool AutomaticCorrection::LoadBrokerPreferences() {
   value.mode = saved.enabled ? correction::Mode::Local : correction::Mode::Off;
   value.timing = saved.timing;
   auto& a = value.automatic; a.enabled = saved.enabled != 0; a.tab = saved.tab != 0;
+  a.wordLocalCompatibility = saved.wordLocalCompatibility != 0;
   a.side = saved.side; a.gap = saved.gap; a.width = saved.width; a.font = saved.font; a.debounce = saved.debounce;
-  if (!saved.revision || saved.enabled > 1 || saved.tab > 1 || saved.timing > 1 ||
+  if (!saved.revision || saved.enabled > 1 || saved.tab > 1 || saved.timing > 1 || saved.wordLocalCompatibility > 1 ||
       saved.timeoutSeconds < 2 || saved.timeoutSeconds > 60 || !std::isfinite(saved.threshold) ||
       saved.threshold < 0 || saved.threshold > 1 || !correction::ValidAutomaticOptions(a)) return false;
   value.local.timeoutSeconds = saved.timeoutSeconds;
@@ -1017,6 +1018,7 @@ bool AutomaticCorrection::CandidateTest(DWORD mode, RECT& position) {
 void AutomaticCorrection::ConfigureTest(const correction::Preferences& preferences, TfClientId client, const std::wstring& worker) {
   Cancel(); ResetKeys(); testing_ = true; testFocused_ = true;
   testPendingScope_ = false;
+  testWordEvidence_ = 0;
   strictCandidateTest_ = false;
   testingBroker_ = worker.compare(0, 7, L"broker:") == 0;
   preferences_ = preferences; testClient_ = client; testWorker_ = testingBroker_ ? worker.substr(7) : worker;
@@ -1059,6 +1061,11 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticCachedUnits(
     ITfTextInputProcessorEx* service, DWORD* units) {
   if (!service || !units) return E_INVALIDARG;
   *units = static_cast<WeaselTSF*>(service)->Automatic().CachedUnitsTest(); return S_OK;
+}
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticWordEvidence(
+    ITfTextInputProcessorEx* service, DWORD evidence) {
+  if (!service) return E_POINTER;
+  return static_cast<WeaselTSF*>(service)->Automatic().WordEvidenceTest(evidence) ? S_OK : E_INVALIDARG;
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticScopeWait(
     ITfTextInputProcessorEx* service, DWORD operation) {

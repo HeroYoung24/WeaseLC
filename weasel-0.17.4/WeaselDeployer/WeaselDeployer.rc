@@ -181,7 +181,7 @@ BEGIN
     PUSHBUTTON      "取消",IDCANCEL,501,382,52,14
 END
 
-IDD_CORRECTION_AUTOMATIC DIALOGEX 0, 0, 350, 239
+IDD_CORRECTION_AUTOMATIC DIALOGEX 0, 0, 350, 293
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "自动纠错提示"
 FONT 9, "MS Shell Dlg", 400, 0, 0x1
@@ -199,11 +199,13 @@ BEGIN
     EDITTEXT IDC_AUTO_FONT,170,119,70,14,ES_NUMBER
     LTEXT "防抖毫秒（100–2000）：",IDC_STATIC1,10,144,155,12
     EDITTEXT IDC_AUTO_DEBOUNCE,170,141,70,14,ES_NUMBER
-    LTEXT "仅检查最近上屏的文字，不读取整篇文档。仅明确的普通文本框支持；密码/未知类型跳过。切换焦点、移动光标、编辑原文或 10 秒后建议失效。",IDC_STATIC1,10,164,330,30
-    LTEXT "布局数值使用 96 DPI 逻辑像素。此页确认后，仍需在主窗口保存。",IDC_STATIC1,10,196,330,20
-    LTEXT "",IDC_AUTO_STATE,10,218,170,14
-    DEFPUSHBUTTON "确定",IDOK,190,218,70,14
-    PUSHBUTTON "取消",IDCANCEL,270,218,70,14
+    AUTOCHECKBOX "Word 本机兼容（默认关闭，仅检查本输入法上屏文字）",IDC_AUTO_WORD_LOCAL,10,164,330,14
+    LTEXT "Word 无法提供版权管理状态时，可由你选择本机检查；受版权限制的文档请勿开启。",IDC_STATIC1,10,182,330,24
+    LTEXT "不读取整篇文档。明确私密/密码/只读/编辑保护字段跳过。切换焦点、移动光标或编辑原文后建议失效。",IDC_STATIC1,10,210,330,30
+    LTEXT "布局使用 96 DPI 逻辑像素。确认后仍需在主窗口保存。",IDC_STATIC1,10,244,330,20
+    LTEXT "",IDC_AUTO_STATE,10,272,170,14
+    DEFPUSHBUTTON "确定",IDOK,190,272,70,14
+    PUSHBUTTON "取消",IDCANCEL,270,272,70,14
 END
 
 IDD_CORRECTION_TERMS DIALOGEX 0, 0, 350, 245
@@ -420,7 +422,7 @@ BEGIN
     PUSHBUTTON      "取消",IDCANCEL,501,382,52,14
 END
 
-IDD_CORRECTION_AUTOMATIC DIALOGEX 0, 0, 350, 239
+IDD_CORRECTION_AUTOMATIC DIALOGEX 0, 0, 350, 293
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "自動糾錯提示"
 FONT 9, "MS Shell Dlg", 400, 0, 0x1
@@ -438,11 +440,13 @@ BEGIN
     EDITTEXT IDC_AUTO_FONT,170,119,70,14,ES_NUMBER
     LTEXT "防抖毫秒（100–2000）：",IDC_STATIC1,10,144,155,12
     EDITTEXT IDC_AUTO_DEBOUNCE,170,141,70,14,ES_NUMBER
-    LTEXT "僅檢查最近上屏文字，不讀取整篇文件。密碼/未知類型跳過。切換焦點、移動游標、編輯原文或 10 秒後建議失效。",IDC_STATIC1,10,164,330,30
-    LTEXT "佈局使用 96 DPI 邏輯像素。確認後，仍需在主視窗儲存。",IDC_STATIC1,10,196,330,20
-    LTEXT "",IDC_AUTO_STATE,10,218,170,14
-    DEFPUSHBUTTON "確定",IDOK,190,218,70,14
-    PUSHBUTTON "取消",IDCANCEL,270,218,70,14
+    AUTOCHECKBOX "Word 本機相容（預設關閉，僅檢查本輸入法上屏文字）",IDC_AUTO_WORD_LOCAL,10,164,330,14
+    LTEXT "Word 無法提供版權管理狀態時，可由你選擇本機檢查；受版權限制的文件請勿啟用。",IDC_STATIC1,10,182,330,24
+    LTEXT "不讀取整篇文件。明確私密/密碼/唯讀/編輯保護欄位跳過。切換焦點、移動游標或編輯原文後建議失效。",IDC_STATIC1,10,210,330,30
+    LTEXT "佈局使用 96 DPI 邏輯像素。確認後仍需在主視窗儲存。",IDC_STATIC1,10,244,330,20
+    LTEXT "",IDC_AUTO_STATE,10,272,170,14
+    DEFPUSHBUTTON "確定",IDOK,190,272,70,14
+    PUSHBUTTON "取消",IDCANCEL,270,272,70,14
 END
 
 IDD_CORRECTION_TERMS DIALOGEX 0, 0, 350, 245
@@ -693,7 +697,7 @@ BEGIN
     PUSHBUTTON      "Cancel",IDCANCEL,501,382,52,14
 END
 
-IDD_CORRECTION_AUTOMATIC DIALOGEX 0, 0, 350, 239
+IDD_CORRECTION_AUTOMATIC DIALOGEX 0, 0, 350, 293
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Automatic correction hints"
 FONT 9, "MS Shell Dlg", 400, 0, 0x1
@@ -711,11 +715,13 @@ BEGIN
     EDITTEXT IDC_AUTO_FONT,170,119,70,14,ES_NUMBER
     LTEXT "Debounce ms (100–2000):",IDC_STATIC1,10,144,155,12
     EDITTEXT IDC_AUTO_DEBOUNCE,170,141,70,14,ES_NUMBER
-    LTEXT "Checks the latest Weasel commit only. Password/unknown fields are skipped. Focus/caret changes, edits or 10 seconds retire suggestions.",IDC_STATIC1,10,164,330,30
-    LTEXT "Layout uses 96 DPI logical pixels. Save in the main window to persist.",IDC_STATIC1,10,196,330,20
-    LTEXT "",IDC_AUTO_STATE,10,218,170,14
-    DEFPUSHBUTTON "OK",IDOK,190,218,70,14
-    PUSHBUTTON "Cancel",IDCANCEL,270,218,70,14
+    AUTOCHECKBOX "Word local compatibility (off by default; own commits only)",IDC_AUTO_WORD_LOCAL,10,164,330,14
+    LTEXT "Choose local checking when Word cannot report rights-management status. Do not enable for rights-managed documents.",IDC_STATIC1,10,182,330,24
+    LTEXT "No full-document reads. Explicit private/password/readonly/protected fields are skipped. Focus/caret changes or source edits retire suggestions.",IDC_STATIC1,10,210,330,30
+    LTEXT "Layout uses 96 DPI logical pixels. Save in the main window to persist.",IDC_STATIC1,10,244,330,20
+    LTEXT "",IDC_AUTO_STATE,10,272,170,14
+    DEFPUSHBUTTON "OK",IDOK,190,272,70,14
+    PUSHBUTTON "Cancel",IDCANCEL,270,272,70,14
 END
 
 IDD_CORRECTION_TERMS DIALOGEX 0, 0, 350, 245

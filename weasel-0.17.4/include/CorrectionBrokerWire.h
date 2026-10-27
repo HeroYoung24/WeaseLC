@@ -10,16 +10,16 @@ enum class BrokerStatus : DWORD {
   Ok, Unavailable, Disabled, SettingsChanged, Busy, InvalidRequest, ModelFailure
 };
 enum class BrokerMetadata : DWORD { Key, Commit, Gate, Capture, Automatic, Scope, ScopeTrace,
-                                  KeyDownDispatch, KeyUpDispatch, IntegratedDispatch };
+                                  KeyDownDispatch, KeyUpDispatch, IntegratedDispatch, WordMetadata };
 #pragma pack(push, 1)
 struct BrokerSettings {
   ULONGLONG revision = 0;
   DWORD enabled = 0, timing = 0, tab = 1, side = 0, gap = 8, width = 320,
-      font = 14, debounce = 250, timeoutSeconds = 30;
+      font = 14, debounce = 250, timeoutSeconds = 30, wordLocalCompatibility = 0;
   double threshold = .90;
 };
 struct BrokerRequest {
-  DWORD magic = 0x32424357, version = 2;
+  DWORD magic = 0x32424357, version = 3;
   BrokerOperation operation = BrokerOperation::Settings;
   ULONGLONG requestId = 0, revision = 0;
   AutomaticRequest input;
@@ -28,7 +28,7 @@ struct BrokerRequest {
   BYTE data[40]{};
 };
 struct BrokerReply {
-  DWORD magic = 0x32524357, version = 2;
+  DWORD magic = 0x32524357, version = 3;
   BrokerStatus status = BrokerStatus::Unavailable;
   ULONGLONG requestId = 0;
   BrokerSettings settings;
@@ -51,7 +51,7 @@ inline std::wstring CorrectionPipeName() {
       GetTokenInformation(token, TokenSessionId, &session, sizeof(session), &size);
   CloseHandle(token);
   if (!valid) return {};
-  return std::wstring(L"\\\\.\\pipe\\") + WEASEL_PIPE_NAME + L".correction.v2." +
+  return std::wstring(L"\\\\.\\pipe\\") + WEASEL_PIPE_NAME + L".correction.v3." +
       std::to_wstring(session) + L"." + std::to_wstring(statistics.AuthenticationId.HighPart) +
       L"." + std::to_wstring(statistics.AuthenticationId.LowPart);
 }
@@ -61,7 +61,8 @@ inline DWORD MetadataSize(BrokerMetadata kind) {
     case BrokerMetadata::Capture: case BrokerMetadata::Automatic: return 24;
     case BrokerMetadata::Scope: return 20;
     case BrokerMetadata::ScopeTrace: case BrokerMetadata::KeyDownDispatch:
-    case BrokerMetadata::KeyUpDispatch: case BrokerMetadata::IntegratedDispatch: return 40;
+    case BrokerMetadata::KeyUpDispatch: case BrokerMetadata::IntegratedDispatch:
+    case BrokerMetadata::WordMetadata: return 40;
     default: return 0;
   }
 }

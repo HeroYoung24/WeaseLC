@@ -20,20 +20,23 @@ $previous='';$events=0;$clock=[Diagnostics.Stopwatch]::StartNew()
 Write-Output "Metadata only; leave the test editor in front. Output: $output"
 while($clock.Elapsed.TotalSeconds -lt $Seconds){
   $key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path)
-  $automatic=$null;$scope=$null;$capture=$null;$worker=$null;$broker=$null;$frontend=[ordered]@{};$scopeTrace=[ordered]@{};$keyDispatch=[ordered]@{}
+  $automatic=$null;$scope=$null;$capture=$null;$worker=$null;$broker=$null;$wordMetadata=$null;$frontend=[ordered]@{};$scopeTrace=[ordered]@{};$keyDispatch=[ordered]@{}
   try{
     $a=Read-Metadata $key 'LastAutomatic' 24
     $s=Read-Metadata $key 'LastScope' 20
     $c=Read-Metadata $key 'LastCapture' 24
     $w=Read-Metadata $key 'LastWorker' 40
     $b=Read-Metadata $key 'LastBrokerCheck' 52
+    $d=Read-Metadata $key 'LastWordMetadata' 40
+    if($d){$wordMetadata=[ordered]@{member=[BitConverter]::ToUInt32($d,4);lookup=('0x{0:X8}' -f [BitConverter]::ToUInt32($d,8));invoke=('0x{0:X8}' -f [BitConverter]::ToUInt32($d,12));exception=('0x{0:X8}' -f [BitConverter]::ToUInt32($d,16));exceptionCode=[BitConverter]::ToUInt32($d,24);variantType=[BitConverter]::ToUInt32($d,28);deferred=('0x{0:X8}' -f [BitConverter]::ToUInt32($d,20));utc=Get-Time $d 32}}
     if($a){$automatic=[ordered]@{stage=[BitConverter]::ToUInt32($a,4);focus=[BitConverter]::ToUInt32($a,8);hresult=('0x{0:X8}' -f [BitConverter]::ToUInt32($a,12));utc=Get-Time $a 16}}
     if($s){$scope=[ordered]@{stage=[BitConverter]::ToUInt32($s,4);hresult=('0x{0:X8}' -f [BitConverter]::ToUInt32($s,8));inputScope=[BitConverter]::ToInt32($s,12);variantType=[BitConverter]::ToUInt32($s,16)}}
-    if($scope -and $scope.stage -in @(20,21)){
+    if($scope -and $scope.stage -in @(20,21,22)){
       # Closed capability bits, never document text or object/window addresses.
       $scope.wordEvidence=$scope.inputScope
       $scope.inputScope=$null
       $scope.wordVerified=($scope.wordEvidence -eq 511 -and $scope.stage -eq 20)
+      $scope.wordLocalCompatibility=($scope.wordEvidence -eq 895 -and $scope.stage -eq 22)
     }
     if($c){$capture=[ordered]@{totalUnits=[BitConverter]::ToUInt32($c,4);addedUnits=[BitConverter]::ToUInt32($c,8);retainedUnits=[BitConverter]::ToUInt32($c,12);utc=Get-Time $c 16}}
     if($w){$worker=[ordered]@{stage=[BitConverter]::ToUInt32($w,4);units=[BitConverter]::ToUInt32($w,8);provider=[BitConverter]::ToUInt32($w,12);state=[BitConverter]::ToUInt32($w,16);nativeError=[BitConverter]::ToUInt32($w,20);httpStatus=[BitConverter]::ToUInt32($w,24);elapsedMs=[BitConverter]::ToUInt32($w,28);utc=Get-Time $w 32}}
@@ -63,7 +66,7 @@ while($clock.Elapsed.TotalSeconds -lt $Seconds){
       }
     }
   }finally{if($key){$key.Dispose()}}
-  $state=[ordered]@{automatic=$automatic;scope=$scope;capture=$capture;worker=$worker;broker=$broker;frontend=$frontend;scopeTrace=$scopeTrace;keyDispatch=$keyDispatch}
+  $state=[ordered]@{automatic=$automatic;scope=$scope;capture=$capture;worker=$worker;broker=$broker;wordMetadata=$wordMetadata;frontend=$frontend;scopeTrace=$scopeTrace;keyDispatch=$keyDispatch}
   $signature=$state | ConvertTo-Json -Depth 5 -Compress
   if($signature -cne $previous){
     [ordered]@{observedUtc=[DateTime]::UtcNow.ToString('o');state=$state} | ConvertTo-Json -Depth 6 -Compress | Add-Content -LiteralPath $output -Encoding UTF8

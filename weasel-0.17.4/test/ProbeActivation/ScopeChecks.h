@@ -190,6 +190,34 @@ static bool TestCorrectionScope() {
   ScopeDiagnostic pending; pending.stage=ScopeStage::WordMetadataUnavailable;pending.error=E_FAIL;
   pending.variantType=VT_EMPTY;pending.scope=WordVerified&~WordUnrestricted;
   check(MayWaitForWordScope(pending) && !static_cast<bool>(pending),"Word quarantine eligibility is not permission to read or correct");
+  const auto compatibility=+[](ITfContext*,ITfRange*)->DWORD{return WordLocalCommitVerified;};
+  auto compatible=[&](ScopeUse use=ScopeUse::LocalCommit,bool enabled=true) {
+    return InspectInputScope(&context,1,&range,use,nullptr,compatibility,enabled);
+  };
+  check(!compatible(ScopeUse::LocalCommit,false) && compatible().stage==ScopeStage::WordLocalCommit,
+      "Word unavailable IRM requires explicit compatibility opt-in");
+  check(!compatible(ScopeUse::NearbyText),"compatibility grants no arbitrary nearby history reads");
+  for(DWORD missing:{DWORD(WordRange),DWORD(WordView),DWORD(WordPane),DWORD(WordObject),DWORD(WordDocument),
+      DWORD(WordWritable),DWORD(WordUnprotected),DWORD(WordStableFocus),DWORD(WordPermissionUnavailable)}) {
+    // A no-capture function pointer reads this fixture's closed evidence only.
+    static DWORD fixtureEvidence=0; fixtureEvidence=WordLocalCommitVerified&~missing;
+    const auto verifier=+[](ITfContext*,ITfRange*)->DWORD{return fixtureEvidence;};
+    check(!InspectInputScope(&context,1,&range,ScopeUse::LocalCommit,nullptr,verifier,true),
+        "every Word capability is still required in compatibility mode");
+  }
+  for(auto failure:{E_ACCESSDENIED,TF_E_NOLOCK,S_FALSE}) {
+    property.result=failure;check(!compatible(),"other property failures cannot enter compatibility");
+  }
+  property.result=E_FAIL;property.type=VT_UNKNOWN;
+  check(!compatible(),"partial property values cannot enter Word compatibility");
+  property.type=VT_EMPTY;context.flags=TF_SD_READONLY;
+  check(compatible().stage==ScopeStage::ReadOnly,"readonly context defeats compatibility");context.flags=0;
+  property.result=S_OK;property.type=VT_UNKNOWN;
+  for(auto scope:{IS_PRIVATE,IS_PASSWORD,IS_NUMERIC_PASSWORD,IS_NUMERIC_PIN,IS_ALPHANUMERIC_PIN}) {
+    input.scopes={scope};check(ProtectedScope(compatible()),"explicit private scopes override compatibility");
+  }
+  input.scopes={IS_URL};check(!compatible(),"unsupported explicit scope remains blocked in compatibility");
+  property.result=E_FAIL;property.type=VT_EMPTY;
   for(DWORD evidence:{DWORD(WordRange),DWORD(WordView),DWORD(WordPane),DWORD(WordObject),DWORD(WordDocument),DWORD(WordWritable),DWORD(WordUnprotected),DWORD(WordStableFocus)}) {
     auto incompletePending=pending;incompletePending.scope&=~evidence;
     check(!MayWaitForWordScope(incompletePending),"every independent Word metadata capability is required before temporary retention");

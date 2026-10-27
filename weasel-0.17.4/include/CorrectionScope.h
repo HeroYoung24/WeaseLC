@@ -11,7 +11,8 @@ enum class ScopeStage : DWORD {
   NotRun, Ready, MissingTarget, PasswordStyle, PropertyQuery, MissingProperty,
   PropertyValue, ValueType, ScopeInterface, ScopeQuery, EmptyScopes,
   TooManyScopes, UnsupportedScope, ProtectedScope, KeyboardUnavailable,
-  KeyboardDisabled, EmptyContext, ReadOnly, StatusUnavailable, NativePlainText, WordDocument, WordMetadataUnavailable
+  KeyboardDisabled, EmptyContext, ReadOnly, StatusUnavailable, NativePlainText, WordDocument, WordMetadataUnavailable,
+  WordLocalCommit
 };
 enum class ScopeUse { NearbyText, LocalCommit };
 struct ScopeDiagnostic {
@@ -20,7 +21,7 @@ struct ScopeDiagnostic {
   HRESULT error = S_OK;
   LONG scope = 0;
   DWORD variantType = VT_EMPTY;
-  explicit operator bool() const { return stage == ScopeStage::Ready || stage == ScopeStage::NativePlainText || stage == ScopeStage::WordDocument; }
+  explicit operator bool() const { return stage == ScopeStage::Ready || stage == ScopeStage::NativePlainText || stage == ScopeStage::WordDocument || stage == ScopeStage::WordLocalCommit; }
 };
 static_assert(sizeof(ScopeDiagnostic) == 20, "Scope diagnostic wire size");
 // A default scope is usable only for this IME's tracked local commits, never as
@@ -55,7 +56,8 @@ inline ScopeDiagnostic CommittedInputState(ITfContext* context) {
 inline ScopeDiagnostic InspectInputScope(ITfContext* context, TfEditCookie cookie, ITfRange* range,
                                           ScopeUse use = ScopeUse::NearbyText,
                                           NativeScopeVerifier native = NativeTextRangeVerified,
-                                          DocumentScopeVerifier document = WordDocumentRangeEvidence) {
+                                          DocumentScopeVerifier document = WordDocumentRangeEvidence,
+                                          bool allowWordLocalCommit = false) {
   ScopeDiagnostic result;
   if (!context || !range) { result.stage = ScopeStage::MissingTarget; result.error = E_POINTER; return result; }
   CComPtr<ITfContextView> view;
@@ -100,6 +102,9 @@ inline ScopeDiagnostic InspectInputScope(ITfContext* context, TfEditCookie cooki
     if (evidence == WordVerified) {
       result.stage=ScopeStage::WordDocument;result.scope=evidence;result.error=S_OK;return result;
     }
+    if (allowWordLocalCommit && evidence == WordLocalCommitVerified) {
+      result.stage=ScopeStage::WordLocalCommit;result.scope=evidence;result.error=S_OK;return result;
+    }
     if (evidence & WordPane) {result.stage=ScopeStage::WordMetadataUnavailable;result.scope=evidence;}
   }
   if (result.stage != ScopeStage::NotRun || !input) return result;
@@ -132,7 +137,8 @@ inline bool ProtectedScope(const ScopeDiagnostic& result) {
 // It is NOT permission to GetText, submit to a model, show or apply a hint.
 inline bool MayWaitForWordScope(const ScopeDiagnostic& result) {
   return result.stage == ScopeStage::WordMetadataUnavailable && result.error == E_FAIL &&
-      result.variantType == VT_EMPTY && result.scope == (WordVerified & ~WordUnrestricted);
+      result.variantType == VT_EMPTY && (result.scope == (WordVerified & ~WordUnrestricted) ||
+                                       result.scope == WordLocalCommitVerified);
 }
 inline const wchar_t* ScopeStageText(ScopeStage stage, bool chinese) {
   const wchar_t* zh[] = {L"尚无范围记录",L"允许的输入范围",L"无目标范围",L"密码输入框",L"范围属性查询失败",
@@ -144,6 +150,7 @@ inline const wchar_t* ScopeStageText(ScopeStage stage, bool chinese) {
     L"Scope not in text allowlist",L"Private/password/PIN field",L"Keyboard state unavailable",L"Keyboard disabled",L"Empty input context",L"Read-only field",L"Host status unavailable",L"Verified native plaintext editor"};
   const auto index = static_cast<unsigned>(stage);
   if (stage == ScopeStage::WordDocument) return chinese ? L"已核验可编辑 Word 文档" : L"Verified editable Word document";
+  if (stage == ScopeStage::WordLocalCommit) return chinese ? L"Word 本机兼容：仅本输入法上屏文字" : L"Word local compatibility: own commits only";
   if (stage == ScopeStage::WordMetadataUnavailable) return chinese ? L"Word 文档保护状态未通过核验" : L"Word document protection not verified";
   if (index > static_cast<unsigned>(ScopeStage::NativePlainText)) return chinese ? L"未知" : L"unknown";
   return chinese ? zh[index] : en[index];

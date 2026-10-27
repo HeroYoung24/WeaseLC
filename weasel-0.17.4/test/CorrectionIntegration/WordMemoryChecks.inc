@@ -71,3 +71,4 @@ for (unsigned scenario = 0; scenario < 3; ++scenario) {
 }
 
 #include "WordPendingChecks.inc"
+#include "WordCompatibilityChecks.inc"
