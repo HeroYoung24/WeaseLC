@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <algorithm>
 #include <string>
+#include <CorrectionHintTheme.h>
 
 namespace correction {
 class HintFont {
@@ -56,15 +57,16 @@ inline HintLayout MeasureHint(HDC dc, LONG width, UINT dpi, unsigned font,
   return result;
 }
 inline void PaintHint(HDC dc, RECT bounds, UINT dpi, unsigned font,
-    const std::wstring& original, const std::wstring& replacement, bool tab, bool chinese, bool preview = false) {
+    const std::wstring& original, const std::wstring& replacement, bool tab, bool chinese,
+    bool preview = false, const weasel::UIStyle* style = nullptr) {
   const auto layout = MeasureHint(dc, bounds.right - bounds.left, dpi, font, original, replacement, tab, chinese, preview);
-  HIGHCONTRASTW contrast{sizeof(contrast)};
-  SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0);
-  const bool highContrast = (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
-  FillRect(dc, &bounds, GetSysColorBrush(COLOR_WINDOW));
-  FrameRect(dc, &bounds, GetSysColorBrush(COLOR_WINDOWFRAME));
+  const auto palette = CurrentHintPalette(style);
+  HBRUSH background = CreateSolidBrush(palette.background), border = CreateSolidBrush(palette.border);
+  FillRect(dc, &bounds, background);
+  FrameRect(dc, &bounds, border);
+  DeleteObject(background); DeleteObject(border);
   RECT accent = bounds; accent.right = accent.left + MulDiv(3, dpi, 96);
-  HBRUSH blue = CreateSolidBrush(highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(0, 83, 160));
+  HBRUSH blue = CreateSolidBrush(palette.accent);
   FillRect(dc, &accent, blue); DeleteObject(blue);
   HintFont title(12, dpi, true), body(font, dpi), suggestion(font, dpi, true), footer(11, dpi);
   const int saved = SaveDC(dc);
@@ -73,7 +75,7 @@ inline void PaintHint(HDC dc, RECT bounds, UINT dpi, unsigned font,
   auto paint = [&](const std::wstring& text, HFONT face, RECT rect, bool emphasize) {
     OffsetRect(&rect, bounds.left, bounds.top);
     SelectObject(dc, face);
-    SetTextColor(dc, emphasize && !highContrast ? RGB(0, 83, 160) : GetSysColor(COLOR_WINDOWTEXT));
+    SetTextColor(dc, emphasize ? palette.accent : palette.text);
     DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &rect, DT_WORDBREAK | DT_NOPREFIX);
   };
   paint(HintTitle(chinese, preview), title.Get(), layout.title, false);

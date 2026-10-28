@@ -440,9 +440,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AutomaticCorrection.cpp" />
+    <ClCompile Include="..\WeaselDeployer\AccessibilityGuids.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="CorrectionBroker.cpp" />
     <ClCompile Include="CorrectionJson.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="..\WeaselDeployer\CorrectionPreferences.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="..\WeaselDeployer\CorrectionLexicon.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="CandidateList.cpp" />
     <ClCompile Include="Compartment.cpp" />
     <ClCompile Include="Composition.cpp" />

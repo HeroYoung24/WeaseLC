@@ -18,6 +18,8 @@ class UIStyleSettings {
   std::string GetColorSchemePreview(const std::string& color_scheme_id);
   std::string GetActiveColorScheme();
   bool SelectColorScheme(const std::string& color_scheme_id);
+  bool InlinePreedit();
+  bool SetInlinePreedit(bool enabled);
 
   RimeCustomSettings* settings() { return settings_; }
 

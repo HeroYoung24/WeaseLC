@@ -84,7 +84,9 @@ bool RemoteClient(const std::wstring& server, const std::wstring& output, const 
 #include "ListenerChecks.inc"
 #include "SupervisorChecks.inc"
 #include "ServiceControlChecks.inc"
+#include "OwnedModelChecks.inc"
 int wmain(int argc, wchar_t** argv) {
+  if (argc == 4 && !wcscmp(argv[1], L"--owned-model")) return RunOwnedModelChecks(argv[2], argv[3]);
   if (argc == 2 && !wcscmp(argv[1], L"/correction-broker")) return RunSupervisorFixture();
   if (argc == 2 && !wcscmp(argv[1], L"--supervisor")) return RunSupervisorChecks();
   if (argc == 2 && !wcscmp(argv[1], L"--service-control")) return RunServiceControlChecks();

@@ -32,10 +32,10 @@ static bool CheckTranslatorLearning(const char* translator) {
   if (!write("default.yaml", "config_version: '1'\nschema_list:\n  - schema: weasel_learning_probe\n") ||
       !write("weasel_learning_probe.schema.yaml",
           "schema:\n  schema_id: weasel_learning_probe\n  name: Synthetic learning test\n  version: '1'\n"
-          "engine:\n  processors: [ascii_composer, speller, selector, express_editor]\n"
-          "  segmentors: [ascii_segmentor, abc_segmentor, fallback_segmentor]\n  translators: [" + std::string(translator) + "]\n"
+          "engine:\n  processors: [ascii_composer, punctuator, speller, selector, express_editor]\n"
+          "  segmentors: [ascii_segmentor, abc_segmentor, punct_segmentor, fallback_segmentor]\n  translators: [punct_translator, " + std::string(translator) + "]\n"
           "speller:\n  alphabet: abcxyz\ntranslator:\n  dictionary: weasel_learning_probe\n"
-          "  enable_user_dict: true\n  enable_sentence: false\nmenu:\n  page_size: 9\n") ||
+          "  enable_user_dict: true\n  enable_sentence: false\npunctuator:\n  half_shape:\n    \".\": {commit: \"。\"}\nmenu:\n  page_size: 9\n") ||
       !write("weasel_learning_probe.dict.yaml", "---\nname: weasel_learning_probe\nversion: '1'\nsort: by_weight\n"
           "use_preset_vocabulary: false\n...\n默认词\taa\t100000\n习惯词\taa\t1\n")) return false;
   const auto shared = (root / "shared").u8string(), user = (root / "user").u8string(), logs = root.u8string();
@@ -93,6 +93,28 @@ static bool CheckTranslatorLearning(const char* translator) {
   while (std::getline(dump, line)) if (line == "习惯词\taa\t5" || line == "习惯词\taa\t5\r") count = true;
   check(count, "user dictionary records five explicit commits");
   api->finalize();
+  api->initialize(&traits);
+  auto punctuation = api->create_session();
+  check(punctuation && api->select_schema(punctuation, "weasel_learning_probe"), "punctuation fixture uses only its synthetic schema");
+  auto feed = [&](const std::string& keys) {
+    std::string text;
+    for (const unsigned char key : keys) {
+      const bool eaten = api->process_key(punctuation, key, 0) != False;
+      RIME_STRUCT(RimeCommit, commit);
+      if (api->get_commit(punctuation, &commit)) { if (commit.text) text += commit.text; api->free_commit(&commit); }
+      if (!eaten) text += static_cast<char>(key);
+    }
+    return text;
+  };
+  const auto firstDot = feed("1.");
+  const char* input = api->get_input(punctuation);
+  check(firstDot == "1" && input && std::string(input) == ".", "first numeric dot remains in native composition for inline display");
+  check(feed(".") == "。" && (api->get_input(punctuation) && !*api->get_input(punctuation)), "second dot commits one Chinese period without Enter");
+  check(feed("3.14 ") == "3.14 ", "native punctuation preserves decimal input");
+  check(feed("1.") == "1", "new numeric dot can start after earlier punctuation");
+  api->clear_composition(punctuation);
+  check((api->get_input(punctuation) && !*api->get_input(punctuation)) && feed("2 ") == "2 ", "cancelled numeric punctuation never swallows following input");
+  api->destroy_session(punctuation); api->finalize();
   return valid;
 }
 bool CheckRimeLearning() {

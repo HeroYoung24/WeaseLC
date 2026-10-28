@@ -17,6 +17,11 @@
 #include "CorrectionPreferences.h"
 #include "CorrectionSettingsDialog.h"
 #include "CorrectionHintPreview.h"
+#include "CorrectionThemeChecks.h"
+#include <CorrectionAppPolicy.h>
+#include <CorrectionFeedback.h>
+#include <shellapi.h>
+#include "LocalModelControl.h"
 
 namespace {
 using namespace correction;
@@ -55,6 +60,113 @@ struct DialogState {
   const wchar_t* Text(const wchar_t* zh, const wchar_t* en) const { return chinese ? zh : en; }
   ModelConfig& Profile() { return editing == Mode::Online ? preferences.online : preferences.local; }
 };
+struct AppDialogState {
+  DialogState& owner;
+  std::vector<std::wstring> apps;
+  bool loaded = false;
+  std::vector<std::wstring> original;
+};
+void RefreshApps(HWND dialog, const AppDialogState& state) {
+  SendDlgItemMessageW(dialog, IDC_APP_LIST, LB_RESETCONTENT, 0, 0);
+  for (const auto& app : state.apps)
+    SendDlgItemMessageW(dialog, IDC_APP_LIST, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(app.c_str()));
+}
+INT_PTR CALLBACK AppsDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM l) {
+  auto* state = reinterpret_cast<AppDialogState*>(GetWindowLongPtrW(dialog, DWLP_USER));
+  if (message == WM_INITDIALOG) {
+    state = reinterpret_cast<AppDialogState*>(l); SetWindowLongPtrW(dialog, DWLP_USER, l);
+    state->loaded = state->owner.testing || state->owner.demo || LoadPausedApps(state->apps);
+    state->original = state->apps;
+    SendDlgItemMessageW(dialog, IDC_APP_NAME, EM_SETLIMITTEXT, kMaxAppName, 0);
+    if (!state->loaded) SetDlgItemTextW(dialog, IDC_APP_STATE, state->owner.Text(
+        L"无法读取现有偏好；为保护原设置，本次不能保存。", L"Preferences unavailable; saving is disabled."));
+    EnableWindow(GetDlgItem(dialog, IDOK), state->loaded);
+    if (state->loaded && !state->owner.testing && !state->owner.demo) {
+      DWORD count = 0;
+      if (ReadFalsePositiveCount(count)) {
+        const auto text = std::wstring(state->owner.Text(L"本地已标记误判次数：", L"Local false-positive reports: ")) + std::to_wstring(count);
+        SetDlgItemTextW(dialog, IDC_APP_STATE, text.c_str());
+      }
+    }
+    RefreshApps(dialog, *state); return TRUE;
+  }
+  if (!state) return FALSE;
+  if (message == WM_CLOSE) { EndDialog(dialog, IDCANCEL); return TRUE; }
+  if (message != WM_COMMAND) return FALSE;
+  const auto id = LOWORD(w);
+  if (id == IDC_APP_ADD) {
+    wchar_t buffer[kMaxAppName + 1]{}; GetDlgItemTextW(dialog, IDC_APP_NAME, buffer, _countof(buffer));
+    std::wstring app;
+    if (!AppName(buffer, app) || state->apps.size() >= kMaxPausedApps || app == L"winword.exe") {
+      SetDlgItemTextW(dialog, IDC_APP_STATE, state->owner.Text(
+          L"填写程序名（如 msedge.exe），不含路径；最多64项。Word固定仅普通输入。",
+          L"Use a filename such as msedge.exe (no path), max 64. Word stays input-only.")); return TRUE;
+    }
+    if (std::find(state->apps.begin(), state->apps.end(), app) == state->apps.end()) state->apps.push_back(std::move(app));
+    RefreshApps(dialog, *state); SetDlgItemTextW(dialog, IDC_APP_NAME, L"");
+    SetDlgItemTextW(dialog, IDC_APP_STATE, state->owner.Text(L"按保存后生效。", L"Choose Save to apply.")); return TRUE;
+  }
+  if (id == IDC_APP_REMOVE) {
+    const auto index = SendDlgItemMessageW(dialog, IDC_APP_LIST, LB_GETCURSEL, 0, 0);
+    if (index >= 0 && static_cast<size_t>(index) < state->apps.size()) state->apps.erase(state->apps.begin() + index);
+    RefreshApps(dialog, *state); return TRUE;
+  }
+  if (id == IDC_APP_DATA) {
+    if (!state->owner.testing) MessageBoxW(dialog, state->owner.Text(
+        L"输入习惯：由 Rime 用户词典管理；请使用原有用户词典管理先备份，再导入/恢复。这里不删除日常词库。\n\n"
+        L"纠错保留表达：在管理纠错的“管理保留词”中增删或清空；不是词频记录。\n\n"
+        L"临时上文：有界且不保存为正文历史；关闭纠错、切换场景或到期时清除。\n\n"
+        L"模型权重：与学习记录分开保存，本窗口不删除模型。",
+        L"Input habits: managed by the existing Rime dictionary manager; back up before import/restore. This page never deletes your daily dictionary.\n\n"
+        L"Kept expressions: add/remove/clear in Manage kept terms; this is separate from word frequency.\n\n"
+        L"Temporary context: bounded, not saved as document history; cleared on disable, context change or expiry.\n\n"
+        L"Model weights are separate and are not deleted here."), L"WeaseLC", MB_OK | MB_ICONINFORMATION);
+    return TRUE;
+  }
+  if (id == IDC_APP_CLEAR_FEEDBACK) {
+    if (state->owner.testing || state->owner.demo ||
+        MessageBoxW(dialog, state->owner.Text(L"仅清除误判总次数？不会删除保留词或输入习惯。",
+            L"Clear only the false-positive count? Kept terms and input habits stay unchanged."),
+            L"WeaseLC", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) {
+      const bool cleared = state->owner.testing || state->owner.demo || ClearFalsePositiveCount();
+      SetDlgItemTextW(dialog, IDC_APP_STATE, cleared ? state->owner.Text(L"误判计数已清除。", L"False-positive count cleared.") :
+          state->owner.Text(L"无法清除计数；其他数据未改动。", L"Could not clear the count; other data unchanged."));
+    }
+    return TRUE;
+  }
+  if (id == IDC_APP_RESET) {
+    if (state->owner.testing || state->owner.demo || MessageBoxW(dialog, state->owner.Text(
+        L"重置暂停应用列表？不会开启全局纠错，Word仍仅普通输入。", L"Reset paused apps? This does not enable global correction; Word stays input-only."),
+        L"WeaseLC", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) {
+      if (state->owner.testing || state->owner.demo || SavePausedApps({})) {
+        state->apps.clear(); state->original.clear(); state->loaded = true; RefreshApps(dialog, *state);
+        SetDlgItemTextW(dialog, IDC_APP_NAME, L"");
+        EnableWindow(GetDlgItem(dialog, IDOK), TRUE);
+        SetDlgItemTextW(dialog, IDC_APP_STATE, state->owner.Text(L"暂停列表已重置并保存。", L"Paused apps reset and saved."));
+      } else SetDlgItemTextW(dialog, IDC_APP_STATE, state->owner.Text(L"无法重置暂停列表。", L"Could not reset paused apps."));
+    }
+    return TRUE;
+  }
+  if (id == IDCANCEL) { EndDialog(dialog, IDCANCEL); return TRUE; }
+  if (id == IDOK) {
+    if (GetWindowTextLengthW(GetDlgItem(dialog, IDC_APP_NAME))) {
+      SetDlgItemTextW(dialog, IDC_APP_STATE, state->owner.Text(
+          L"请先添加或清空程序名，再保存，避免遗漏此项。", L"Add or clear the typed name before saving so it is not lost.")); return TRUE;
+    }
+    if (!state->owner.testing && !state->owner.demo) {
+      std::vector<std::wstring> current;
+      if (!LoadPausedApps(current) || current != state->original) {
+        SetDlgItemTextW(dialog, IDC_APP_STATE, state->owner.Text(
+            L"偏好已在其他窗口更改；请取消后重开，避免覆盖。", L"Choices changed elsewhere. Cancel and reopen to avoid overwriting them.")); return TRUE;
+      }
+    }
+    if (!state->loaded || (!state->owner.testing && !state->owner.demo && !SavePausedApps(state->apps))) {
+      SetDlgItemTextW(dialog, IDC_APP_STATE, state->owner.Text(L"保存失败；原偏好未更改。", L"Save failed; original preferences unchanged.")); return TRUE;
+    }
+    EndDialog(dialog, IDOK); return TRUE;
+  }
+  return FALSE;
+}
 void ShowService(HWND dialog, DialogState& state, const ServiceJob& job) {
   std::wstring backend = state.Text(L"无法取得监护状态：后端未启动或版本不匹配。", L"Supervisor unavailable: backend absent or version mismatch.");
   if (job.available) {
@@ -469,6 +581,7 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
                     L"Kept terms could not be read. Clear/save them in Manage kept terms before checking."));
     UpdateButtons(dialog, *state);
     EnableWindow(GetDlgItem(dialog, IDC_CORRECTION_SERVICE_RETRY), FALSE);
+    EnableWindow(GetDlgItem(dialog, IDC_CORRECTION_MODEL_CONTROL), !state->testing && !state->demo);
     SetDlgItemTextW(dialog, IDC_CORRECTION_SERVICE_STATE, state->demo || state->testing ?
         state->Text(L"离线演示/自检：不连接纠错服务。", L"Offline demo/self-test: service not contacted.") :
         state->Text(L"正在查询纠错服务状态…", L"Checking correction service status…"));
@@ -576,6 +689,24 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
           MAKEINTRESOURCEW(IDD_CORRECTION_AUTOMATIC), dialog, AutomaticDialogProc, reinterpret_cast<LPARAM>(&settings));
       return TRUE;
     }
+    case IDC_CORRECTION_APPS: {
+      AppDialogState apps{*state};
+      DialogBoxParamW(reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(dialog, GWLP_HINSTANCE)),
+          MAKEINTRESOURCEW(IDD_CORRECTION_APPS), dialog, AppsDialogProc, reinterpret_cast<LPARAM>(&apps));
+      return TRUE;
+    }
+    case IDC_CORRECTION_MODEL_CONTROL: {
+      if (state->demo || state->testing) return TRUE;
+      wchar_t executable[32768]{};
+      const auto length = GetModuleFileNameW(nullptr, executable, _countof(executable));
+      if (length && length < _countof(executable)) {
+        SHELLEXECUTEINFOW launch{sizeof(launch)};
+        launch.hwnd = dialog; launch.lpFile = executable; launch.lpParameters = L"/local-model"; launch.nShow = SW_SHOWNORMAL;
+        if (!ShellExecuteExW(&launch)) SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,
+            state->Text(L"无法打开本地模型运行窗口。", L"Could not open local model control."));
+      }
+      return TRUE;
+    }
     case IDC_CORRECTION_CHECK: if (!state->testing) BeginCheck(dialog, *state); return TRUE;
     case IDC_CORRECTION_CANCEL_CHECK:
       Cancel(*state, dialog);
@@ -667,6 +798,8 @@ static void SaveDialogPreview(HWND dialog, const char* filename) {
   if (screen) ReleaseDC(nullptr, screen);
 }
 bool CheckCorrectionDialogResources(HINSTANCE instance) {
+  const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  struct ComScope { HRESULT result; ~ComScope() { if (SUCCEEDED(result)) CoUninitialize(); } } comScope{com};
   class FixtureClient final : public IModelClient {
    public:
     CheckResult Check(const ModelConfig&, const CheckRequest& request,
@@ -685,10 +818,14 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
     report << label << " = " << condition << '\n'; report.flush();
     valid = condition && valid;
   };
+  CheckCorrectionThemes(check);
   const LANGID previous = GetThreadUILanguage();
   for (const LANGID language : {MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED),
       MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL), MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US)}) {
     SetThreadUILanguage(language);
+    check(CheckLocalModelControl(instance, [&](HWND window) {
+      if (language == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)) SaveDialogPreview(window, "LocalModelControlPreview.bmp");
+    }), "offline local model UI never discovers files launches models or queries endpoints");
     DialogState state; state.testing = true;
     HWND dialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_CORRECTION_SETTINGS),
         nullptr, DialogProc, reinterpret_cast<LPARAM>(&state));
@@ -700,10 +837,34 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
         IDC_CORRECTION_CHECK, IDC_CORRECTION_CANCEL_CHECK, IDC_CORRECTION_CLI_RESERVED,
         IDC_CORRECTION_JSON_MODE, IDC_CORRECTION_CONSENT, IDC_CORRECTION_DEFAULTS,
         IDC_CORRECTION_SUGGESTIONS, IDC_CORRECTION_APPLY, IDC_CORRECTION_IGNORE,
-        IDC_CORRECTION_KEEP, IDC_CORRECTION_TERMS, IDC_CORRECTION_AUTOMATIC,
-        IDC_CORRECTION_SERVICE_STATE, IDC_CORRECTION_SERVICE_MODEL, IDC_CORRECTION_SERVICE_RETRY})
+        IDC_CORRECTION_KEEP, IDC_CORRECTION_TERMS, IDC_CORRECTION_AUTOMATIC, IDC_CORRECTION_APPS,
+        IDC_CORRECTION_SERVICE_STATE, IDC_CORRECTION_SERVICE_MODEL, IDC_CORRECTION_SERVICE_RETRY, IDC_CORRECTION_MODEL_CONTROL})
       check(GetDlgItem(dialog, id) != nullptr, "control present");
     check(!IsWindowVisible(dialog), "hidden test window");
+    AppDialogState appState{state};
+    HWND appDialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_CORRECTION_APPS), dialog,
+        AppsDialogProc, reinterpret_cast<LPARAM>(&appState));
+    check(appDialog && appState.loaded && appState.apps.empty(), "offline applications page never reads saved app preferences");
+    if (appDialog) {
+      SetDlgItemTextW(appDialog, IDC_APP_NAME, L"MsEdge.EXE");
+      SendMessageW(appDialog, WM_COMMAND, IDC_APP_ADD, 0);
+      check(appState.apps == std::vector<std::wstring>{L"msedge.exe"}, "applications page adds normalized executable");
+      SetDlgItemTextW(appDialog, IDC_APP_NAME, L"C:\\private\\app.exe");
+      SendMessageW(appDialog, WM_COMMAND, IDC_APP_ADD, 0);
+      check(appState.apps.size() == 1, "applications page does not store a private filesystem path");
+      SendDlgItemMessageW(appDialog, IDC_APP_LIST, LB_SETCURSEL, 0, 0);
+      SendMessageW(appDialog, WM_COMMAND, IDC_APP_REMOVE, 0);
+      check(appState.apps.empty(), "applications page can restore correction by removing pause");
+      SendMessageW(appDialog, WM_COMMAND, IDC_APP_CLEAR_FEEDBACK, 0);
+      check(Text(appDialog, IDC_APP_STATE) == state.Text(L"误判计数已清除。", L"False-positive count cleared."),
+          "offline data cleanup operates without writing real feedback or dictionaries");
+      appState.loaded = false;
+      SendMessageW(appDialog, WM_COMMAND, IDC_APP_RESET, 0);
+      check(appState.loaded && appState.apps.empty() && IsWindowEnabled(GetDlgItem(appDialog, IDOK)),
+          "application policy has an explicit recovery path without changing global correction mode");
+      if (language == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)) SaveDialogPreview(appDialog, "CorrectionAppsPreview.bmp");
+      DestroyWindow(appDialog);
+    }
     check(!state.serviceJob && !IsWindowEnabled(GetDlgItem(dialog, IDC_CORRECTION_SERVICE_RETRY)),
         "offline UI test never queries/restarts installed backend");
     ServiceJob service;
@@ -743,12 +904,36 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
       check(GetDlgItem(autoDialog, IDC_AUTO_PREVIEW) != nullptr, "offline preview control present");
       SendMessageW(autoDialog, WM_COMMAND, IDC_AUTO_PREVIEW, 0);
       check(automatic.preview.Window() && !IsWindowVisible(automatic.preview.Window()), "preview renders without model or focus in hidden test");
+      IAccessible* accessible = nullptr;
+      const auto access = AccessibleObjectFromWindow(automatic.preview.Window(), OBJID_CLIENT, IID_IAccessible,
+          reinterpret_cast<void**>(&accessible));
+      VARIANT child{}; child.vt = VT_I4; child.lVal = CHILDID_SELF;
+      VARIANT role{}, accState{}; BSTR name = nullptr;
+      check(access == S_OK && accessible && accessible->get_accRole(child, &role) == S_OK &&
+          role.vt == VT_I4 && role.lVal == ROLE_SYSTEM_TOOLTIP, "suggestion exposes standard accessible tooltip role");
+      check(accessible && accessible->get_accState(child, &accState) == S_OK && accState.vt == VT_I4 &&
+          (accState.lVal & STATE_SYSTEM_READONLY) && !(accState.lVal & STATE_SYSTEM_FOCUSABLE),
+          "suggestion accessibility never makes the hint an editable focus target");
+      check(accessible && accessible->get_accName(child, &name) == S_OK && name && SysStringLen(name),
+          "suggestion preview has an accessible name");
+      if (name) SysFreeString(name); if (accessible) accessible->Release();
       RECT initialPreview{}; GetWindowRect(automatic.preview.Window(), &initialPreview);
       SetDlgItemInt(autoDialog, IDC_AUTO_FONT, 24, FALSE);
       RECT largePreview{}; GetWindowRect(automatic.preview.Window(), &largePreview);
       check(largePreview.bottom - largePreview.top > initialPreview.bottom - initialPreview.top,
           "preview responds to font changes");
       if (language == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)) SaveDialogPreview(automatic.preview.Window(), "CorrectionHintPreview.bmp");
+      if (language == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)) {
+        weasel::UIStyle theme;
+        theme.back_color = 0xff202020; theme.candidate_text_color = 0xffeeeeee;
+        theme.hilited_candidate_back_color = 0xfff09040; theme.border_color = 0xff808080;
+        automatic.preview.SetStyleSnapshot(theme);
+        SaveDialogPreview(automatic.preview.Window(), "CorrectionHintDarkPreview.bmp");
+        theme.back_color = 0xfff8f8f8; theme.candidate_text_color = 0xff222222;
+        automatic.preview.SetStyleSnapshot(theme);
+        SaveDialogPreview(automatic.preview.Window(), "CorrectionHintLightPreview.bmp");
+        check(!IsWindowVisible(automatic.preview.Window()), "theme snapshots do not activate or display the hidden preview");
+      }
       SetDlgItemInt(autoDialog, IDC_AUTO_FONT, 14, FALSE);
       SetDlgItemTextW(autoDialog, IDC_AUTO_GAP, L"");
       SendMessageW(autoDialog, WM_COMMAND, IDOK, 0);

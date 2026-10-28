@@ -87,3 +87,4 @@ arm64x_wrapper/*.exp
 /output/CorrectionHint*.png
 /output/SecurityChecks/
 /output/IsolationTest/
+/output/AdvancedFeatures-20261028/

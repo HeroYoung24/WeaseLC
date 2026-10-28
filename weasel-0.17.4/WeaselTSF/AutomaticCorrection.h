@@ -2,6 +2,7 @@
 #include <CorrectionAutomatic.h>
 #include <CorrectionDiagnostics.h>
 #include <CorrectionBrokerClient.h>
+#include <CorrectionHintTheme.h>
 #include "../WeaselDeployer/CorrectionPreferences.h"
 
 class WeaselTSF;
@@ -21,6 +22,8 @@ class AutomaticCorrection {
   void Refresh();
   bool Key(ITfContext*, WPARAM, LPARAM, bool test, bool up, BOOL* eaten);
   bool IntegratedKey(WPARAM, LPARAM, BOOL* eaten);
+  bool CanGiveFeedback() const { return ready_ && window_ && IsWindowVisible(window_) && !InputOnlyHost() && Focused(); }
+  bool GiveFeedback(bool keepExpression);
   struct WriteVerification {
     com_ptr<ITfRange> range;
     std::wstring text;
@@ -37,11 +40,11 @@ class AutomaticCorrection {
   HRESULT ContinueWrite(TfEditCookie, ITfContext*, WriteVerification&, bool resume);
   bool Focused(ITfContext* target = nullptr) const;
   void Poll();
-  bool InputOnlyHost() const {
+  bool InputOnlyHost(bool forcePolicy = false) const {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
     if (testing_ && testInputOnlyHost_) return true;
 #endif
-    return correction::InputOnlyHost();
+    return correction::InputOnlyHost(forcePolicy);
   }
 #ifdef WEASELC_LOCAL_TEST_BUILD
   bool ScopeTraceEnabled() const { return !InputOnlyHost() && preferences_.mode==correction::Mode::Local && preferences_.automatic.enabled; }
@@ -60,6 +63,7 @@ class AutomaticCorrection {
   DWORD CachedUnitsTest() const { return static_cast<DWORD>(text_.size()); }
   void PendingScopeTest(bool enabled) { testPendingScope_ = enabled; }
   void InputOnlyHostTest(bool enabled) { testInputOnlyHost_ = enabled; }
+  void FeedbackFailureTest(bool enabled) { testFeedbackFailure_ = enabled; }
   void ExpirePendingTest() { if (scopeWaitUntil_) scopeWaitUntil_ = 1; }
   void RevalidateTest() { nextValidation_ = 0; }
   ULONGLONG ScopeDeadlineTest() const { return scopeWaitUntil_; }
@@ -112,6 +116,7 @@ class AutomaticCorrection {
   UINT anchorDpi_ = 96;
   UINT measuredDpi_ = 0;
   SIZE measuredSize_{};
+  correction::HintPalette paintedPalette_{};
   HANDLE process_ = nullptr, job_ = nullptr, output_ = nullptr;
   bool ready_ = false, checked_ = false, downTab_ = false;
   bool polling_ = false, requesting_ = false;
@@ -125,6 +130,7 @@ class AutomaticCorrection {
   bool strictCandidateTest_ = false;
   bool testPendingScope_ = false;
   bool testInputOnlyHost_ = false;
+  bool testFeedbackFailure_ = false;
   DWORD testWordEvidence_ = 0;
   TfClientId testClient_ = TF_CLIENTID_NULL;
   std::wstring testWorker_;

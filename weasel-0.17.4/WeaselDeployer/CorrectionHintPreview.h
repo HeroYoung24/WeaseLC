@@ -1,6 +1,8 @@
 #pragma once
 #include <CorrectionAutomatic.h>
 #include <CorrectionHintView.h>
+#include "CorrectionPreviewStyle.h"
+#include <CorrectionAccessibility.h>
 
 // Explicit settings preview. Uses only compiled sample strings, owns no model,
 // text-service state, keyboard sink or application document.
@@ -17,8 +19,13 @@ class CorrectionHintPreview {
   }
   void Hide() { if (window_) ShowWindow(window_, SW_HIDE); }
   HWND Window() const { return window_; }
+  void SetStyleSnapshot(const weasel::UIStyle& style) {
+    style_ = style; hasStyle_ = true;
+    if (window_) InvalidateRect(window_, nullptr, TRUE);
+  }
   bool Show(HWND owner, const correction::AutomaticOptions& options, bool chinese, bool visible) {
     options_ = options; chinese_ = chinese;
+    if (visible) hasStyle_ = LoadCorrectionPreviewStyle(style_);
     if (!window_) {
       WNDCLASSW wc{}; wc.lpfnWndProc = WindowProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = kClass;
       if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
@@ -26,6 +33,7 @@ class CorrectionHintPreview {
           kClass, chinese ? L"纠错提示预览（固定示例）" : L"Correction preview (fixed sample)", WS_POPUP,
           0, 0, 0, 0, owner, nullptr, wc.hInstance, this);
       if (!window_ || !SetLayeredWindowAttributes(window_, 0, 255, LWA_ALPHA)) { Close(); return false; }
+      correction::AnnotateCorrectionHint(window_);
     }
     RECT anchor{}; GetWindowRect(owner, &anchor);
     MONITORINFO monitor{sizeof(monitor)};
@@ -53,19 +61,28 @@ class CorrectionHintPreview {
     if (message == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
     if (message == WM_NCHITTEST) return HTTRANSPARENT;
     if (message == WM_ERASEBKGND) return 1;
+    if (message == WM_SYSCOLORCHANGE || message == WM_THEMECHANGED || message == WM_SETTINGCHANGE) {
+      if (self->hasStyle_) self->hasStyle_ = LoadCorrectionPreviewStyle(self->style_);
+      InvalidateRect(window, nullptr, TRUE);
+    }
     if (message == WM_PAINT || message == WM_PRINTCLIENT) {
       PAINTSTRUCT ps{};
       const HDC dc = message == WM_PAINT ? BeginPaint(window, &ps) : reinterpret_cast<HDC>(w);
       RECT rect{}; GetClientRect(window, &rect);
       correction::PaintHint(dc, rect, correction::AutomaticWindowDpi(window), self->options_.font,
-          L"错子", L"错字", self->options_.tab, self->chinese_, true);
+          L"错子", L"错字", self->options_.tab, self->chinese_, true, self->hasStyle_ ? &self->style_ : nullptr);
       if (message == WM_PAINT) EndPaint(window, &ps);
       return 0;
     }
-    if (message == WM_NCDESTROY) SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+    if (message == WM_NCDESTROY) {
+      correction::ClearCorrectionAccessibility(window);
+      SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+    }
     return DefWindowProcW(window, message, w, l);
   }
   HWND window_ = nullptr;
   correction::AutomaticOptions options_;
   bool chinese_ = true;
+  bool hasStyle_ = false;
+  weasel::UIStyle style_;
 };

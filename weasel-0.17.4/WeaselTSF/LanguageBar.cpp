@@ -97,7 +97,7 @@ static void HMENU2ITfMenu(HMENU hMenu, ITfMenu* pTfMenu) {
   for (int i = 0; i < N; i++) {
     MENUITEMINFO mii;
     mii.cbSize = sizeof(MENUITEMINFO);
-    mii.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STRING;
+    mii.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_STATE;
     mii.dwTypeData = NULL;
     if (GetMenuItemInfo(hMenu, i, TRUE, &mii)) {
       UINT id = mii.wID;
@@ -108,7 +108,8 @@ static void HMENU2ITfMenu(HMENU hMenu, ITfMenu* pTfMenu) {
         mii.dwTypeData = (LPWSTR)malloc(sizeof(WCHAR) * (mii.cch + 1));
         mii.cch++;
         if (GetMenuItemInfo(hMenu, i, TRUE, &mii))
-          pTfMenu->AddMenuItem(id, 0, NULL, NULL, mii.dwTypeData, mii.cch,
+          pTfMenu->AddMenuItem(id, ((mii.fState & MFS_CHECKED) ? TF_LBMENUF_CHECKED : 0) |
+              ((mii.fState & MFS_DISABLED) ? TF_LBMENUF_GRAYED : 0), NULL, NULL, mii.dwTypeData, mii.cch,
                                NULL);
         free(mii.dwTypeData);
       }
@@ -277,6 +278,12 @@ STDAPI CLangBarItemButton::OnClick(TfLBIClick click,
 STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu) {
   HMENU menu = LoadMenuW(g_hInst, MAKEINTRESOURCE(IDR_MENU_POPUP));
   HMENU popupMenu = GetSubMenu(menu, 0);
+  const bool inputOnly = correction::InputOnlyExecutable(correction::CurrentAppName().c_str());
+  const bool paused = correction::UserPausedHost(true);
+  CheckMenuItem(popupMenu, ID_WEASELTRAY_CORRECTION_PAUSE, MF_BYCOMMAND | (paused || inputOnly ? MF_CHECKED : MF_UNCHECKED));
+  EnableMenuItem(popupMenu, ID_WEASELTRAY_CORRECTION_PAUSE, MF_BYCOMMAND | (inputOnly ? MF_GRAYED : MF_ENABLED));
+  for (const auto id : {ID_WEASELTRAY_CORRECTION_KEEP, ID_WEASELTRAY_CORRECTION_FEEDBACK})
+    EnableMenuItem(popupMenu, id, MF_BYCOMMAND | (_pTextService->Automatic().CanGiveFeedback() ? MF_ENABLED : MF_GRAYED));
   HMENU2ITfMenu(popupMenu, pMenu);
   DestroyMenu(menu);
   return S_OK;
@@ -391,6 +398,25 @@ std::wstring WeaselTSF::_GetRootDir() {
 void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
   std::wstring dir{};
   switch (wID) {
+    case ID_WEASELTRAY_CORRECTION_KEEP:
+    case ID_WEASELTRAY_CORRECTION_FEEDBACK:
+      if (!Automatic().GiveFeedback(wID == ID_WEASELTRAY_CORRECTION_KEEP))
+        MessageBoxW(nullptr, L"建议已变化或记录未保存；未修改正文。 / Suggestion changed or the record could not be saved; text was not modified.",
+            L"WeaseLC", MB_OK | MB_ICONINFORMATION);
+      break;
+    case ID_WEASELTRAY_CORRECTION_PAUSE: {
+      const auto& app = correction::CurrentAppName();
+      if (correction::InputOnlyExecutable(app.c_str())) break;
+      std::vector<std::wstring> apps;
+      if (!correction::LoadPausedApps(apps)) break;
+      auto found = std::find(apps.begin(), apps.end(), app);
+      if (found != apps.end()) apps.erase(found); else apps.push_back(app);
+      if (correction::SavePausedApps(apps)) {
+        correction::UserPausedHost(true);
+        Automatic().Cancel(); Automatic().ResetKeys();
+      } else MessageBoxW(nullptr, L"无法保存应用纠错偏好。 / Could not save application preference.", L"WeaseLC", MB_OK | MB_ICONINFORMATION);
+      break;
+    }
     case ID_WEASELTRAY_CORRECTION_PROBE: {
       _correctionProbePending = false;
       _correctionProbeContext = nullptr;

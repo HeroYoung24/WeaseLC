@@ -12,6 +12,9 @@
 #include <CorrectionHintView.h>
 #include <CorrectionDeployment.h>
 #include <CorrectionPipelineDiagnostics.h>
+#include <CorrectionLexicon.h>
+#include <CorrectionFeedback.h>
+#include <CorrectionAccessibility.h>
 
 namespace {
 constexpr ULONGLONG kLifetime = 10000;
@@ -102,7 +105,13 @@ void AutomaticCorrection::Report(correction::AutomaticStage stage, correction::F
 #endif
   correction::SaveAutomaticDiagnostic(diagnostic_);
 }
-void AutomaticCorrection::Hide() { if (window_) ShowWindow(window_, SW_HIDE); }
+void AutomaticCorrection::Hide() {
+  if (window_ && IsWindowVisible(window_)) {
+    ShowWindow(window_, SW_HIDE);
+    correction::AnnotateCorrectionHint(window_);
+    NotifyWinEvent(EVENT_OBJECT_HIDE, window_, OBJID_CLIENT, CHILDID_SELF);
+  }
+}
 void AutomaticCorrection::StopWorker() {
   brokerCall_.Reset();
   // Closing this job terminates only the child we created, including on teardown.
@@ -126,6 +135,7 @@ void AutomaticCorrection::Cancel() {
 void AutomaticCorrection::DiscardSuggestion(bool completed) {
   ++revision_; ready_ = false; checked_ = completed;
   StopWorker(); Hide(); label_.clear(); item_ = {};
+  if (window_) SetWindowTextW(window_, L"WeaseLC correction hint");
   measuredDpi_ = 0; measuredSize_ = {};
 }
 void AutomaticCorrection::InferenceFailed(correction::AutomaticStage stage) {
@@ -204,6 +214,7 @@ bool AutomaticCorrection::EnsureWindow() {
   if (window_ && !SetLayeredWindowAttributes(window_, 0, 255, LWA_ALPHA)) {
     DestroyWindow(window_); window_ = nullptr;
   }
+  if (window_) correction::AnnotateCorrectionHint(window_);
   return window_ != nullptr;
 }
 LRESULT CALLBACK AutomaticCorrection::WindowProc(HWND window, UINT message, WPARAM w, LPARAM l) {
@@ -232,16 +243,20 @@ LRESULT CALLBACK AutomaticCorrection::WindowProc(HWND window, UINT message, WPAR
     correction::PaintHint(dc, bounds, correction::AutomaticWindowDpi(window), self->preferences_.automatic.font,
         std::wstring(self->item_.original, self->item_.originalUnits),
         std::wstring(self->item_.replacement, self->item_.replacementUnits), self->preferences_.automatic.tab,
-        PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE);
+        PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE, false,
+        self->owner_->_cand ? &self->owner_->_cand->style() : nullptr);
     if (message == WM_PAINT) EndPaint(window, &ps);
     return 0;
   }
-  if (message == WM_NCDESTROY) SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+  if (message == WM_NCDESTROY) {
+    correction::ClearCorrectionAccessibility(window);
+    SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+  }
   return DefWindowProcW(window, message, w, l);
 }
 void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
                                   ITfRange* committed, const std::wstring& text) try {
-  if (InputOnlyHost()) {Cancel();Report(correction::AutomaticStage::InputOnlyHost);return;}
+  if (InputOnlyHost(true)) {Cancel();Report(correction::AutomaticStage::InputOnlyHost);return;}
 #ifdef WEASELC_LOCAL_TEST_BUILD
   correction::FrontendDiagnostic gate;
   gate.stage = 1; gate.units = static_cast<DWORD>(text.size());
@@ -451,6 +466,7 @@ void AutomaticCorrection::LayoutChanged(ITfContext* context, bool destroyed) {
 }
 HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool apply, bool* applied, WriteVerification* verification) {
   if (applied) *applied = false;
+  if (apply && InputOnlyHost(true)) { Cancel(); return S_FALSE; }
   if (!Validate(cookie, context)) { if (!scopePending_) Cancel(); return S_FALSE; }
   ReadPosition(context, cookie);
   // A layout/candidate can disappear between timer ticks or between the TSF
@@ -545,6 +561,7 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
 }
 HRESULT AutomaticCorrection::ContinueWrite(TfEditCookie cookie, ITfContext* context,
                                            WriteVerification& pending, bool resume) {
+  if (InputOnlyHost(true)) { Cancel(); return S_FALSE; }
   if (!pending.detached || !pending.range || !pending.source || !pending.selection || !pending.preedit ||
       !owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision ||
       owner_->_IsComposing() || !Focused(context) || !SettingsCurrent()) return S_FALSE;
@@ -733,13 +750,23 @@ void AutomaticCorrection::Refresh() {
   const RECT placed = correction::PlaceAutomaticHint(anchor, monitor.rcWork, size, options.side, MulDiv(options.gap, scale, 96));
   if (IsRectEmpty(&placed)) { Hide(); return; }
   RECT previous{}; GetWindowRect(window_, &previous);
+  const auto palette = correction::CurrentHintPalette(owner_->_cand ? &owner_->_cand->style() : nullptr);
+  if (!(palette == paintedPalette_)) {
+    paintedPalette_ = palette;
+    InvalidateRect(window_, nullptr, TRUE);
+  }
   if (EqualRect(&previous, &placed) && IsWindowVisible(window_)) return;
+  const bool wasVisible = IsWindowVisible(window_) != FALSE;
   InvalidateRect(window_, nullptr, TRUE);
   if (!SetWindowPos(window_, HWND_TOPMOST, placed.left, placed.top, placed.right - placed.left,
       placed.bottom - placed.top, SWP_NOACTIVATE | SWP_SHOWWINDOW) || !IsWindowVisible(window_)) {
     Report(correction::AutomaticStage::LayoutUnavailable); Hide(); return;
   }
   Report(correction::AutomaticStage::Shown);
+  if (!wasVisible) {
+    correction::AnnotateCorrectionHint(window_);
+    NotifyWinEvent(EVENT_OBJECT_SHOW, window_, OBJID_CLIENT, CHILDID_SELF);
+  }
 }
 bool AutomaticCorrection::IntegratedKey(WPARAM key, LPARAM flags, BOOL* eaten) {
   if (InputOnlyHost()) {Cancel();ResetKeys();if(eaten)*eaten=FALSE;Report(correction::AutomaticStage::InputOnlyHost);return false;}
@@ -752,6 +779,23 @@ bool AutomaticCorrection::IntegratedKey(WPARAM key, LPARAM flags, BOOL* eaten) {
   com_ptr<ITfContext> target = context_;
   return Key(target, key, flags, false, false, eaten);
 }
+bool AutomaticCorrection::GiveFeedback(bool keepExpression) try {
+  if (!CanGiveFeedback() || InputOnlyHost(true) || !Request(false, context_) || !ready_) return false;
+  const std::wstring original(item_.original, item_.originalUnits);
+  if (original.empty() || original.size() > correction::kMaxKeptTermUnits) return false;
+  bool saved = false;
+#ifdef WEASEL_CORRECTION_PROBE_BUILD
+  if (testing_) saved = !testFeedbackFailure_; else
+#endif
+  if (keepExpression) {
+    correction::UserLexicon lexicon;
+    saved = correction::LoadUserLexicon(lexicon) && correction::KeepTerm(lexicon, original) && correction::SaveUserLexicon(lexicon);
+  } else saved = correction::RecordFalsePositive();
+  // Dismissing a false positive is user intent, independent of storage health.
+  // A failed preference/count write must never leave this suggestion on Tab.
+  Cancel(); ResetKeys();
+  return saved;
+} catch (...) { Cancel(); ResetKeys(); return false; }
 bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, bool test, bool up, BOOL* eaten) try {
   if (!eaten) return false;
   if (InputOnlyHost()) {Cancel();ResetKeys();*eaten=FALSE;Report(correction::AutomaticStage::InputOnlyHost);return false;}
@@ -811,10 +855,12 @@ bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
   label_ += preferences_.automatic.tab ? (chinese ? L"\nTab 接受 · Esc 忽略" : L"\nTab accepts · Esc dismisses") :
       (chinese ? L"\n纠错建议（Tab 已关闭）" : L"\nCorrection (Tab disabled)");
   SetWindowTextW(window_, (std::wstring(correction::HintTitle(chinese)) + L": " + label_).c_str());
+  correction::AnnounceCorrectionHint(window_);
   InvalidateRect(window_, nullptr, TRUE);
   ready_ = true; Report(correction::AutomaticStage::Ready); return true;
 }
 bool AutomaticCorrection::StartWorker() {
+  if (InputOnlyHost(true)) return false;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   if (!testing_ || testingBroker_)
 #endif
@@ -1077,8 +1123,10 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticWordEvidence
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticScopeWait(
     ITfTextInputProcessorEx* service, DWORD operation) {
-  if (!service || operation > 5) return E_INVALIDARG;
+  if (!service || operation > 9) return E_INVALIDARG;
   auto& automatic = static_cast<WeaselTSF*>(service)->Automatic();
+  if (operation >= 8) { automatic.FeedbackFailureTest(operation == 8); return S_OK; }
+  if (operation >= 6) return automatic.GiveFeedback(operation == 6) ? S_OK : S_FALSE;
   if (operation >= 4) automatic.InputOnlyHostTest(operation == 4);
   else if (operation == 3) automatic.RevalidateTest();
   else if (operation == 2) automatic.ExpirePendingTest();

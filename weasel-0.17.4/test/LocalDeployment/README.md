@@ -1,5 +1,17 @@
 # 本机独立测试
 
+## 2026-10-28：高级功能源码与检查
+
+本轮七项源码已补齐，尚未部署。Word仍只普通输入；4B配置冻结。实现和下一次部署顺序见[`docs/ADVANCED_FEATURES_IMPLEMENTATION_2026-10-28.md`](../../docs/ADVANCED_FEATURES_IMPLEMENTATION_2026-10-28.md)。
+
+构建后可运行`Test-AdvancedFeatures.ps1 -Architecture x64|Win32`，顺序检查自有UI/TSF/临时注册表/进程，不安装输入法；架构间不要并发占用同名测试管道。临时注册表检查需允许测试执行权限。
+
+真实模型启停另用`Test-ManagedLocalModel.ps1`：拒绝已有运行时、保留原日志，显式选用调用方已有PowerShell，只运行原脚本的合成预热，完成后验证模型与ready/端口退出。普通产品窗口允许选择`pwsh.exe`，不依赖开发环境固定路径；需使用支持`StopOnInputClose`的本轮启动脚本。没有自动下载或更改用户执行策略。
+
+最近实际安装为e5ce10d，Word普通输入及Edge验收已通过；高级功能尚未部署。纠错关闭，模型已停止。下面的旧安装版本、Word兼容方案和等待反馈状态均为历史，不作为当前执行依据。
+
+## 历史执行记录
+
 **2026-10-27当前决策：Word只作为普通输入法使用。** 新源码在读取/缓存/模型/提示/纠错Tab前跳过Word，原本机兼容选项已退役；旧包UpdatePatch-20261027-150517被superseded标记及更新器拒绝，不能继续安装该方案。当前安装仍f5f11f1/Off。本轮新产物下一步仅验Word普通输入，重点转Edge撤销/重做、密码/只读和跨框失效。测试页已补事件摘要，真实DOM行为仍待验收。[最新报告](../../docs/WORD_INPUT_ONLY_AND_EDGE_HISTORY_2026-10-27.md)。以下Word兼容路线为历史。
 
 **2026-10-27最新源码：** Word特定Permission getter异常已分阶段确认，新增默认关闭、需明确选择的本机自有提交兼容模式。修复f8f22e6、包`UpdatePatch-20261027-150517`只读校验通过，未安装；实际安装仍f5f11f1，纠错Off。下一轮必须成套更新六文件（协调器协议v3），先Word基础，再于合成文档明确开启兼容、先核对整句捕获再提示/Tab。设置v4回退需恢复升级前v3快照；快照和状态见`output/LocalTest/word-irm-compat-state-20261027.json`。[定位、边界与回归报告](../../docs/WORD_IRM_COMPATIBILITY_FIX_2026-10-27.md)。下文旧状态仅作历史。

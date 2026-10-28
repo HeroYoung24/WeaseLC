@@ -13,8 +13,18 @@ class BrokerProcess {
   BrokerProcess(const BrokerProcess&) = delete;
   BrokerProcess& operator=(const BrokerProcess&) = delete;
   HANDLE Process() const { return process_; }
-  bool Start(const std::wstring& executable) {
+  bool ContainsProcess(DWORD id) const {
+    if (!job_ || !id) return false;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, id);
+    BOOL contained = FALSE;
+    const bool valid = process && IsProcessInJob(process, job_, &contained) && contained;
+    if (process) CloseHandle(process); return valid;
+  }
+  bool Start(const std::wstring& executable, const std::wstring& arguments = L"/correction-broker",
+      DWORD processLimit = 1) {
     Stop();
+    if (!processLimit || processLimit > 4 || executable.find(L'"') != std::wstring::npos ||
+        executable.find_first_of(L"\r\n") != std::wstring::npos) return false;
     SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
     HANDLE input = nullptr, null = INVALID_HANDLE_VALUE;
     STARTUPINFOEXW startup{}; startup.StartupInfo.cb = sizeof(startup);
@@ -48,9 +58,9 @@ class BrokerProcess {
     job_ = CreateJobObjectW(nullptr, nullptr);
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
-    limits.BasicLimitInformation.ActiveProcessLimit = 1;
+    limits.BasicLimitInformation.ActiveProcessLimit = processLimit;
     const auto slash = executable.find_last_of(L'\\');
-    auto command = L"\"" + executable + L"\" /correction-broker";
+    auto command = L"\"" + executable + L"\" " + arguments;
     const auto directory = executable.substr(0, slash);
     if (slash == std::wstring::npos || !job_ ||
         !SetInformationJobObject(job_, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) ||

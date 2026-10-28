@@ -122,6 +122,7 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
   auto poll = reinterpret_cast<Invalidate>(GetProcAddress(module, "WeaselProbeAutomaticPoll"));
   auto expire = reinterpret_cast<Invalidate>(GetProcAddress(module, "WeaselProbeAutomaticExpire"));
   auto environment = reinterpret_cast<Environment>(GetProcAddress(module, "WeaselProbeAutomaticEnvironment"));
+  auto feedback = reinterpret_cast<HRESULT(WINAPI*)(ITfTextInputProcessorEx*, DWORD)>(GetProcAddress(module, "WeaselProbeAutomaticScopeWait"));
   auto apply = reinterpret_cast<Apply>(GetProcAddress(module, "WeaselProbeApplySyntheticResponse"));
   auto preedit = reinterpret_cast<Apply>(GetProcAddress(module, "WeaselProbeAutomaticPreedit"));
   auto invalidate = reinterpret_cast<Invalidate>(GetProcAddress(module, "WeaselProbeInvalidateEditSessions"));
@@ -428,6 +429,32 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
         "native context can commit after correction through its alias");
     contextAlias.Reset();nativeIdentity.Reset();aliasIdentity.Reset();
 
+    if (feedback) {
+      for (const DWORD operation : {6U, 7U}) {
+        configureNow();
+        check(Commit(apply, service.Get(), context.Get(), client, L"这里有错子。") &&
+            edit([&](TfEditCookie ec) { return preedit(service.Get(), context.Get(), ec, L"ni"); }) && inject(service.Get(), &reply) == S_OK,
+            "feedback fixture has valid suggestion and active pinyin");
+        const auto unchanged = store->text;
+        check(feedback(service.Get(), operation) == S_OK && store->text == unchanged && !state().first,
+            "explicit keep or false-positive action clears suggestion without changing host text or pinyin");
+        check(feedback(service.Get(), operation) == S_FALSE && store->text == unchanged,
+            "duplicate feedback cannot consume a stale suggestion");
+      }
+      configureNow();
+      Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
+      DWORD ignoredProcess = 0; environment(service.Get(), FALSE, &ignoredProcess);
+      const auto unchanged = store->text;
+      check(feedback(service.Get(), 6) == S_FALSE && store->text == unchanged, "feedback rejects changed focus without storing a term");
+      environment(service.Get(), TRUE, &ignoredProcess);
+      configureNow();
+      Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
+      const auto beforeFailure = store->text;
+      check(feedback(service.Get(), 8) == S_OK && feedback(service.Get(), 7) == S_FALSE &&
+          store->text == beforeFailure && !state().first && noKey(),
+          "failed feedback persistence still dismisses the suggestion without taking normal Tab");
+      feedback(service.Get(), 9);
+    } else check(false, "feedback probe interface is present");
     preferences.automatic.tab = false; configureNow();
     Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
     check(state().first && noKey(), "Tab setting disables shortcut without hiding suggestion");

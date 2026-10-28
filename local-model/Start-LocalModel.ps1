@@ -1,5 +1,5 @@
 param([int]$Port = 18963, [ValidateSet('1.7b','4b','4b-instruct','7b')][string]$Variant = '4b',
-  [ValidateSet(0,16,24,32,64)][int]$ThinkingBudget = 0)
+  [ValidateSet(0,16,24,32,64)][int]$ThinkingBudget = 0, [switch]$StopOnInputClose)
 $ErrorActionPreference = 'Stop'
 if ($Port -lt 1024 -or $Port -gt 65535) { throw 'Use an unprivileged local port.' }
 $name = if ($Variant -eq '7b') { 'qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf' } elseif ($Variant -eq '4b-instruct') { 'Qwen3-4B-Instruct-2507-Q4_K_M.gguf' } elseif ($Variant -eq '4b') { 'Qwen3-4B-Q4_K_M.gguf' } else { 'Qwen3-1.7B-Q8_0.gguf' }
@@ -25,12 +25,28 @@ if (Test-Path -LiteralPath $readyPath) { Remove-Item -LiteralPath $readyPath }
 $handler = [Net.Http.HttpClientHandler]::new(); $handler.UseProxy = $false
 $client = [Net.Http.HttpClient]::new($handler); $client.Timeout = [TimeSpan]::FromSeconds(60)
 $server = $null
+# Optional GUI ownership: EOF requests shutdown of this launcher's own child.
+$inputClosed = $null
+if ($StopOnInputClose) {
+  # Console.In.ReadLineAsync can synchronously block on redirected input.
+  # Run the pipe read on a .NET worker; never read the global keyboard.
+  Add-Type -TypeDefinition @"
+using System;
+using System.Threading.Tasks;
+public static class WeaseLCGuiInputClose {
+  public static Task Wait() { return Task.Run(() => { Console.In.ReadLine(); }); }
+}
+"@
+  $inputClosed = [WeaseLCGuiInputClose]::Wait()
+}
 try {
+  if ($inputClosed -and $inputClosed.IsCompleted) { return }
   $server = Start-Process -FilePath $exe -ArgumentList $arguments -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput (Join-Path $PSScriptRoot 'runtime.stdout.log') `
     -RedirectStandardError (Join-Path $PSScriptRoot 'runtime.stderr.log')
   $clock = [Diagnostics.Stopwatch]::StartNew()
   while ($true) {
+    if ($inputClosed -and $inputClosed.IsCompleted) { return }
     if ($server.HasExited) { throw 'Model process exited; see runtime.stderr.log.' }
     if ($clock.Elapsed.TotalSeconds -gt 90) { throw 'Model startup timed out.' }
     try {
@@ -55,7 +71,10 @@ try {
     port=$Port;thinkingBudget=$ThinkingBudget;contextTokens=8192;startupAndWarmupMs=$clock.ElapsedMilliseconds} |
     ConvertTo-Json | Set-Content -LiteralPath $readyPath -Encoding utf8
   Write-Output "Ready: http://127.0.0.1:$Port/v1/chat/completions ($alias); Ctrl+C stops it."
-  while (!$server.HasExited) { Start-Sleep -Milliseconds 250 }
+  while (!$server.HasExited) {
+    if ($inputClosed -and $inputClosed.IsCompleted) { return }
+    Start-Sleep -Milliseconds 250
+  }
   if ($server.ExitCode) { throw "Model exited: $($server.ExitCode)" }
 } finally {
   if ($server -and !$server.HasExited) { Stop-Process -InputObject $server -Force }

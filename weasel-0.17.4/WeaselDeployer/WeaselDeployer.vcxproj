@@ -213,6 +213,8 @@
     <ClCompile Include="CorrectionSettingsDialog.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="..\RimeWithWeasel\WeaselUtility.cpp" />
     <ClCompile Include="Configurator.cpp" />
+    <ClCompile Include="LocalModelControl.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="AccessibilityGuids.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="DictManagementDialog.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>

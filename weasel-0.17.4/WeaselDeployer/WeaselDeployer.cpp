@@ -8,6 +8,7 @@
 #include "CorrectionSettingsDialog.h"
 #include "RimeLearningChecks.h"
 #include "CorrectionWorker.h"
+#include "LocalModelControl.h"
 #include <WeaselCommandLine.h>
 
 CAppModule _Module;
@@ -29,6 +30,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
   if (!wcscmp(L"/rime-learning-selftest", lpCmdLine)) {
     try { return CheckRimeLearning() ? 0 : 1; } catch (...) { return 1; }
   }
+  if (!wcscmp(L"/local-model-selftest", lpCmdLine)) return CheckOwnedLocalModel() ? 0 : 1;
 
   if (!wcscmp(L"/correction-selftest", lpCmdLine)) {
     return CheckCorrectionDialogResources(hInstance) ? 0 : 1;
@@ -60,6 +62,10 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
   CreateDirectory(WeaselUserDataPath().c_str(), NULL);
 
   int ret = 0;
+  if (!wcscmp(L"/local-model", lpCmdLine)) {
+    ret = ShowLocalModelControl(hInstance);
+    _Module.Term(); ::CoUninitialize(); return ret == -1 ? 1 : 0;
+  }
   HANDLE hMutex = CreateMutex(NULL, TRUE, WEASEL_DEPLOYER_EXCLUSIVE_MUTEX);
   if (!hMutex) {
     ret = 1;

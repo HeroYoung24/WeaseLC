@@ -38,6 +38,7 @@ LRESULT UIStyleSettingsDialog::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&) {
   select_font_.EnableWindow(FALSE);
 
   Populate();
+  CheckDlgButton(IDC_STYLE_INLINE_PREEDIT, settings_ && settings_->InlinePreedit() ? BST_CHECKED : BST_UNCHECKED);
 
   CenterWindow();
   BringWindowToTop();
@@ -50,6 +51,7 @@ LRESULT UIStyleSettingsDialog::OnClose(UINT, WPARAM, LPARAM, BOOL&) {
 }
 
 LRESULT UIStyleSettingsDialog::OnOK(WORD, WORD code, HWND, BOOL&) {
+  if (settings_ && !settings_->SetInlinePreedit(IsDlgButtonChecked(IDC_STYLE_INLINE_PREEDIT) == BST_CHECKED)) return 0;
   EndDialog(code);
   return 0;
 }

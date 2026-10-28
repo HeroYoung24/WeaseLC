@@ -73,3 +73,12 @@ bool UIStyleSettings::SelectColorScheme(const std::string& color_scheme_id) {
                          color_scheme_id.c_str());
   return true;
 }
+bool UIStyleSettings::InlinePreedit() {
+  // settings_get_config returns a borrowed pointer; never config_close it.
+  RimeConfig config{}; Bool enabled = False;
+  return api_->settings_get_config(settings_, &config) &&
+      rime_get_api()->config_get_bool(&config, "style/inline_preedit", &enabled) && enabled;
+}
+bool UIStyleSettings::SetInlinePreedit(bool enabled) {
+  return api_->customize_bool(settings_, "style/inline_preedit", enabled) != False;
+}

@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <cwchar>
+#include "CorrectionAppPolicy.h"
 
 namespace correction {
 // Product compatibility policy, independent of text attributes and Office COM.
@@ -12,12 +13,12 @@ inline bool InputOnlyExecutable(const wchar_t* image) {
   const auto base = !slash ? forward : !forward ? slash : slash > forward ? slash : forward;
   return !_wcsicmp(base ? base+1 : image,L"WINWORD.EXE");
 }
-inline bool InputOnlyHost() {
+inline bool InputOnlyHost(bool forcePolicy = false) {
   static const bool inputOnly=[] {
     wchar_t image[32768]{};
     const auto length=GetModuleFileNameW(nullptr,image,_countof(image));
     return !length || length>=_countof(image) || InputOnlyExecutable(image);
   }();
-  return inputOnly;
+  return inputOnly || UserPausedHost(forcePolicy);
 }
 }  // namespace correction
