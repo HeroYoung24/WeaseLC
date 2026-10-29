@@ -1,8 +1,8 @@
 # 当前开发进度（2026-10-29）
 
-## 暂停读取修复Edge基础/初始菜单通过，等待Fixed反馈
+## 暂停读取修复Edge Fixed通过，等待仅暂停反馈
 
-已安装13ee957，包`output/LocalTest/UpdatePatch-20261029-155045`回退/200文件/原版基线及双架构后端通过。用户确认Edge A选词/句号/中断退格、B/C普通输入均正常，菜单目标msedge.exe且初始未勾选；加载修复版哈希已核对。现Fixed开启、无真实模型、专用后端及600秒无正文观察器保留，等待A/B/C提示/实际Tab/拼音及中断结果，本步不切暂停，不提前关停。之后再验证暂停/恢复及名单变化。chatgpt.exe记录保留。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`，[专项部署记录](docs/APP_PAUSE_REGISTRY_READ_FIX_2026-10-29.md)顶部。下文“Off/等待基础/修复尚未部署”均为此前阶段。
+已安装13ee957，回退/200文件/原版基线及双架构后端通过。用户确认Edge基础、初始菜单及A/B/C Fixed提示/实际Tab/拼音保留/下一次选词/中断恢复均正常；加载哈希及3次新鲜Shown/TabApplied已核对。现Fixed保持、无真实模型，后端/有界观察器保留，等待Edge仅暂停反馈：明确msedge.exe目标、勾选切换、旧提示消失、新输入不提示、普通输入正常，暂不恢复。暂停前外部名单仅chatgpt.exe，收到反馈后先核对确实增加msedge.exe，再单独验恢复。旧记录保留，不提前关停。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`，[专项记录](docs/APP_PAUSE_REGISTRY_READ_FIX_2026-10-29.md)顶部。下文“等待Fixed/Off/修复尚未部署”均为此前阶段。
 
 ## 已定位暂停名单读取根因；修复源码回归通过，尚未部署
 
