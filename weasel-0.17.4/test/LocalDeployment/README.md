@@ -2,7 +2,7 @@
 
 ## 2026-10-29：高级功能新版已部署，人工验收进行中
 
-独立安装已从e5ce10d更新为2dd6fa7，回退演练、200文件及原输入法基线、双架构私有后端检查通过。Word/Edge基础人工及加载版本均已通过；现Fixed开启，等待Edge A/B/C提示与Tab反馈，无真实模型，保留后端及测试页。之后依次验高级菜单及真实模型/故障恢复。Word仍仅普通输入。以[本轮部署记录](../../docs/ADVANCED_FEATURES_ACCEPTANCE_2026-10-29.md)及`output/LocalTest/advanced-acceptance-state-20261029.json`恢复；下面10月28日“尚未部署”为历史。
+独立安装已从e5ce10d更新为2dd6fa7，回退演练、200文件及原输入法基线、双架构私有后端检查通过。Word/Edge基础、加载版本及Edge A/B/C Fixed提示/Tab/拼音/中断已通过；现等待应用暂停/恢复反馈，无真实模型，保留后端及测试页。直接右键菜单状态刷新缺失已修源码并通过双架构UI337项，尚未安装，**当前构建目录不同于安装**；下次更新重新准备包。之后依次验其余高级菜单及真实模型/故障恢复。Word仍仅普通输入。以[本轮部署记录](../../docs/ADVANCED_FEATURES_ACCEPTANCE_2026-10-29.md)及`output/LocalTest/advanced-acceptance-state-20261029.json`恢复；下面10月28日“尚未部署”为历史。
 
 ## 2026-10-28：高级功能源码与检查
 

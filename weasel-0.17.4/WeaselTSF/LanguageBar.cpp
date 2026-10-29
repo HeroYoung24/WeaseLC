@@ -7,6 +7,7 @@
 #include "CandidateList.h"
 #include <WeaselUtility.h>
 #include <CorrectionProbe.h>
+#include <CorrectionMenuState.h>
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 #include <ProbeDiagnostics.h>
 
@@ -265,6 +266,7 @@ STDAPI CLangBarItemButton::OnClick(TfLBIClick click,
         menu = LoadMenuW(g_hInst, MAKEINTRESOURCE(IDR_MENU_POPUP));
       }
       HMENU popupMenu = GetSubMenu(menu, 0);
+      UpdateCorrectionMenu(popupMenu);
       UINT wID = TrackPopupMenuEx(
           popupMenu, TPM_NONOTIFY | TPM_RETURNCMD | TPM_HORPOSANIMATION, pt.x,
           pt.y, hwnd, NULL);
@@ -275,15 +277,17 @@ STDAPI CLangBarItemButton::OnClick(TfLBIClick click,
   return S_OK;
 }
 
+void CLangBarItemButton::UpdateCorrectionMenu(HMENU menu) {
+  const bool inputOnly = correction::InputOnlyExecutable(correction::CurrentAppName().c_str());
+  const bool paused = correction::UserPausedHost(true);
+  correction::UpdateCorrectionMenuState(menu, inputOnly, paused,
+      _pTextService->Automatic().CanGiveFeedback());
+}
+
 STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu) {
   HMENU menu = LoadMenuW(g_hInst, MAKEINTRESOURCE(IDR_MENU_POPUP));
   HMENU popupMenu = GetSubMenu(menu, 0);
-  const bool inputOnly = correction::InputOnlyExecutable(correction::CurrentAppName().c_str());
-  const bool paused = correction::UserPausedHost(true);
-  CheckMenuItem(popupMenu, ID_WEASELTRAY_CORRECTION_PAUSE, MF_BYCOMMAND | (paused || inputOnly ? MF_CHECKED : MF_UNCHECKED));
-  EnableMenuItem(popupMenu, ID_WEASELTRAY_CORRECTION_PAUSE, MF_BYCOMMAND | (inputOnly ? MF_GRAYED : MF_ENABLED));
-  for (const auto id : {ID_WEASELTRAY_CORRECTION_KEEP, ID_WEASELTRAY_CORRECTION_FEEDBACK})
-    EnableMenuItem(popupMenu, id, MF_BYCOMMAND | (_pTextService->Automatic().CanGiveFeedback() ? MF_ENABLED : MF_GRAYED));
+  UpdateCorrectionMenu(popupMenu);
   HMENU2ITfMenu(popupMenu, pMenu);
   DestroyMenu(menu);
   return S_OK;

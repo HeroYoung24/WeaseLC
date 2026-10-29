@@ -3,10 +3,32 @@
 #include <WeaselStyleColors.h>
 #include <functional>
 #include <CorrectionAppPolicy.h>
+#include <CorrectionMenuState.h>
 #include "LocalModelIdentity.h"
 
 inline void CheckCorrectionThemes(const std::function<void(bool, const char*)>& check) {
   using namespace correction;
+  HMENU menu = CreatePopupMenu();
+  check(menu != nullptr, "native correction menu fixture created");
+  if (menu) {
+    for (const auto id : {ID_WEASELTRAY_CORRECTION_PAUSE, ID_WEASELTRAY_CORRECTION_KEEP, ID_WEASELTRAY_CORRECTION_FEEDBACK})
+      AppendMenuW(menu, MF_STRING, id, L"test");
+    // Reuse one menu through every transition, including checked -> unchecked
+    // and disabled -> enabled; no host preferences are read or written.
+    for (int flags = 7; flags >= 0; --flags) {
+      const bool inputOnly = (flags & 1) != 0, paused = (flags & 2) != 0, feedback = (flags & 4) != 0;
+      UpdateCorrectionMenuState(menu, inputOnly, paused, feedback);
+      const auto pauseState = GetMenuState(menu, ID_WEASELTRAY_CORRECTION_PAUSE, MF_BYCOMMAND);
+      check(!!(pauseState & MF_CHECKED) == (inputOnly || paused), "native menu pause check reflects current policy");
+      check(!!(pauseState & (MF_GRAYED | MF_DISABLED)) == inputOnly, "native menu cannot enable Word correction");
+      for (const auto id : {ID_WEASELTRAY_CORRECTION_KEEP, ID_WEASELTRAY_CORRECTION_FEEDBACK}) {
+        const auto itemState = GetMenuState(menu, id, MF_BYCOMMAND);
+        check(!!(itemState & (MF_GRAYED | MF_DISABLED)) == !(feedback && !inputOnly && !paused),
+            "native menu feedback requires a current eligible suggestion");
+      }
+    }
+    DestroyMenu(menu);
+  }
   const HintPalette system{RGB(255, 255, 255), RGB(0, 0, 0), RGB(0, 0, 0), RGB(0, 0, 128)};
   check(ResolveHintPalette(nullptr, false, system) == system, "missing theme uses system palette");
   weasel::UIStyle style;

@@ -36,6 +36,7 @@ class CLangBarItemButton : public ITfLangBarItemButton, public ITfSource {
   void SetLangbarStatus(DWORD dwStatus, BOOL fSet);
 
  private:
+  void UpdateCorrectionMenu(HMENU menu);
   GUID _guid;
   com_ptr<WeaselTSF> _pTextService;
   com_ptr<ITfLangBarItemSink> _pLangBarItemSink;
