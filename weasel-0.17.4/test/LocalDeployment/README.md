@@ -1,5 +1,9 @@
 # 本机独立测试
 
+## 2026-10-29本轮高级验收已收尾
+
+安装仍13ee957，详细已通过范围和缺口见[本轮汇总](../../docs/ADVANCED_UI_ACCEPTANCE_2026-10-29.md)。Off/fixed0、专用后端/观察器停、无模型；200文件/原版基线一致，用户窗口、权重保留，碧水/inline=false恢复，使用记录0组、学习开启。强调色优化已构建且354项通过但未部署，构建目录不等于安装。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`和`advanced-round-final-state-20261029.json`；下文所有“等待/保持模型运行”均是历史。
+
 ## 暂停读取修复13ee957已部署，等待Edge反馈
 
 更新包`UpdatePatch-20261029-155045`回退/200文件/原版基线和双架构后端通过。现Off/无模型、专用后端运行，Edge页保留，等待基础输入及初始菜单目标/状态；不提前开Fixed。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`，[最新部署](../../docs/APP_PAUSE_REGISTRY_READ_FIX_2026-10-29.md)顶部。以下待部署状态为历史。

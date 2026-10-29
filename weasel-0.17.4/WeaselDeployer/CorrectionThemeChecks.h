@@ -55,6 +55,14 @@ inline void CheckCorrectionThemes(const std::function<void(bool, const char*)>& 
     check(ResolveHintPalette(&style, true, system) == highContrast, "high contrast ignores custom colors");
   }
   check(FlattenHintColor(0x80000000, RGB(255, 255, 255)) == RGB(127, 127, 127), "alpha flattened before GDI painting");
+  style.back_color = 0xff222222; style.candidate_text_color = 0xffd8e3e6;
+  style.hilited_candidate_back_color = 0xff333333; style.hilited_candidate_text_color = 0xff92f6da;
+  const auto darkAccent = ResolveHintPalette(&style, false, system);
+  check(darkAccent.accent == RGB(0xda, 0xf6, 0x92) && HintContrast(darkAccent.accent, darkAccent.background) >= 4.5,
+      "dark theme uses readable native highlight text when selected background cannot emphasize");
+  style.back_color = 0xffffffff; style.hilited_candidate_back_color = 0xfffa3a0a;
+  check(ResolveHintPalette(&style, false, system).accent == RGB(0x0a, 0x3a, 0xfa),
+      "readable light theme accent stays unchanged");
   check(weasel::style_config::blend_colors(0, 0) == 0, "fully transparent upstream blend is defined");
   auto* api = rime_get_api();
   for (const auto* format : {"abgr", "argb", "rgba"}) {

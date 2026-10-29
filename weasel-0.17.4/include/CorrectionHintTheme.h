@@ -47,6 +47,8 @@ inline HintPalette ResolveHintPalette(const weasel::UIStyle* style, bool highCon
   if (HintContrast(result.text, result.background) < 4.5) result.text = readable;
   result.border = FlattenHintColor(style->border_color, result.background);
   result.accent = FlattenHintColor(style->hilited_candidate_back_color, result.background);
+  if (HintContrast(result.accent, result.background) < 4.5)
+    result.accent = FlattenHintColor(style->hilited_candidate_text_color, result.background);
   if (HintContrast(result.accent, result.background) < 4.5) result.accent = result.text;
   return result;
 }
