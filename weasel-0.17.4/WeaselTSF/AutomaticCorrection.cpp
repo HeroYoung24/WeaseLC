@@ -8,12 +8,11 @@
 #include <vector>
 #include <cstdio>
 #include <functional>
+#include <cwctype>
 #include <CorrectionProbe.h>
 #include <CorrectionHintView.h>
 #include <CorrectionDeployment.h>
 #include <CorrectionPipelineDiagnostics.h>
-#include <CorrectionLexicon.h>
-#include <CorrectionFeedback.h>
 #include <CorrectionAccessibility.h>
 
 namespace {
@@ -106,6 +105,7 @@ void AutomaticCorrection::Report(correction::AutomaticStage stage, correction::F
   correction::SaveAutomaticDiagnostic(diagnostic_);
 }
 void AutomaticCorrection::Hide() {
+  exposure_.shown = 0;
   if (window_ && IsWindowVisible(window_)) {
     ShowWindow(window_, SW_HIDE);
     correction::AnnotateCorrectionHint(window_);
@@ -118,6 +118,7 @@ void AutomaticCorrection::StopWorker() {
   Close(job_); Close(process_); Close(output_);
 }
 void AutomaticCorrection::Cancel() {
+  pendingEscape_ = {}; pendingEscapeUntil_ = 0; escapeContext_.Release();
 #ifdef WEASELC_LOCAL_TEST_BUILD
   scopeReadTraceContext_.Release();
 #endif
@@ -133,6 +134,7 @@ void AutomaticCorrection::Cancel() {
   if (window_) KillTimer(window_, 1);
 }
 void AutomaticCorrection::DiscardSuggestion(bool completed) {
+  exposure_ = {};
   ++revision_; ready_ = false; checked_ = completed;
   StopWorker(); Hide(); label_.clear(); item_ = {};
   if (window_) SetWindowTextW(window_, L"WeaseLC correction hint");
@@ -284,6 +286,10 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
       carriedDeadline = scopeWaitUntil_ ? scopeWaitUntil_ : waiting ? GetTickCount64() + kScopeWait : 0;
     }
   }
+  if (previous && !accumulated.empty() && exposure_.VisibleLongEnough(GetTickCount64()) &&
+      window_ && IsWindowVisible(window_) && Focused(context) &&
+      std::any_of(text.begin(), text.end(), [](wchar_t c) { return iswalnum(c) || (c >= 0x3400 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff); }))
+    RecordBehavior(exposure_, correction::BehaviorOutcome::Ignored);
   Cancel();
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   if (!testing_ || testingBroker_)
@@ -755,7 +761,10 @@ void AutomaticCorrection::Refresh() {
     paintedPalette_ = palette;
     InvalidateRect(window_, nullptr, TRUE);
   }
-  if (EqualRect(&previous, &placed) && IsWindowVisible(window_)) return;
+  if (EqualRect(&previous, &placed) && IsWindowVisible(window_)) {
+    if (!exposure_.shown) exposure_.shown = GetTickCount64();
+    return;
+  }
   const bool wasVisible = IsWindowVisible(window_) != FALSE;
   InvalidateRect(window_, nullptr, TRUE);
   if (!SetWindowPos(window_, HWND_TOPMOST, placed.left, placed.top, placed.right - placed.left,
@@ -763,6 +772,7 @@ void AutomaticCorrection::Refresh() {
     Report(correction::AutomaticStage::LayoutUnavailable); Hide(); return;
   }
   Report(correction::AutomaticStage::Shown);
+  if (!exposure_.shown) exposure_.shown = GetTickCount64();
   if (!wasVisible) {
     correction::AnnotateCorrectionHint(window_);
     NotifyWinEvent(EVENT_OBJECT_SHOW, window_, OBJID_CLIENT, CHILDID_SELF);
@@ -779,30 +789,40 @@ bool AutomaticCorrection::IntegratedKey(WPARAM key, LPARAM flags, BOOL* eaten) {
   com_ptr<ITfContext> target = context_;
   return Key(target, key, flags, false, false, eaten);
 }
-bool AutomaticCorrection::GiveFeedback(bool keepExpression) try {
-  if (!CanGiveFeedback() || InputOnlyHost(true) || !Request(false, context_) || !ready_) return false;
-  const std::wstring original(item_.original, item_.originalUnits);
-  if (original.empty() || original.size() > correction::kMaxKeptTermUnits) return false;
-  bool saved = false;
+void AutomaticCorrection::RecordBehavior(const correction::BehaviorExposure& exposure, correction::BehaviorOutcome outcome) noexcept try {
+  if (!exposure.shown || exposure.resolved || correction::EmptyBehaviorDigest(exposure.digest)) return;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
-  if (testing_) saved = !testFeedbackFailure_; else
+  if (testing_ && !testingBroker_) { ++testBehavior_[static_cast<DWORD>(outcome) - 1]; return; }
 #endif
-  if (keepExpression) {
-    correction::UserLexicon lexicon;
-    saved = correction::LoadUserLexicon(lexicon) && correction::KeepTerm(lexicon, original) && correction::SaveUserLexicon(lexicon);
-  } else saved = correction::RecordFalsePositive();
-  // Dismissing a false positive is user intent, independent of storage health.
-  // A failed preference/count write must never leave this suggestion on Tab.
-  Cancel(); ResetKeys();
-  return saved;
-} catch (...) { Cancel(); ResetKeys(); return false; }
+  if (!exposure.request || !exposure.revision) return;
+  correction::BrokerRequest request; request.operation = correction::BrokerOperation::Behavior;
+  request.requestId = exposure.request; request.revision = exposure.revision;
+  correction::BehaviorNotice notice; notice.digest = exposure.digest; notice.outcome = outcome;
+  request.metadataBytes = sizeof(notice); memcpy(request.data, &notice, sizeof(notice));
+  correction::BrokerCall call; call.SendMetadata(BrokerServer(), request);
+  SecureZeroMemory(&request, sizeof(request));
+} catch (...) {}  // Learning must never affect whether the host consumes a key.
 bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, bool test, bool up, BOOL* eaten) try {
   if (!eaten) return false;
   if (InputOnlyHost()) {Cancel();ResetKeys();*eaten=FALSE;Report(correction::AutomaticStage::InputOnlyHost);return false;}
+  if (key != VK_ESCAPE || up || (flags & (1LL << 30))) {
+    pendingEscape_ = {}; pendingEscapeUntil_ = 0; escapeContext_.Release();
+  }
   if (key != VK_TAB) {
+    const auto previousEscape = pendingEscape_; com_ptr<ITfContext> previousContext = escapeContext_;
+    const auto shown = exposure_;
+    const bool explicitEscape = key == VK_ESCAPE && !up && !(flags & (1LL << 30)) && !owner_->_IsComposing() &&
+        Focused(context) && ((ready_ && window_ && IsWindowVisible(window_) && Request(false, context) && ready_) ||
+        (previousEscape.shown && correction::SameIdentity(previousContext, context) &&
+         GetTickCount64() <= pendingEscapeUntil_));
     if (!up && (key == VK_ESCAPE || key == VK_LEFT || key == VK_RIGHT || key == VK_HOME ||
         key == VK_END || key == VK_DELETE || key == VK_BACK || key == VK_SHIFT || key == VK_CONTROL || key == VK_MENU)) Cancel();
     else if (!up && context_ && !Request(false, context)) Cancel();
+    if (explicitEscape) {
+      const auto vote = shown.shown ? shown : previousEscape;
+      if (test) { pendingEscape_ = vote; pendingEscapeUntil_ = GetTickCount64() + 250; escapeContext_ = context; }
+      else RecordBehavior(vote, correction::BehaviorOutcome::Rejected);
+    }
     return false;
   }
   if (up) {
@@ -825,7 +845,10 @@ bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, boo
     if (!ready_ || !window_ || !IsWindowVisible(window_)) return false;
     *eaten = TRUE; return true;
   }
+  const auto acceptedExposure = exposure_;
   if (!Request(true, context)) { Cancel(); return false; }
+  if (diagnostic_.stage == correction::AutomaticStage::TabApplied)
+    RecordBehavior(acceptedExposure, correction::BehaviorOutcome::Accepted);
   downTab_ = true; *eaten = TRUE; return true;
 } catch (...) { Cancel(); return false; }
 bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
@@ -849,6 +872,8 @@ bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
     Report(correction::AutomaticStage::NoSuggestion); return true;
   }
   item_ = reply.items[0];
+  exposure_ = {}; exposure_.request = brokerRequestId_; exposure_.revision = brokerRevision_;
+  correction::BehaviorIdentity(text_, item_, exposure_.digest);
   measuredDpi_ = 0; measuredSize_ = {};
   label_ = std::wstring(item_.original, item_.originalUnits) + L" → " + std::wstring(item_.replacement, item_.replacementUnits);
   const bool chinese = PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE;
@@ -1072,6 +1097,7 @@ void AutomaticCorrection::ConfigureTest(const correction::Preferences& preferenc
   Cancel(); ResetKeys(); testing_ = true; testFocused_ = true;
   testPendingScope_ = false;
   testInputOnlyHost_ = false;
+  std::fill_n(testBehavior_, 3, 0);
   testWordEvidence_ = 0;
   strictCandidateTest_ = false;
   testingBroker_ = worker.compare(0, 7, L"broker:") == 0;
@@ -1125,13 +1151,17 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticScopeWait(
     ITfTextInputProcessorEx* service, DWORD operation) {
   if (!service || operation > 9) return E_INVALIDARG;
   auto& automatic = static_cast<WeaselTSF*>(service)->Automatic();
-  if (operation >= 8) { automatic.FeedbackFailureTest(operation == 8); return S_OK; }
-  if (operation >= 6) return automatic.GiveFeedback(operation == 6) ? S_OK : S_FALSE;
+  if (operation >= 6) return S_FALSE;  // Retired explicit feedback operations.
   if (operation >= 4) automatic.InputOnlyHostTest(operation == 4);
   else if (operation == 3) automatic.RevalidateTest();
   else if (operation == 2) automatic.ExpirePendingTest();
   else automatic.PendingScopeTest(operation != 0);
   return S_OK;
+}
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticBehavior(
+    ITfTextInputProcessorEx* service, DWORD* counts, DWORD age) {
+  if (!service || !counts || age > 60000) return E_INVALIDARG;
+  static_cast<WeaselTSF*>(service)->Automatic().BehaviorTest(counts, age); return S_OK;
 }
 extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticScopeDeadline(
     ITfTextInputProcessorEx* service, ULONGLONG* deadline) {

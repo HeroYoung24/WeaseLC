@@ -280,8 +280,14 @@ STDAPI CLangBarItemButton::OnClick(TfLBIClick click,
 void CLangBarItemButton::UpdateCorrectionMenu(HMENU menu) {
   const bool inputOnly = correction::InputOnlyExecutable(correction::CurrentAppName().c_str());
   const bool paused = correction::UserPausedHost(true);
-  correction::UpdateCorrectionMenuState(menu, inputOnly, paused,
-      _pTextService->Automatic().CanGiveFeedback());
+  const bool foreground = correction::CorrectionMenuTargetsForeground(
+      _pTextService->_GetFocusedContextWindow(), GetForegroundWindow());
+  wchar_t title[256]{};
+  if (menu && GetMenuStringW(menu, ID_WEASELTRAY_CORRECTION_PAUSE, title, _countof(title), MF_BYCOMMAND)) {
+    const auto label = std::wstring(title) + L" [" + correction::CurrentAppName() + L"]";
+    ModifyMenuW(menu, ID_WEASELTRAY_CORRECTION_PAUSE, MF_BYCOMMAND | MF_STRING, ID_WEASELTRAY_CORRECTION_PAUSE, label.c_str());
+  }
+  correction::UpdateCorrectionMenuState(menu, inputOnly, paused, foreground);
 }
 
 STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu) {
@@ -402,15 +408,10 @@ std::wstring WeaselTSF::_GetRootDir() {
 void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
   std::wstring dir{};
   switch (wID) {
-    case ID_WEASELTRAY_CORRECTION_KEEP:
-    case ID_WEASELTRAY_CORRECTION_FEEDBACK:
-      if (!Automatic().GiveFeedback(wID == ID_WEASELTRAY_CORRECTION_KEEP))
-        MessageBoxW(nullptr, L"建议已变化或记录未保存；未修改正文。 / Suggestion changed or the record could not be saved; text was not modified.",
-            L"WeaseLC", MB_OK | MB_ICONINFORMATION);
-      break;
     case ID_WEASELTRAY_CORRECTION_PAUSE: {
       const auto& app = correction::CurrentAppName();
-      if (correction::InputOnlyExecutable(app.c_str())) break;
+      if (app.empty() || correction::InputOnlyExecutable(app.c_str()) ||
+          !correction::CorrectionMenuTargetsForeground(_GetFocusedContextWindow(), GetForegroundWindow())) break;
       std::vector<std::wstring> apps;
       if (!correction::LoadPausedApps(apps)) break;
       auto found = std::find(apps.begin(), apps.end(), app);
@@ -491,6 +492,7 @@ void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
 }
 
 HWND WeaselTSF::_GetFocusedContextWindow() {
+  if (!_pThreadMgr) return nullptr;
   HWND hwnd = NULL;
   ITfDocumentMgr* pDocMgr;
   if (_pThreadMgr->GetFocus(&pDocMgr) == S_OK && pDocMgr != NULL) {

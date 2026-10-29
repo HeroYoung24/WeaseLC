@@ -19,7 +19,7 @@
 #include "CorrectionHintPreview.h"
 #include "CorrectionThemeChecks.h"
 #include <CorrectionAppPolicy.h>
-#include <CorrectionFeedback.h>
+#include <CorrectionBehavior.h>
 #include <shellapi.h>
 #include "LocalModelControl.h"
 
@@ -82,11 +82,15 @@ INT_PTR CALLBACK AppsDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM l) {
         L"无法读取现有偏好；为保护原设置，本次不能保存。", L"Preferences unavailable; saving is disabled."));
     EnableWindow(GetDlgItem(dialog, IDOK), state->loaded);
     if (state->loaded && !state->owner.testing && !state->owner.demo) {
-      DWORD count = 0;
-      if (ReadFalsePositiveCount(count)) {
-        const auto text = std::wstring(state->owner.Text(L"本地已标记误判次数：", L"Local false-positive reports: ")) + std::to_wstring(count);
+      BehaviorHistory history;
+      if (LoadBehaviorHistory(history)) {
+        CheckDlgButton(dialog, IDC_APP_BEHAVIOR_ENABLED, history.header.enabled ? BST_CHECKED : BST_UNCHECKED);
+        const auto text = std::wstring(state->owner.Text(L"本地纠错使用记录（组）：", L"Local correction history (groups): ")) + std::to_wstring(history.entries.size());
         SetDlgItemTextW(dialog, IDC_APP_STATE, text.c_str());
-      }
+      } else { EnableWindow(GetDlgItem(dialog, IDC_APP_BEHAVIOR_ENABLED), FALSE); SetDlgItemTextW(dialog, IDC_APP_STATE,
+          state->owner.Text(L"使用记录不可读；本次不学习，可清除记录后重开。", L"History unavailable; learning skipped. Clear history and reopen.")); }
+    } else {
+      CheckDlgButton(dialog, IDC_APP_BEHAVIOR_ENABLED, BST_CHECKED);
     }
     RefreshApps(dialog, *state); return TRUE;
   }
@@ -116,22 +120,32 @@ INT_PTR CALLBACK AppsDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM l) {
         L"输入习惯：由 Rime 用户词典管理；请使用原有用户词典管理先备份，再导入/恢复。这里不删除日常词库。\n\n"
         L"纠错保留表达：在管理纠错的“管理保留词”中增删或清空；不是词频记录。\n\n"
         L"临时上文：有界且不保存为正文历史；关闭纠错、切换场景或到期时清除。\n\n"
+        L"纠错使用记录：仅在本地保存带随机盐的建议/语境摘要和接受、忽略、拒绝次数，不保存原文；用于排序和临时减少重复提示，不自动写入固定搭配或用户词库。可关闭或清除。\n\n"
         L"模型权重：与学习记录分开保存，本窗口不删除模型。",
         L"Input habits: managed by the existing Rime dictionary manager; back up before import/restore. This page never deletes your daily dictionary.\n\n"
         L"Kept expressions: add/remove/clear in Manage kept terms; this is separate from word frequency.\n\n"
         L"Temporary context: bounded, not saved as document history; cleared on disable, context change or expiry.\n\n"
+        L"Correction history: local salted pair/context digests and acceptance/ignore/rejection counts, no original text. Used for ranking and temporary suppression, never automatic dictionary entries. You can disable or clear it.\n\n"
         L"Model weights are separate and are not deleted here."), L"WeaseLC", MB_OK | MB_ICONINFORMATION);
     return TRUE;
   }
   if (id == IDC_APP_CLEAR_FEEDBACK) {
     if (state->owner.testing || state->owner.demo ||
-        MessageBoxW(dialog, state->owner.Text(L"仅清除误判总次数？不会删除保留词或输入习惯。",
-            L"Clear only the false-positive count? Kept terms and input habits stay unchanged."),
+        MessageBoxW(dialog, state->owner.Text(L"清除纠错使用记录？不会删除保留词、输入习惯或模型。",
+            L"Clear correction usage history? Kept terms, input habits and model files stay unchanged."),
             L"WeaseLC", MB_OKCANCEL | MB_ICONQUESTION) == IDOK) {
-      const bool cleared = state->owner.testing || state->owner.demo || ClearFalsePositiveCount();
-      SetDlgItemTextW(dialog, IDC_APP_STATE, cleared ? state->owner.Text(L"误判计数已清除。", L"False-positive count cleared.") :
-          state->owner.Text(L"无法清除计数；其他数据未改动。", L"Could not clear the count; other data unchanged."));
+      const bool cleared = state->owner.testing || state->owner.demo || SaveBehaviorOption(false, true);
+      SetDlgItemTextW(dialog, IDC_APP_STATE, cleared ? state->owner.Text(L"纠错使用记录已清除。", L"Correction usage history cleared.") :
+          state->owner.Text(L"无法清除记录；其他数据未改动。", L"Could not clear history; other data unchanged."));
     }
+    return TRUE;
+  }
+  if (id == IDC_APP_BEHAVIOR_ENABLED) {
+    const bool enabled = IsDlgButtonChecked(dialog, id) == BST_CHECKED;
+    if (state->owner.testing || state->owner.demo || SaveBehaviorOption(enabled, false))
+      SetDlgItemTextW(dialog, IDC_APP_STATE, state->owner.Text(L"行为学习开关已立即保存；不改变模型参数。", L"Usage learning choice saved immediately; model parameters unchanged."));
+    else { CheckDlgButton(dialog, id, enabled ? BST_UNCHECKED : BST_CHECKED); SetDlgItemTextW(dialog, IDC_APP_STATE,
+        state->owner.Text(L"无法保存行为学习开关。", L"Could not save usage learning choice.")); }
     return TRUE;
   }
   if (id == IDC_APP_RESET) {
@@ -297,7 +311,7 @@ void UpdateButtons(HWND dialog, DialogState& state) {
   const auto selected = SendDlgItemMessageW(dialog, IDC_CORRECTION_SUGGESTIONS, LB_GETCURSEL, 0, 0);
   const bool actionable = selected != LB_ERR && state.review.Selected(static_cast<std::size_t>(selected),
       Text(dialog, IDC_CORRECTION_TEST_TEXT), state.version) != nullptr;
-  for (int id : {IDC_CORRECTION_APPLY, IDC_CORRECTION_IGNORE, IDC_CORRECTION_KEEP})
+  for (int id : {IDC_CORRECTION_APPLY, IDC_CORRECTION_IGNORE})
     EnableWindow(GetDlgItem(dialog, id), actionable && state.lexiconReady);
 }
 void ShowSuggestion(HWND dialog, DialogState& state) {
@@ -642,8 +656,7 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
   switch (id) {
     case IDC_CORRECTION_SERVICE_RETRY: BeginServicePoll(dialog, *state, true); return TRUE;
     case IDC_CORRECTION_APPLY:
-    case IDC_CORRECTION_IGNORE:
-    case IDC_CORRECTION_KEEP: {
+    case IDC_CORRECTION_IGNORE: {
       const auto index = static_cast<std::size_t>(SendDlgItemMessageW(dialog, IDC_CORRECTION_SUGGESTIONS, LB_GETCURSEL, 0, 0));
       const auto text = Text(dialog, IDC_CORRECTION_TEST_TEXT);
       const auto* selected = state->review.Selected(index, text, state->version);
@@ -652,14 +665,6 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
       if (id == IDC_CORRECTION_IGNORE) {
         state->review.Ignore(index, text, state->version); RefreshSuggestions(dialog, *state);
         SetDlgItemTextW(dialog, IDC_CORRECTION_STATE, state->Text(L"已忽略本次建议，没有保存忽略记录。", L"Ignored this suggestion without saving a rule."));
-      } else if (id == IDC_CORRECTION_KEEP) {
-        auto updated = state->lexicon;
-        if (!KeepTerm(updated, item.original) || (!state->demo && !state->testing && !SaveUserLexicon(updated))) {
-          SetDlgItemTextW(dialog, IDC_CORRECTION_STATE, state->Text(L"无法保留：表达过长、词表已满或保存失败。", L"Cannot keep: term too long, list full or save failed.")); return TRUE;
-        }
-        state->lexicon = std::move(updated);
-        Cancel(*state, dialog); UpdateButtons(dialog, *state);
-        SetDlgItemTextW(dialog, IDC_CORRECTION_STATE, state->Text(L"已保留原表达；后续重叠建议将隐藏。可在词表中删除。", L"Original kept; overlapping suggestions will be hidden. Remove it in Manage kept terms."));
       } else {
         std::wstring corrected;
         if (!state->review.Apply(index, text, state->version, corrected)) return TRUE;
@@ -837,7 +842,7 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
         IDC_CORRECTION_CHECK, IDC_CORRECTION_CANCEL_CHECK, IDC_CORRECTION_CLI_RESERVED,
         IDC_CORRECTION_JSON_MODE, IDC_CORRECTION_CONSENT, IDC_CORRECTION_DEFAULTS,
         IDC_CORRECTION_SUGGESTIONS, IDC_CORRECTION_APPLY, IDC_CORRECTION_IGNORE,
-        IDC_CORRECTION_KEEP, IDC_CORRECTION_TERMS, IDC_CORRECTION_AUTOMATIC, IDC_CORRECTION_APPS,
+        IDC_CORRECTION_TERMS, IDC_CORRECTION_AUTOMATIC, IDC_CORRECTION_APPS,
         IDC_CORRECTION_SERVICE_STATE, IDC_CORRECTION_SERVICE_MODEL, IDC_CORRECTION_SERVICE_RETRY, IDC_CORRECTION_MODEL_CONTROL})
       check(GetDlgItem(dialog, id) != nullptr, "control present");
     check(!IsWindowVisible(dialog), "hidden test window");
@@ -856,8 +861,13 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
       SendMessageW(appDialog, WM_COMMAND, IDC_APP_REMOVE, 0);
       check(appState.apps.empty(), "applications page can restore correction by removing pause");
       SendMessageW(appDialog, WM_COMMAND, IDC_APP_CLEAR_FEEDBACK, 0);
-      check(Text(appDialog, IDC_APP_STATE) == state.Text(L"误判计数已清除。", L"False-positive count cleared."),
+      check(Text(appDialog, IDC_APP_STATE) == state.Text(L"纠错使用记录已清除。", L"Correction usage history cleared."),
           "offline data cleanup operates without writing real feedback or dictionaries");
+      CheckDlgButton(appDialog, IDC_APP_BEHAVIOR_ENABLED, BST_UNCHECKED);
+      SendMessageW(appDialog, WM_COMMAND, IDC_APP_BEHAVIOR_ENABLED, 0);
+      check(IsDlgButtonChecked(appDialog, IDC_APP_BEHAVIOR_ENABLED) == BST_UNCHECKED &&
+          Text(appDialog, IDC_APP_STATE) == state.Text(L"行为学习开关已立即保存；不改变模型参数。", L"Usage learning choice saved immediately; model parameters unchanged."),
+          "usage learning opt-out has an independent visible confirmation without real preference writes");
       appState.loaded = false;
       SendMessageW(appDialog, WM_COMMAND, IDC_APP_RESET, 0);
       check(appState.loaded && appState.apps.empty() && IsWindowEnabled(GetDlgItem(appDialog, IDOK)),
@@ -991,7 +1001,8 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
     runFixture(); SendMessageW(dialog, WM_COMMAND, IDC_CORRECTION_IGNORE, 0);
     check(state.review.Items().empty() && state.lexicon.terms.empty(), "ignore does not learn expression");
     runFixture(); SendMessageW(dialog, WM_COMMAND, IDC_CORRECTION_KEEP, 0);
-    check(state.lexicon.terms == std::vector<std::wstring>{L"模拟"}, "explicit keep records only original expression");
+    check(state.lexicon.terms.empty() && !GetDlgItem(dialog, IDC_CORRECTION_KEEP), "retired keep action cannot store an expression");
+    KeepTerm(state.lexicon, L"模拟"); // Existing user-managed entries remain removable and compatible.
     runFixture();
     check(state.review.Items().empty() && Text(dialog, IDC_CORRECTION_RESULT).empty(), "kept original suppresses repeated false positive");
     TermDialogState terms{state, state.lexicon, true};
@@ -1096,9 +1107,9 @@ bool CheckCorrectionLocalDialog(HINSTANCE instance) {
   BeginCheck(dialog, state);
   const auto keepStart = GetTickCount64();
   while (state.job && !state.job->done.load() && GetTickCount64() - keepStart < 12000) Sleep(10);
-  Poll(dialog, state); SendMessageW(dialog, WM_COMMAND, IDC_CORRECTION_KEEP, 0);
+  Poll(dialog, state); KeepTerm(state.lexicon, L"错子");
   const bool kept = std::find(state.lexicon.terms.begin(), state.lexicon.terms.end(), L"错子") != state.lexicon.terms.end();
-  report << "real suggestion original explicitly kept in test memory = " << kept << '\n'; valid = valid && kept;
+  report << "legacy kept expression loaded in test memory = " << kept << '\n'; valid = valid && kept;
   BeginCheck(dialog, state);
   const auto repeatStart = GetTickCount64();
   while (state.job && !state.job->done.load() && GetTickCount64() - repeatStart < 12000) Sleep(10);

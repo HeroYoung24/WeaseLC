@@ -2,6 +2,7 @@
 #include <CorrectionBrokerWire.h>
 #include <CorrectionProbe.h>
 #include <CorrectionLexicon.h>
+#include <CorrectionBehavior.h>
 #include <CorrectionPipelineDiagnostics.h>
 #include "../WeaselDeployer/CorrectionPreferences.h"
 #include <atomic>
@@ -86,6 +87,14 @@ struct CorrectionBroker::Impl {
   // Only metadata from the latest started check is eligible for management UI.
   // No text/result array is retained, and settings changes invalidate this state.
   std::mutex healthMutex;
+  std::mutex behaviorMutex;
+  struct BehaviorTicket {
+    BehaviorDigest digest{};
+    ULONGLONG request = 0, revision = 0, issued = 0;
+    ULONG pid = 0;
+    std::wstring model;
+  };
+  std::vector<BehaviorTicket> behaviorTickets;
   ULONGLONG checkSequence = 0, healthRevision = 0;
   DWORD healthState = 0xffffffff, healthError = 0, healthHttp = 0, healthElapsed = 0;
   struct Worker { std::thread thread; std::atomic_bool done{false}; };
@@ -140,6 +149,41 @@ struct CorrectionBroker::Impl {
     PrepareDiagnostics();
     Record(names[static_cast<unsigned>(request.metadata)], request.data, request.metadataBytes);
   }
+  void BehaviorFeedback(HANDLE pipe, const BrokerRequest& request, BrokerReply& reply) {
+    BehaviorNotice notice{};
+    if (request.metadataBytes != sizeof(notice) || request.input.units || request.input.text[0]) {
+      reply.status = BrokerStatus::InvalidRequest; return;
+    }
+    memcpy(&notice, request.data, sizeof(notice));
+    if (notice.version != 1 || EmptyBehaviorDigest(notice.digest) || notice.outcome < BehaviorOutcome::Accepted || notice.outcome > BehaviorOutcome::Rejected) {
+      reply.status = BrokerStatus::InvalidRequest; return;
+    }
+    reply.status = Snapshot(reply.settings);
+    if (reply.status != BrokerStatus::Ok || !reply.settings.enabled || request.revision != reply.settings.revision) {
+      reply.status = BrokerStatus::SettingsChanged; return;
+    }
+    ULONG pid = 0; if (!GetNamedPipeClientProcessId(pipe, &pid)) { reply.status = BrokerStatus::InvalidRequest; return; }
+    std::lock_guard<std::mutex> guard(behaviorMutex);
+    const auto now = GetTickCount64();
+    auto found = std::find_if(behaviorTickets.begin(), behaviorTickets.end(), [&](const BehaviorTicket& ticket) {
+      return ticket.pid == pid && ticket.request == request.requestId && ticket.revision == request.revision &&
+          ticket.digest == notice.digest && now - ticket.issued < 65000;
+    });
+    if (found == behaviorTickets.end()) { reply.status = BrokerStatus::InvalidRequest; return; }
+    const auto model = found->model;
+    behaviorTickets.erase(found);  // A displayed response can produce one vote, including failed storage.
+    BehaviorStoreLock lock(path); if (!lock) { reply.status = BrokerStatus::Unavailable; return; }
+    BehaviorHistory history;
+    if (!LoadBehaviorHistory(history, path) || !UpdateBehavior(history, notice.digest, model, notice.outcome, BehaviorNow())) {
+      reply.status = BrokerStatus::Disabled; return;
+    }
+    HKEY key = nullptr; const auto diagnostic = path + L"\\Diagnostics";
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, diagnostic.c_str(), 0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) {
+      reply.status = BrokerStatus::Unavailable; return;
+    }
+    const bool saved = WriteBehavior(key, history); RegCloseKey(key);
+    reply.status = saved ? BrokerStatus::Ok : BrokerStatus::Unavailable;
+  }
   void Check(HANDLE pipe, const BrokerRequest& request, BrokerReply& reply) {
     if (request.input.magic != 0x31434357 || request.input.version != 1 ||
         !ValidAutomaticText(request.input.text, request.input.units, 1024)) {
@@ -175,9 +219,11 @@ struct CorrectionBroker::Impl {
     input.text.assign(request.input.text, request.input.units);
     struct Erase { std::wstring& text; ~Erase() { if (!text.empty()) SecureZeroMemory(text.data(), text.size() * sizeof(WCHAR)); } } erase{input.text};
     std::unique_ptr<IModelTransport> selected;
+    bool fixedFixture = false;
     if (transport) selected = transport();
 #ifdef WEASELC_LOCAL_TEST_BUILD
     else if (UseFixedAutomaticReply()) {
+      fixedFixture = true;
       const auto verdict = FixedAutomaticVerdict(input.text);
       if (verdict == FixedVerdict::Reject) { reply.status = BrokerStatus::InvalidRequest; return; }
       selected = std::make_unique<FixedAutomaticTransport>(verdict == FixedVerdict::Suggest);
@@ -209,6 +255,36 @@ struct CorrectionBroker::Impl {
       item.replacementUnits = static_cast<DWORD>(suggestion.replacement.size()); item.score = suggestion.score;
       memcpy(item.original, suggestion.original.data(), suggestion.original.size() * sizeof(WCHAR));
       memcpy(item.replacement, suggestion.replacement.data(), suggestion.replacement.size() * sizeof(WCHAR));
+    }
+    // Personal history only reorders already eligible results or briefly
+    // suppresses repeatedly rejected pairs. It cannot lower model thresholds.
+    if (!fixedFixture && reply.result.count) {
+      const auto model = preferences.local.endpoint + L"\n" + preferences.local.model;
+      BehaviorHistory history;
+      const bool loaded = LoadBehaviorHistory(history, path) && history.header.enabled;
+      std::vector<std::pair<AutomaticReply::Item, double>> ranked;
+      for (DWORD i = 0; i < reply.result.count; ++i) {
+        const auto& item = reply.result.items[i]; BehaviorDigest digest{};
+        const auto* entry = loaded && BehaviorIdentity(input.text, item, digest) ? FindBehavior(history, digest, model) : nullptr;
+        if (entry && SuppressBehavior(*entry, BehaviorNow())) continue;
+        ranked.emplace_back(item, item.score + (entry ? .05 * BehaviorBias(*entry) : 0));
+      }
+      std::stable_sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+      reply.result = {};
+      for (const auto& item : ranked) reply.result.items[reply.result.count++] = item.first;
+      if (reply.modelState == static_cast<DWORD>(State::Suggestions) && !reply.result.count) reply.modelState = static_cast<DWORD>(State::Filtered);
+      if (loaded && reply.result.count) {
+        BehaviorTicket ticket; ticket.model = model; ticket.request = request.requestId;
+        ticket.revision = request.revision; ticket.issued = GetTickCount64();
+        if (BehaviorIdentity(input.text, reply.result.items[0], ticket.digest) && GetNamedPipeClientProcessId(pipe, &ticket.pid)) {
+          std::lock_guard<std::mutex> guard(behaviorMutex);
+          behaviorTickets.erase(std::remove_if(behaviorTickets.begin(), behaviorTickets.end(), [&](const BehaviorTicket& old) {
+            return ticket.issued - old.issued >= 65000 || (old.pid == ticket.pid && old.request == ticket.request);
+          }), behaviorTickets.end());
+          if (behaviorTickets.size() >= 128) behaviorTickets.erase(behaviorTickets.begin());
+          behaviorTickets.push_back(std::move(ticket));
+        }
+      }
     }
     if (RegistryRevision(path) != request.revision) { reply.result = {}; reply.status = BrokerStatus::SettingsChanged; }
   }
@@ -246,6 +322,7 @@ struct CorrectionBroker::Impl {
           break;
         }
         case BrokerOperation::Metadata: Metadata(request); return;
+        case BrokerOperation::Behavior: BehaviorFeedback(pipe, request, reply); break;
         default: reply.status = BrokerStatus::InvalidRequest;
       }
     } catch (...) { reply.status = BrokerStatus::ModelFailure; reply.modelState = static_cast<DWORD>(State::InvalidResponse); reply.result = {}; }

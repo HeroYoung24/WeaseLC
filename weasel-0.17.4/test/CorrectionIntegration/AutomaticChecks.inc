@@ -303,6 +303,11 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
       check(diagnostic && writeState.stage ==
           (lostAfterLock ? AutomaticStage::TabPersistenceUnconfirmed : AutomaticStage::TabWriteUnconfirmed),
           "readback distinguishes an unretained write from a notified post-lock revert");
+      const auto behaviorState = reinterpret_cast<HRESULT(WINAPI*)(ITfTextInputProcessorEx*, DWORD*, DWORD)>(
+          GetProcAddress(module, "WeaselProbeAutomaticBehavior"));
+      DWORD votes[3]{};
+      check(behaviorState && behaviorState(service.Get(), votes, 0) == S_OK && votes[0] == 0,
+          "acknowledged or reverted edits never train a successful acceptance");
       keys->OnKeyUp(context.Get(), VK_TAB, 0, &eaten);
       check(eaten && noKey(), "unconfirmed write releases Tab for normal navigation after key-up");
       check(Commit(apply, service.Get(), context.Get(), client, L"你好"),
@@ -429,32 +434,45 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
         "native context can commit after correction through its alias");
     contextAlias.Reset();nativeIdentity.Reset();aliasIdentity.Reset();
 
-    if (feedback) {
-      for (const DWORD operation : {6U, 7U}) {
-        configureNow();
-        check(Commit(apply, service.Get(), context.Get(), client, L"这里有错子。") &&
-            edit([&](TfEditCookie ec) { return preedit(service.Get(), context.Get(), ec, L"ni"); }) && inject(service.Get(), &reply) == S_OK,
-            "feedback fixture has valid suggestion and active pinyin");
-        const auto unchanged = store->text;
-        check(feedback(service.Get(), operation) == S_OK && store->text == unchanged && !state().first,
-            "explicit keep or false-positive action clears suggestion without changing host text or pinyin");
-        check(feedback(service.Get(), operation) == S_FALSE && store->text == unchanged,
-            "duplicate feedback cannot consume a stale suggestion");
-      }
-      configureNow();
-      Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
-      DWORD ignoredProcess = 0; environment(service.Get(), FALSE, &ignoredProcess);
-      const auto unchanged = store->text;
-      check(feedback(service.Get(), 6) == S_FALSE && store->text == unchanged, "feedback rejects changed focus without storing a term");
+    using Behavior = HRESULT(WINAPI*)(ITfTextInputProcessorEx*, DWORD*, DWORD);
+    const auto behavior = reinterpret_cast<Behavior>(GetProcAddress(module, "WeaselProbeAutomaticBehavior"));
+    check(behavior != nullptr, "implicit behavior probe is available");
+    if (behavior) {
+      const auto oldTiming = preferences.timing; preferences.timing = 1;
+      auto history = [&](DWORD age = 0) { std::array<DWORD,3> counts{}; behavior(service.Get(), counts.data(), age); return counts; };
+      configureNow(); Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
+      key(service.Get(), context.Get(), VK_TAB, 0, 1, &eaten);
+      check(history()[0] == 0, "Tab query never counts acceptance");
+      key(service.Get(), context.Get(), VK_TAB, 0, 0, &eaten);
+      check(history()[0] == 1, "only verified actual Tab correction counts acceptance");
+      key(service.Get(), context.Get(), VK_TAB, 1LL << 30, 0, &eaten);
+      check(history()[0] == 1, "held Tab cannot count a second acceptance");
+      key(service.Get(), context.Get(), VK_TAB, 0, 2, &eaten);
+      configureNow(); Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
+      key(service.Get(), context.Get(), VK_ESCAPE, 0, 1, &eaten);
+      check(history()[2] == 0 && !state().first, "Escape query dismisses but cannot vote");
+      key(service.Get(), context.Get(), VK_ESCAPE, 0, 0, &eaten);
+      check(history()[2] == 1 && !eaten, "actual plain Escape rejects once without taking Rime's key");
+      key(service.Get(), context.Get(), VK_ESCAPE, 1LL << 30, 0, &eaten);
+      check(history()[2] == 1, "held Escape cannot repeat rejection");
+      configureNow(); Commit(apply, service.Get(), context.Get(), client, L"这里有错子。");
+      edit([&](TfEditCookie ec) { return preedit(service.Get(), context.Get(), ec, L"ni"); }); inject(service.Get(), &reply);
+      key(service.Get(), context.Get(), VK_ESCAPE, 0, 1, &eaten); key(service.Get(), context.Get(), VK_ESCAPE, 0, 0, &eaten);
+      check(history()[2] == 0, "Escape cancelling active pinyin is ambiguous and does not reject correction");
+      configureNow(); Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
+      history(2000); Commit(apply, service.Get(), context.Get(), client, L"你好");
+      check(history()[1] == 1, "continuing a validated adjacent commit after visible dwell counts weak ignore");
+      configureNow(); Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
+      history(2000); Commit(apply, service.Get(), context.Get(), client, L"。。");
+      check(history()[1] == 0, "continuing punctuation cannot train repeated ignored expressions");
+      configureNow(); Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
+      DWORD ignoredProcess = 0; environment(service.Get(), FALSE, &ignoredProcess); poll(service.Get());
+      check(history() == std::array<DWORD,3>{}, "focus loss never trains a rejection or ignore");
       environment(service.Get(), TRUE, &ignoredProcess);
-      configureNow();
-      Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
-      const auto beforeFailure = store->text;
-      check(feedback(service.Get(), 8) == S_OK && feedback(service.Get(), 7) == S_FALSE &&
-          store->text == beforeFailure && !state().first && noKey(),
-          "failed feedback persistence still dismisses the suggestion without taking normal Tab");
-      feedback(service.Get(), 9);
-    } else check(false, "feedback probe interface is present");
+      check(feedback(service.Get(), 6) == S_FALSE && feedback(service.Get(), 7) == S_FALSE,
+          "retired explicit keep/report interfaces cannot write a preference");
+      preferences.timing = oldTiming;
+    }
     preferences.automatic.tab = false; configureNow();
     Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"); inject(service.Get(), &reply);
     check(state().first && noKey(), "Tab setting disables shortcut without hiding suggestion");

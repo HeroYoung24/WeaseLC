@@ -1,5 +1,6 @@
 #include <CorrectionBrokerClient.h>
 #include <CorrectionLexicon.h>
+#include <CorrectionBehavior.h>
 #include <CorrectionPipelineDiagnostics.h>
 #include <CorrectionBrokerProcess.h>
 #include <CorrectionBrokerSupervisor.h>
@@ -221,6 +222,49 @@ int wmain(int argc, wchar_t** argv) {
         "bounded dispatch counters relay on the correct closed metadata channel");
   }
   check(run() && reply.status == BrokerStatus::Ok && reply.result.count == 1, "fixed response through production parser and broker");
+  {
+    const auto input = CheckRequestFor(settings);
+    const std::wstring text(input.input.text, input.input.units);
+    BehaviorNotice notice;
+    check(BehaviorIdentity(text, reply.result.items[0], notice.digest), "behavior ticket uses the exact issued suggestion and local context");
+    auto vote = [&](BehaviorOutcome outcome) {
+      BrokerRequest event; event.operation = BrokerOperation::Behavior;
+      event.requestId = input.requestId; event.revision = settings.settings.revision;
+      notice.outcome = outcome; event.metadataBytes = sizeof(notice); memcpy(event.data, &notice, sizeof(notice));
+      const auto calls = fixture.calls.load();
+      return call.Exchange(Self(), event, reply, 1000) && fixture.calls == calls;
+    };
+    check(vote(BehaviorOutcome::Accepted) && reply.status == BrokerStatus::Ok, "successful behavior feedback persists outside the host without calling a model");
+    const auto stableRevision = settings.settings.revision;
+    check(snapshot() && settings.settings.revision == stableRevision, "behavior writes cannot invalidate live input settings revisions");
+    BehaviorHistory history;
+    check(LoadBehaviorHistory(history, root) && history.entries.size() == 1 && history.entries[0].accepted == 1,
+        "authoritative controller stores only the accepted counter for the issued pair");
+    check(vote(BehaviorOutcome::Accepted) && reply.status == BrokerStatus::InvalidRequest,
+        "a duplicate feedback request cannot train a second acceptance");
+    HKEY diagnostic = nullptr;
+    const auto diagnosticPath = root + L"\\Diagnostics";
+    RegOpenKeyExW(HKEY_CURRENT_USER, diagnosticPath.c_str(), 0, KEY_ALL_ACCESS, &diagnostic);
+    check(diagnostic != nullptr, "behavior integration owns the temporary diagnostics key");
+    if (diagnostic) {
+      RegDeleteValueW(diagnostic, L"BehaviorHistoryV1");
+      bool rejected = true;
+      for (unsigned i = 0; i < 3; ++i) rejected = run() && reply.result.count == 1 && vote(BehaviorOutcome::Rejected) && reply.status == BrokerStatus::Ok && rejected;
+      check(rejected && run() && reply.result.count == 0 && reply.modelState == static_cast<DWORD>(State::Filtered),
+          "repeated explicit rejections temporarily suppress that model and context pair");
+      RegDeleteValueW(diagnostic, L"BehaviorHistoryV1");
+      check(run() && reply.result.count == 1, "clearing correction history restores ordinary eligible suggestions");
+      const auto modelScore = reply.result.items[0].score;
+      check(vote(BehaviorOutcome::Ignored) && reply.status == BrokerStatus::Ok && run() && reply.result.count == 1 &&
+          reply.result.items[0].score == modelScore, "weak ignore preserves suggestions and cannot change model confidence or lower thresholds");
+      check(LoadBehaviorHistory(history, root), "personalization state can be inspected in the controller");
+      history.header.enabled = 0; WriteBehavior(diagnostic, history);
+      check(vote(BehaviorOutcome::Rejected) && reply.status == BrokerStatus::Disabled && run() && reply.result.count == 1,
+          "turning learning off blocks votes and preserves ordinary correction behavior");
+      RegDeleteValueW(diagnostic, L"BehaviorHistoryV1"); RegCloseKey(diagnostic);
+      run();  // Restore the successful health snapshot for existing checks.
+    }
+  }
   check(healthSnapshot() && health.modelState == static_cast<DWORD>(State::Suggestions),
       "health retains result state without suggestion text");
   check(!call.Exchange(L"C:\\invalid-server.exe", request, reply), "reject mismatched backend executable");

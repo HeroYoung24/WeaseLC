@@ -5,30 +5,41 @@
 #include <CorrectionAppPolicy.h>
 #include <CorrectionMenuState.h>
 #include "LocalModelIdentity.h"
+#include "CorrectionBehaviorChecks.h"
 
 inline void CheckCorrectionThemes(const std::function<void(bool, const char*)>& check) {
   using namespace correction;
+  CheckCorrectionBehavior(check);
   HMENU menu = CreatePopupMenu();
   check(menu != nullptr, "native correction menu fixture created");
   if (menu) {
-    for (const auto id : {ID_WEASELTRAY_CORRECTION_PAUSE, ID_WEASELTRAY_CORRECTION_KEEP, ID_WEASELTRAY_CORRECTION_FEEDBACK})
-      AppendMenuW(menu, MF_STRING, id, L"test");
+    AppendMenuW(menu, MF_STRING, ID_WEASELTRAY_CORRECTION_PAUSE, L"test");
     // Reuse one menu through every transition, including checked -> unchecked
     // and disabled -> enabled; no host preferences are read or written.
-    for (int flags = 7; flags >= 0; --flags) {
-      const bool inputOnly = (flags & 1) != 0, paused = (flags & 2) != 0, feedback = (flags & 4) != 0;
-      UpdateCorrectionMenuState(menu, inputOnly, paused, feedback);
+    for (int flags = 3; flags >= 0; --flags) {
+      const bool inputOnly = (flags & 1) != 0, paused = (flags & 2) != 0;
+      UpdateCorrectionMenuState(menu, inputOnly, paused);
       const auto pauseState = GetMenuState(menu, ID_WEASELTRAY_CORRECTION_PAUSE, MF_BYCOMMAND);
       check(!!(pauseState & MF_CHECKED) == (inputOnly || paused), "native menu pause check reflects current policy");
       check(!!(pauseState & (MF_GRAYED | MF_DISABLED)) == inputOnly, "native menu cannot enable Word correction");
-      for (const auto id : {ID_WEASELTRAY_CORRECTION_KEEP, ID_WEASELTRAY_CORRECTION_FEEDBACK}) {
-        const auto itemState = GetMenuState(menu, id, MF_BYCOMMAND);
-        check(!!(itemState & (MF_GRAYED | MF_DISABLED)) == !(feedback && !inputOnly && !paused),
-            "native menu feedback requires a current eligible suggestion");
-      }
     }
+    UpdateCorrectionMenuState(menu, false, false, false);
+    check((GetMenuState(menu, ID_WEASELTRAY_CORRECTION_PAUSE, MF_BYCOMMAND) & MF_GRAYED) != 0,
+        "stale background language bar cannot pause another foreground application");
+    UpdateCorrectionMenuState(menu, false, false, true);
+    check(!(GetMenuState(menu, ID_WEASELTRAY_CORRECTION_PAUSE, MF_BYCOMMAND) & (MF_GRAYED | MF_DISABLED)),
+        "foreground application can recover the pause menu");
     DestroyMenu(menu);
   }
+  HWND host = CreateWindowW(L"STATIC", L"", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, nullptr, nullptr);
+  HWND other = CreateWindowW(L"STATIC", L"", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, nullptr, nullptr);
+  HWND child = host ? CreateWindowW(L"STATIC", L"", WS_CHILD, 0, 0, 1, 1, host, nullptr, nullptr, nullptr) : nullptr;
+  check(host && other && child, "foreground menu test owns hidden windows only");
+  check(CorrectionMenuTargetsForeground(child, host), "child text view matches its foreground application root");
+  check(!CorrectionMenuTargetsForeground(child, other), "different window cannot receive the pause action");
+  check(!CorrectionMenuTargetsForeground(nullptr, host) && !CorrectionMenuTargetsForeground(host, nullptr),
+      "unknown menu target cannot change application preferences");
+  if (host) DestroyWindow(host); if (other) DestroyWindow(other);
   const HintPalette system{RGB(255, 255, 255), RGB(0, 0, 0), RGB(0, 0, 0), RGB(0, 0, 128)};
   check(ResolveHintPalette(nullptr, false, system) == system, "missing theme uses system palette");
   weasel::UIStyle style;

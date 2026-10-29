@@ -3,6 +3,7 @@
 #include <CorrectionDiagnostics.h>
 #include <CorrectionBrokerClient.h>
 #include <CorrectionHintTheme.h>
+#include <CorrectionBehavior.h>
 #include "../WeaselDeployer/CorrectionPreferences.h"
 
 class WeaselTSF;
@@ -22,8 +23,6 @@ class AutomaticCorrection {
   void Refresh();
   bool Key(ITfContext*, WPARAM, LPARAM, bool test, bool up, BOOL* eaten);
   bool IntegratedKey(WPARAM, LPARAM, BOOL* eaten);
-  bool CanGiveFeedback() const { return ready_ && window_ && IsWindowVisible(window_) && !InputOnlyHost() && Focused(); }
-  bool GiveFeedback(bool keepExpression);
   struct WriteVerification {
     com_ptr<ITfRange> range;
     std::wstring text;
@@ -63,7 +62,10 @@ class AutomaticCorrection {
   DWORD CachedUnitsTest() const { return static_cast<DWORD>(text_.size()); }
   void PendingScopeTest(bool enabled) { testPendingScope_ = enabled; }
   void InputOnlyHostTest(bool enabled) { testInputOnlyHost_ = enabled; }
-  void FeedbackFailureTest(bool enabled) { testFeedbackFailure_ = enabled; }
+  void BehaviorTest(DWORD* counts, DWORD age) {
+    std::copy_n(testBehavior_, 3, counts);
+    if (age && exposure_.shown) exposure_.shown = GetTickCount64() - age;
+  }
   void ExpirePendingTest() { if (scopeWaitUntil_) scopeWaitUntil_ = 1; }
   void RevalidateTest() { nextValidation_ = 0; }
   ULONGLONG ScopeDeadlineTest() const { return scopeWaitUntil_; }
@@ -87,6 +89,7 @@ class AutomaticCorrection {
   void VerifiedCapture();
   bool AcceptReply(const correction::AutomaticReply&);
   void Hide();
+  void RecordBehavior(const correction::BehaviorExposure&, correction::BehaviorOutcome) noexcept;
   TfClientId Client() const;
   bool SettingsCurrent() const;
   bool LoadBrokerPreferences();
@@ -120,6 +123,9 @@ class AutomaticCorrection {
   HANDLE process_ = nullptr, job_ = nullptr, output_ = nullptr;
   bool ready_ = false, checked_ = false, downTab_ = false;
   bool polling_ = false, requesting_ = false;
+  correction::BehaviorExposure exposure_, pendingEscape_;
+  ULONGLONG pendingEscapeUntil_ = 0;
+  com_ptr<ITfContext> escapeContext_;
 #ifdef WEASELC_LOCAL_TEST_BUILD
   com_ptr<ITfContext> scopeReadTraceContext_;
 #endif
@@ -130,7 +136,7 @@ class AutomaticCorrection {
   bool strictCandidateTest_ = false;
   bool testPendingScope_ = false;
   bool testInputOnlyHost_ = false;
-  bool testFeedbackFailure_ = false;
+  DWORD testBehavior_[3]{};
   DWORD testWordEvidence_ = 0;
   TfClientId testClient_ = TF_CLIENTID_NULL;
   std::wstring testWorker_;

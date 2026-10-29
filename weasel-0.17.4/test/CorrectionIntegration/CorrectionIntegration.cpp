@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <array>
 #include <msctf.h>
 #include <ctfutb.h>
 #include <wrl/client.h>

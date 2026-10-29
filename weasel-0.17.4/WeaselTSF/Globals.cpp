@@ -21,6 +21,7 @@ static const GUID c_guidProfile = WEASELC_TEST_PROFILE;
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticDiagnostic=_WeaselProbeAutomaticDiagnostic@8")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticCachedUnits=_WeaselProbeAutomaticCachedUnits@8")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticScopeWait=_WeaselProbeAutomaticScopeWait@8")
+#pragma comment(linker, "/EXPORT:WeaselProbeAutomaticBehavior=_WeaselProbeAutomaticBehavior@12")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticScopeDeadline=_WeaselProbeAutomaticScopeDeadline@8")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticWordEvidence=_WeaselProbeAutomaticWordEvidence@8")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticCandidate=_WeaselProbeAutomaticCandidate@12")

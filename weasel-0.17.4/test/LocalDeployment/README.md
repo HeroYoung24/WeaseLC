@@ -1,5 +1,9 @@
 # 本机独立测试
 
+## 2026-10-29后续：行为反馈源码待更新
+
+2dd6fa7的Word/Edge基础及Edge Fixed已通过。暂停现场列表为chatgpt.exe，不能当作Edge暂停/恢复通过；已补目标名称/前台归属。按用户决策撤掉保留/误判动作，改为有界使用行为参考，双架构离线回归通过，新源码尚未安装。当前Off、无模型、专用后端停止，旧DLL仍加载，不直接替换。以[最新报告](../../docs/BEHAVIOR_FEEDBACK_2026-10-29.md)及`output/LocalTest/advanced-acceptance-state-20261029.json`恢复。
+
 ## 2026-10-29：高级功能新版已部署，人工验收进行中
 
 独立安装已从e5ce10d更新为2dd6fa7，回退演练、200文件及原输入法基线、双架构私有后端检查通过。Word/Edge基础、加载版本及Edge A/B/C Fixed提示/Tab/拼音/中断已通过；现等待应用暂停/恢复反馈，无真实模型，保留后端及测试页。直接右键菜单状态刷新缺失已修源码并通过双架构UI337项，尚未安装，**当前构建目录不同于安装**；下次更新重新准备包。之后依次验其余高级菜单及真实模型/故障恢复。Word仍仅普通输入。以[本轮部署记录](../../docs/ADVANCED_FEATURES_ACCEPTANCE_2026-10-29.md)及`output/LocalTest/advanced-acceptance-state-20261029.json`恢复；下面10月28日“尚未部署”为历史。

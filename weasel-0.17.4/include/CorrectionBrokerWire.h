@@ -5,7 +5,7 @@
 #include <string>
 
 namespace correction {
-enum class BrokerOperation : DWORD { Settings = 1, Check, Metadata, Health };
+enum class BrokerOperation : DWORD { Settings = 1, Check, Metadata, Health, Behavior };
 enum class BrokerStatus : DWORD {
   Ok, Unavailable, Disabled, SettingsChanged, Busy, InvalidRequest, ModelFailure
 };
