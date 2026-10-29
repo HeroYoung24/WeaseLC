@@ -46,15 +46,19 @@ inline bool DecodePausedApps(const std::vector<wchar_t>& data, std::vector<std::
   apps = std::move(result); return true;
 }
 inline bool ReadPausedApps(HKEY key, std::vector<std::wstring>& apps) {
-  DWORD bytes = 0;
-  auto status = RegGetValueW(key, nullptr, L"PausedAppsV1", RRF_RT_REG_MULTI_SZ | RRF_NOEXPAND, nullptr, nullptr, &bytes);
+  DWORD bytes = 0, type = 0;
+  // Decode the stored bytes, without RegGetValue's terminator normalization
+  // and capacity overestimate for strings. Still validate type and both NULs.
+  auto status = RegQueryValueExW(key, L"PausedAppsV1", nullptr, &type, nullptr, &bytes);
   if (status == ERROR_FILE_NOT_FOUND) { apps.clear(); return true; }
-  if (status != ERROR_SUCCESS || bytes % sizeof(wchar_t) || bytes < 4 ||
+  if (status != ERROR_SUCCESS || type != REG_MULTI_SZ || bytes % sizeof(wchar_t) || bytes < 4 ||
       bytes > ((kMaxAppName + 1) * kMaxPausedApps + 1) * sizeof(wchar_t)) return false;
   std::vector<wchar_t> data(bytes / sizeof(wchar_t));
-  const auto expected = bytes;
-  status = RegGetValueW(key, nullptr, L"PausedAppsV1", RRF_RT_REG_MULTI_SZ | RRF_NOEXPAND, nullptr, data.data(), &bytes);
-  return status == ERROR_SUCCESS && bytes == expected && DecodePausedApps(data, apps);
+  const auto capacity = bytes;
+  status = RegQueryValueExW(key, L"PausedAppsV1", nullptr, &type, reinterpret_cast<BYTE*>(data.data()), &bytes);
+  if (status != ERROR_SUCCESS || type != REG_MULTI_SZ || bytes > capacity || bytes < 4 || bytes % sizeof(wchar_t)) return false;
+  data.resize(bytes / sizeof(wchar_t));
+  return DecodePausedApps(data, apps);
 }
 inline bool LoadPausedApps(std::vector<std::wstring>& apps) {
   HKEY key = nullptr;

@@ -6,10 +6,12 @@
 #include <CorrectionMenuState.h>
 #include "LocalModelIdentity.h"
 #include "CorrectionBehaviorChecks.h"
+#include "CorrectionAppPolicyChecks.h"
 
 inline void CheckCorrectionThemes(const std::function<void(bool, const char*)>& check) {
   using namespace correction;
   CheckCorrectionBehavior(check);
+  CheckAppPolicyRegistry(check);
   HMENU menu = CreatePopupMenu();
   check(menu != nullptr, "native correction menu fixture created");
   if (menu) {
