@@ -1,8 +1,8 @@
 # 当前开发进度（2026-10-29）
 
-## 暂停读取修复Edge Fixed通过，等待仅暂停反馈
+## 暂停/恢复实机通过，等待原生模型窗口启动反馈
 
-已安装13ee957，回退/200文件/原版基线及双架构后端通过。用户确认Edge基础、初始菜单及A/B/C Fixed提示/实际Tab/拼音保留/下一次选词/中断恢复均正常；加载哈希及3次新鲜Shown/TabApplied已核对。现Fixed保持、无真实模型，后端/有界观察器保留，等待Edge仅暂停反馈：明确msedge.exe目标、勾选切换、旧提示消失、新输入不提示、普通输入正常，暂不恢复。暂停前外部名单仅chatgpt.exe，收到反馈后先核对确实增加msedge.exe，再单独验恢复。旧记录保留，不提前关停。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`，[专项记录](docs/APP_PAUSE_REGISTRY_READ_FIX_2026-10-29.md)顶部。下文“等待Fixed/Off/修复尚未部署”均为此前阶段。
+安装13ee957，Edge基础/初始菜单及A/B/C Fixed全部通过。用户反馈来回切换与应用选择正常，最终名单仅chatgpt.exe；又单独确认恢复后的新提示、Tab/拼音和继续输入正常。暂停/恢复人工功能通过，但未采到暂停中途名单快照，不编造。现Off/fixed0，后端保留，已打开安装版原生模型控制窗口10208，用户正在选择既有模型目录/PowerShell并启动、最小化，尚未反馈GUI就绪。日志已备份`output/LocalTest/NativeModelUi-20261029-162006`；**用户启动后保持该窗口及模型，不提前关闭或停止**，待实际模型和行为记录测试完成后收尾。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`，[专项记录](docs/APP_PAUSE_REGISTRY_READ_FIX_2026-10-29.md)顶部。下文等待暂停/Fixed状态为此前阶段。
 
 ## 已定位暂停名单读取根因；修复源码回归通过，尚未部署
 
