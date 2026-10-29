@@ -1,8 +1,8 @@
 # 当前开发进度（2026-10-29）
 
-## 行为反馈新版已安装，等待Word基础反馈
+## 行为反馈新版Word/Edge基础通过，Fixed及菜单目标待反馈
 
-用户完全退出残余Edge后重扫占用为空，已安装78f352f：`output/LocalTest/UpdatePatch-20261029-152226`。设置/六文件备份、实际回退演练、200文件与原输入法基线、双架构私有中文/标点检查全部通过。现Off/fixed0，无模型，独立后端运行，新空白Word已打开，等待普通输入/句号/中断/Shift及搜狗结果；不把旧安装的通过算作新版验收。之后核对宿主加载哈希，再Edge基础、菜单目标/暂停、固定提示与真实模型行为计数。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`，报告[最新部署续测](docs/BEHAVIOR_FEEDBACK_2026-10-29.md)。旧chatgpt.exe暂停记录保留，下一轮通过明确目标菜单或应用列表处理；下文“新源码未安装”是此前阶段。
+已安装78f352f：`output/LocalTest/UpdatePatch-20261029-152226`。备份、实际回退演练、200文件/原输入法基线及双架构后端通过。用户确认新版Word四项和Edge A/B/C基础均正常，两个宿主加载哈希已核对。现Fixed开启、无真实模型、专用后端及600秒无正文观察器保留，等待Edge A/B/C提示、实际Tab改文、拼音/中断结果；同时只查看语言栏是否显示目标[msedge.exe]、旧反馈两项是否消失，暂不点击暂停。不要提前关停本阶段。随后明确目标暂停/恢复，再真实模型行为计数。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`，报告[最新部署续测](docs/BEHAVIOR_FEEDBACK_2026-10-29.md)。旧chatgpt.exe暂停记录保留；下文“Off/新源码未安装/等待Word反馈”是此前阶段。
 
 ## 用户调整反馈方案：改为使用行为参考；源码完成，尚未部署
 

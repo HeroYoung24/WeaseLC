@@ -1,8 +1,8 @@
 # 本机独立测试
 
-## 行为版已安装，等待Word基础验收
+## 行为版基础已通过，等待Fixed与菜单验收
 
-78f352f已成套安装，回退演练、200文件/原输入法基线及双架构私有后端通过；现Off/无模型、独立后端运行，等待新空白Word普通输入反馈。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`，[报告](../../docs/BEHAVIOR_FEEDBACK_2026-10-29.md)顶部。以下“新行为源码未安装”均为此轮安装前的状态。
+78f352f已成套安装，回退/200文件/原输入法基线/双架构后端及Word、Edge A/B/C基础通过；现Fixed开启、无模型，等待A/B/C提示与菜单目标反馈，保留后端和页面。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`，[报告](../../docs/BEHAVIOR_FEEDBACK_2026-10-29.md)顶部。以下“新行为源码未安装”均为此轮安装前的状态。
 
 ## 2026-10-29后续：行为反馈源码待更新
 
