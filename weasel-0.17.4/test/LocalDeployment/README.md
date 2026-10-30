@@ -1,5 +1,9 @@
 # 本机独立测试
 
+## 2026-10-30标点保留与强调色已更新，人工验收进行中
+
+安装1be0b8d，双架构完整回归/后端、回退演练、200文件和原输入法基线通过，Edge基础用户通过；现Fixed、无模型，等待A/B/C标点/Tab/拼音结果，保留后端与测试页。[当前报告](../../docs/PUNCTUATION_PRESERVATION_2026-10-30.md)，恢复`output/LocalTest/punctuation-acceptance-state-20261030.json`。下方10月29日收尾及强调色未安装为历史。
+
 ## 2026-10-29本轮高级验收已收尾
 
 安装仍13ee957，详细已通过范围和缺口见[本轮汇总](../../docs/ADVANCED_UI_ACCEPTANCE_2026-10-29.md)。Off/fixed0、专用后端/观察器停、无模型；200文件/原版基线一致，用户窗口、权重保留，碧水/inline=false恢复，使用记录0组、学习开启。强调色优化已构建且354项通过但未部署，构建目录不等于安装。恢复`output/LocalTest/advanced-acceptance-state-20261029.json`和`advanced-round-final-state-20261029.json`；下文所有“等待/保持模型运行”均是历史。
