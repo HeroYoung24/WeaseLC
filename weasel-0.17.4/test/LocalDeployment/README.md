@@ -1,5 +1,9 @@
 # 本机独立测试
 
+## 2026-10-30当前：fc841a9已更新，等待A区实测
+
+包`UpdatePatch-20261030-104649`实际回退/更新、200文件/原版基线、双架构后端检查通过；当前Fixed、无模型，等待新Edge A区Tab时句号/拼音保留及下一次选词结果，保留后端和页面。新修复尚未实机通过，下面待释放/未安装为历史。[报告](../../docs/PUNCTUATION_PRESERVATION_2026-10-30.md)，恢复`output/LocalTest/punctuation-acceptance-state-20261030.json`。
+
 ## 2026-10-30标点实测失败；宿主写入修复待更新
 
 安装仍1be0b8d，基础通过但A/B/C按Tab瞬间丢标点，已Off/固定关闭/专用后端停止。补Chromium光标相对提交模型复现旧版可见丢尾部，锁内携带已核对尾部/重建范围的新源码双架构712项通过，未安装。下一步释放ChatGPT/Explorer/Edge旧DLL后更新新包，先只验A。[当前报告](../../docs/PUNCTUATION_PRESERVATION_2026-10-30.md)，恢复`output/LocalTest/punctuation-acceptance-state-20261030.json`。下方等待旧版测试及旧收尾为历史。
