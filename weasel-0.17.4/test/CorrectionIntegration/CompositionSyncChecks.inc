@@ -42,6 +42,58 @@ for (const InputScope scope : {IS_TEXT, IS_DEFAULT}) for (const bool composing :
   }
 }
 
+// A host may reconcile an untouched suffix when resuming composition. A
+// same-length corruption leaves word/preedit ranges intact: only a complete
+// source readback can detect it. Do not overwrite the host from an old snapshot.
+for (const bool composing : {false, true}) {
+  ComPtr<ITfTextInputProcessorEx> subject;
+  ComPtr<MemoryTextStore> host; host.Attach(new MemoryTextStore(IS_TEXT));
+  ComPtr<ITfDocumentMgr> document; ComPtr<ITfContext> context; TfEditCookie ignored = 0;
+  const bool made = factory->CreateInstance(nullptr, IID_ITfTextInputProcessorEx,
+      reinterpret_cast<void**>(subject.GetAddressOf())) == S_OK && manager->CreateDocumentMgr(&document) == S_OK &&
+      document->CreateContext(client, 0, static_cast<ITextStoreACP*>(host.Get()), &context, &ignored) == S_OK &&
+      document->Push(context.Get()) == S_OK;
+  check(made, "suffix reconciliation fault owns its document"); if (!made) continue;
+  auto editOwned = [&](std::function<HRESULT(TfEditCookie)> body) {
+    ComPtr<ITfEditSession> session; session.Attach(new AutomaticHostEdit(std::move(body))); HRESULT result = E_FAIL;
+    return context->RequestEditSession(client, session.Get(), TF_ES_SYNC | TF_ES_READWRITE, &result) == S_OK && result == S_OK;
+  };
+  Preferences options; options.mode = Mode::Local; options.timing = composing ? 0 : 1; options.automatic.enabled = true;
+  check(configure(subject.Get(), &options, client, L"") == S_OK &&
+      Commit(apply,subject.Get(),context.Get(),client,L"这里有错子。") &&
+      (!composing || editOwned([&](TfEditCookie ec){return preedit(subject.Get(),context.Get(),ec,L"ni");})) &&
+      inject(subject.Get(),&reply) == S_OK, "suffix fault starts with a valid hint and optional pinyin");
+  BOOL handled = FALSE; key(subject.Get(),context.Get(),VK_TAB,0,1,&handled);
+  unsigned locks = 0;
+  bool reconciled = false;
+  std::function<void()> reconcile;
+  reconcile = [&] {
+    if (++locks == (composing ? 3U : 1U)) {
+      const auto caret = host->SelectionEnd();
+      reconciled = host->UserReplace(5,6,L"，") == S_OK && host->UserSelect(caret,caret) == S_OK;
+    }
+    else host->onAfterLock = reconcile;
+  };
+  host->onAfterLock = reconcile;
+  key(subject.Get(),context.Get(),VK_TAB,0,0,&handled);
+  host->onAfterLock = {};
+  AutomaticDiagnostic observed;
+  const auto diagnostic = reinterpret_cast<HRESULT(WINAPI*)(ITfTextInputProcessorEx*,AutomaticDiagnostic*)>(
+      GetProcAddress(module,"WeaselProbeAutomaticDiagnostic"));
+  check(reconciled && handled && host->text == std::wstring(L"这里有错字，") + (composing ? L"ni" : L"") &&
+      diagnostic && diagnostic(subject.Get(),&observed) == S_OK && observed.stage == AutomaticStage::TabPersistenceUnconfirmed,
+      "changed suffix cannot be reported as successful correction or overwritten from a stale snapshot");
+  const auto behavior = reinterpret_cast<HRESULT(WINAPI*)(ITfTextInputProcessorEx*,DWORD*,DWORD)>(
+      GetProcAddress(module,"WeaselProbeAutomaticBehavior"));
+  DWORD votes[3]{};
+  check(behavior && behavior(subject.Get(),votes,0) == S_OK && votes[0] == 0,
+      "suffix reconciliation failure never trains a successful acceptance");
+  key(subject.Get(),context.Get(),VK_TAB,0,2,&handled);
+  check(Commit(apply,subject.Get(),context.Get(),client,L"你好") &&
+      host->text == std::wstring(L"这里有错字，你好"), "input remains usable after suffix verification failure");
+  invalidate(subject.Get()); document->Pop(TF_POPF_ALL);
+}
+
 // Faults at actual lock boundaries. Never queue a later write: source, preedit,
 // selection, focus and permissions must still match on each synchronous step.
 for (unsigned fault=0; fault<10; ++fault) {

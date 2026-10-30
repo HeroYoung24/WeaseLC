@@ -315,7 +315,8 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     }
 
     preferences.timing = 0;
-    for (const std::wstring sentence : {L"这里有错子.", L"这里有错子", L"这里有错子，，，", L"这里有错子。。。"}) {
+    for (const std::wstring sentence : {L"这里有错子。", L"这里有错子.", L"这里有错子", L"这里有错子，，，", L"这里有错子。。。",
+        L"这里有错子。！？", L"这里有错子。）”", L"这里有错子。后文🙂"}) {
       const auto beforeVariant = store->text;
       auto corrected = sentence; corrected.replace(3, 2, L"错字");
       check(configureNow() && Commit(apply, service.Get(), context.Get(), client, sentence) &&
@@ -360,6 +361,26 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     keys->OnKeyUp(context.Get(), VK_TAB, 0, &eaten);
     Commit(apply, service.Get(), context.Get(), client, L"你好");
     check(store->text == beforeShorter + L"这有错子。你好", "commit remains aligned after length change");
+
+    for (const auto& pinyin : {L"ni", L"nihaoshijie"}) {
+      const auto previous = store->text;
+      check(configureNow() && Commit(apply, service.Get(), context.Get(), client, L"这里有错子。"),
+          "whole-phrase reply prepares original punctuation");
+      auto wide = reply; auto& proposed = wide.items[0]; proposed.start = 0;
+      proposed.originalUnits = proposed.replacementUnits = 6;
+      wcscpy_s(proposed.original,L"这里有错子。"); wcscpy_s(proposed.replacement,L"这里有错字。");
+      auto dropsPeriod = wide; dropsPeriod.items[0].replacementUnits = 5;
+      wcscpy_s(dropsPeriod.items[0].replacement,L"这里有错字");
+      check(inject(service.Get(), &dropsPeriod) == S_FALSE, "frontend independently rejects a period-deleting reply");
+      check(edit([&](TfEditCookie ec){return preedit(service.Get(),context.Get(),ec,pinyin);}) &&
+          inject(service.Get(), &wide) == S_OK, "wide model phrase coexists with short or long pinyin");
+      keys->OnTestKeyDown(context.Get(), VK_TAB, 0, &eaten); keys->OnKeyDown(context.Get(), VK_TAB, 0, &eaten);
+      check(eaten && store->text == previous + L"这里有错字。" + pinyin,
+          "minimal word write preserves original full stop and the complete active pinyin");
+      keys->OnKeyUp(context.Get(), VK_TAB, 0, &eaten);
+      check(Commit(apply,service.Get(),context.Get(),client,L"你好") && store->text == previous + L"这里有错字。你好",
+          "candidate selection after wide phrase correction replaces pinyin exactly once");
+    }
 
     preferences.timing = 1; configureNow();
     const auto beforeFragments = store->text;

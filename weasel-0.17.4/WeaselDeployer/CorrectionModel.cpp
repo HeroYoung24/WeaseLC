@@ -9,6 +9,7 @@
 #define BOOST_CONTAINER_NO_LIB
 #include <boost/json/src.hpp>
 #include <CorrectionModel.h>
+#include <CorrectionSpellingEdit.h>
 
 #pragma comment(lib, "winhttp.lib")
 
@@ -65,6 +66,7 @@ bool ProtectedChange(const CheckRequest& request, const Suggestion& suggestion) 
   // prose rewriting. Model self-scores cannot override these deterministic rules.
   const auto& a = suggestion.original;
   const auto& b = suggestion.replacement;
+  if (!SpellingEdit(a, b)) return true;
   if (a.size() > 32 || b.size() > 32) return true;
   unsigned row[33] = {}, next[33] = {};
   for (std::size_t j = 0; j <= b.size(); ++j) row[j] = static_cast<unsigned>(j);

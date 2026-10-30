@@ -14,6 +14,7 @@
 #include <CorrectionDeployment.h>
 #include <CorrectionPipelineDiagnostics.h>
 #include <CorrectionAccessibility.h>
+#include <CorrectionSpellingEdit.h>
 
 namespace {
 constexpr ULONGLONG kLifetime = 10000;
@@ -482,7 +483,20 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
   if (!positionValid_) { Hide(); return S_FALSE; }
   if (!ready_ || !window_ || !IsWindowVisible(window_) || !preferences_.automatic.tab) return S_FALSE;
   const auto revision = revision_;
-  const auto item = item_;
+  auto item = item_;
+  const auto sourceText = text_;
+  correction::SpellingEditBounds bounds;
+  const std::wstring original(item.original, item.originalUnits), replacement(item.replacement, item.replacementUnits);
+  if (!correction::SpellingEdit(original, replacement, &bounds)) return S_FALSE;
+  // Keep the phrase in the hint, but do not rewrite matching context or trailing
+  // punctuation. Pure insertion/deletion retains its original anchored span.
+  if (bounds.original && bounds.replacement) {
+    item.start += static_cast<unsigned>(bounds.prefix);
+    item.originalUnits = static_cast<unsigned>(bounds.original);
+    item.replacementUnits = static_cast<unsigned>(bounds.replacement);
+    wcscpy_s(item.original, original.substr(bounds.prefix, bounds.original).c_str());
+    wcscpy_s(item.replacement, replacement.substr(bounds.prefix, bounds.replacement).c_str());
+  }
   com_ptr<ITfRange> change;
   com_ptr<ITfRange> target = range_;
   com_ptr<ITfContext> held = context_;
@@ -508,7 +522,7 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
     pending.range = change; pending.source = target; pending.selection = restore;
     pending.original.assign(item.original, item.originalUnits);
     pending.text.assign(item.replacement, item.replacementUnits);
-    pending.sourceText = text_; pending.preeditText = expectedPreedit_;
+    pending.sourceText = sourceText; pending.preeditText = expectedPreedit_;
     pending.offset = item.start;
     pending.generation = owner_->_GetEditGeneration();
     if (!composition || composition->GetRange(&pending.preedit) != S_OK || !pending.preedit ||
@@ -559,6 +573,10 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
       verification->range = change;
       verification->text.assign(item.replacement, item.replacementUnits);
       verification->generation = generation;
+      verification->source = target;
+      verification->sourceText = sourceText;
+      verification->sourceText.replace(item.start, item.originalUnits, item.replacement, item.replacementUnits);
+      verification->selection = restore;
     }
   }
   // An in-lock read may still be a TSF cache. Request() verifies again only
@@ -630,9 +648,11 @@ HRESULT AutomaticCorrection::ContinueWrite(TfEditCookie cookie, ITfContext* cont
   return context->SetSelection(cookie, 1, &selected);
 }
 HRESULT AutomaticCorrection::VerifyWrite(TfEditCookie cookie, ITfContext* context, const WriteVerification& verification) {
-  if (!verification.range || verification.text.empty() || verification.text.size() > 32 ||
+  if (!verification.range || !verification.source || !verification.selection ||
+      verification.text.empty() || verification.text.size() > 32 ||
       !owner_->_IsEditSessionCurrent(verification.generation) || !Focused(context) ||
-      !owner_->_CorrectionSafeScope(context, cookie, verification.range)) return S_FALSE;
+      !owner_->_CorrectionSafeScope(context, cookie, verification.range) ||
+      !owner_->_CorrectionSafeScope(context, cookie, verification.source)) return S_FALSE;
   if (verification.detached) {
     com_ptr<ITfRange> live;
     auto composition = owner_->_pComposition;
@@ -642,7 +662,16 @@ HRESULT AutomaticCorrection::VerifyWrite(TfEditCookie cookie, ITfContext* contex
         !Same(live, verification.preedit, cookie, TF_ANCHOR_END, TF_ANCHOR_END) ||
         !ReadExact(live, cookie, verification.preeditText)) return S_FALSE;
   }
-  const bool retained = ReadExact(verification.range, cookie, verification.text);
+  TF_SELECTION selected{}; ULONG count = 0;
+  const auto got = context->GetSelection(cookie, TF_DEFAULT_SELECTION, 1, &selected, &count);
+  com_ptr<ITfRange> selection; selection.Attach(selected.range);
+  // Verify the complete captured text AFTER resuming preedit, not just the
+  // changed word. Otherwise a dropped full stop could still train acceptance.
+  const bool retained = got == S_OK && count == 1 && selection && !selected.style.fInterimChar &&
+      Same(selection, verification.selection, cookie, TF_ANCHOR_START, TF_ANCHOR_START) &&
+      Same(selection, verification.selection, cookie, TF_ANCHOR_END, TF_ANCHOR_END) &&
+      ReadExact(verification.source, cookie, verification.sourceText) &&
+      ReadExact(verification.range, cookie, verification.text);
   if (!owner_->_IsEditSessionCurrent(verification.generation) || !Focused(context)) return S_FALSE;
   Report(retained ? correction::AutomaticStage::TabApplied : correction::AutomaticStage::TabPersistenceUnconfirmed);
   return retained ? S_OK : S_FALSE;
@@ -861,7 +890,8 @@ bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
             preferences_.local.sensitivity == 1 ? .80 : preferences_.local.sensitivity == 2 ? .65 : .90) || item.score > 1 ||
         item.start > text_.size() || item.originalUnits > text_.size() - item.start ||
         text_.compare(item.start, item.originalUnits, item.original, item.originalUnits) != 0 ||
-        std::wstring(item.original, item.originalUnits) == std::wstring(item.replacement, item.replacementUnits)) return false;
+        !correction::SpellingEdit(std::wstring(item.original, item.originalUnits),
+            std::wstring(item.replacement, item.replacementUnits))) return false;
   }
   checked_ = true;
   if (!reply.count) {

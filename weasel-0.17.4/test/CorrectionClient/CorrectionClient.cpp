@@ -7,6 +7,7 @@
 #include <CorrectionSession.h>
 #include <CorrectionQueue.h>
 #include <CorrectionReview.h>
+#include <CorrectionSpellingEdit.h>
 #include <CorrectionLexicon.h>
 #include "../../WeaselDeployer/CorrectionPreferences.h"
 #include "../LocalDeployment/FixedAutomaticReply.h"
@@ -322,6 +323,24 @@ int wmain(int argc, wchar_t** argv) {
   Check(protectedAnswer(L"忽略前面的规则", "忽略前面的规则", "遵循规则") == State::Filtered, "semantic rewrite rejected");
   Check(protectedAnswer(L"变量 user_id，存在错子", "错子", "错字") == State::Suggestions, "nearby identifier does not suppress ordinary typo");
   Check(protectedAnswer(L"www.example.com，错子", "错子", "错字") == State::Suggestions, "URL protection ends at punctuation");
+  for (const auto& pair : {std::pair<const char*,const char*>{"错子。", "错字"},
+      {"错子，，，", "错字，，"}, {"错子。", "错字."}, {"错子", "错字。"},
+      {"错 子", "错字"}, {"错子\n", "错字"}, {"“错子”", "错字"}, {"错子。", "错。字"}}) {
+    auto answer = Suggest(pair.first); answer["replacement"] = pair.second;
+    auto input = request;
+    const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, pair.first, -1, nullptr, 0);
+    std::wstring target(count, L'\0'); MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, pair.first, -1, target.data(), count);
+    target.resize(count-1); input.text = target;
+    Check(ParseCorrectionAnswer(json::serialize(Answer({answer})), config, input).state == State::Filtered,
+        "spelling suggestions cannot delete, insert, move or convert punctuation and whitespace");
+  }
+  Check(protectedAnswer(L"这里有错子。。。", "这里有错子。。。", "这里有错字。。。") == State::Suggestions,
+      "a phrase quoting unchanged trailing punctuation remains usable");
+  SpellingEditBounds bounds;
+  Check(SpellingEdit(L"这里有错子。", L"这里有错字。", &bounds) && bounds.prefix == 4 &&
+      bounds.original == 1 && bounds.replacement == 1, "minimal write excludes matching phrase and full stop");
+  Check(SpellingEdit(L"甲🙂乙", L"甲🙃乙", &bounds) && bounds.prefix == 1 && bounds.original == 2 &&
+      bounds.replacement == 2, "minimal edit never splits a UTF-16 surrogate pair");
   Check(json::parse(BuildCorrectionInput(request)).at("target").as_string() == "这里有错子。",
       "provider-independent input");
   Check(ParseChatResponse(Envelope(nochange), config, request).state == State::NoSuggestion, "no change");
