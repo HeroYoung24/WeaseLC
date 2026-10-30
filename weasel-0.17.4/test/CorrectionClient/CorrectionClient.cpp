@@ -341,6 +341,36 @@ int wmain(int argc, wchar_t** argv) {
       bounds.original == 1 && bounds.replacement == 1, "minimal write excludes matching phrase and full stop");
   Check(SpellingEdit(L"甲🙂乙", L"甲🙃乙", &bounds) && bounds.prefix == 1 && bounds.original == 2 &&
       bounds.replacement == 2, "minimal edit never splits a UTF-16 surrogate pair");
+  for (const auto* sentence : {L"这里有错子，，。，。",L"这里有错子，，，。，",L"这里有错子，，，，，",L"这里有错子，，。。，。"}) {
+    auto automaticRequest=request; automaticRequest.source=Source::CommittedText; automaticRequest.text=sentence;
+    const std::string expected=automaticRequest.text.back()==L'，' ? "这里有错子，" : "这里有错子。";
+    Check(json::parse(BuildCorrectionInput(automaticRequest)).at("target").as_string()==expected,
+        "automatic model view collapses terminal runs to their final comma or stop");
+    const auto answer=ParseCorrectionAnswer(json::serialize(Answer({Suggest()})),config,automaticRequest);
+    Check(answer.state==State::Suggestions && answer.suggestions[0].start==3 && answer.suggestions[0].original==L"错子",
+        "model-view spelling offsets map to the unchanged original lexical prefix");
+    SuggestionReview originalReview; std::wstring output;
+    auto corrected=automaticRequest.text; corrected.replace(3,2,L"错字");
+    Check(originalReview.Load(automaticRequest,answer) && originalReview.Apply(0,automaticRequest.text,automaticRequest.version,output) && output==corrected,
+        "review applies only spelling while preserving the entire original mixed punctuation run");
+    auto low=ParseCorrectionAnswer(json::serialize(Answer({Suggest("错子",.85)})),config,automaticRequest);
+    Check(low.state==State::Filtered,"normalizing punctuation never lowers the frozen confidence threshold");
+    if (automaticRequest.text.back()==L'。') {
+      auto quoted=Suggest("这里有错子。"); quoted["replacement"]="这里有错字。";
+      const auto mapped=ParseCorrectionAnswer(json::serialize(Answer({quoted})),config,automaticRequest);
+      Check(mapped.state==State::Suggestions && mapped.suggestions[0].original==L"这里有错子" && mapped.suggestions[0].replacement==L"这里有错字",
+          "unchanged synthetic boundary in quoted context is excluded from original-document edits");
+      quoted["replacement"]="这里有错字";
+      Check(ParseCorrectionAnswer(json::serialize(Answer({quoted})),config,automaticRequest).state==State::Filtered,
+          "suggested punctuation deletion stays prohibited after normalization");
+    }
+  }
+  auto internal=request; internal.source=Source::CommittedText; internal.text=L"这里，。有错子";
+  Check(json::parse(BuildCorrectionInput(internal)).at("target").as_string()=="这里，。有错子",
+      "internal punctuation is never normalized or removed");
+  auto manual=request; manual.text=L"这里有错子，，。";
+  Check(json::parse(BuildCorrectionInput(manual)).at("target").as_string()=="这里有错子，，。",
+      "manual input remains byte-for-byte outside the automatic model projection");
   Check(json::parse(BuildCorrectionInput(request)).at("target").as_string() == "这里有错子。",
       "provider-independent input");
   Check(ParseChatResponse(Envelope(nochange), config, request).state == State::NoSuggestion, "no change");

@@ -1,5 +1,7 @@
 # 本机独立测试
 
+**用户要求暂停，已收尾：** 纠错/学习Off，模型及专用后端停止，安装仍fc841a9；新连续性/模型视图源码未部署。[恢复入口](../../docs/EDITING_CONTINUITY_2026-10-30.md)，下方保持模型运行的指令为历史。
+
 **当前真实4B阶段：** 已就绪并核对身份/health200，Model开启、Fixed0，等待合成测试反馈。模型窗口保持最小化、模型与后端/页面保留，不提前停止。恢复`output/LocalTest/punctuation-acceptance-state-20261030.json`；下面Off/等待就绪为历史。
 
 **最新阶段：** fc841a9的Fixed A/B/C/连续标点/长拼音/恢复及A撤销重做人工通过；现Off，原生模型运行窗口已打开，等待既有冻结4B就绪，不要提前切Model或关闭该窗口。随后真实模型及强调色/恢复收尾，下面等待A/B/C为历史。[报告](../../docs/PUNCTUATION_PRESERVATION_2026-10-30.md)，恢复JSON同前。

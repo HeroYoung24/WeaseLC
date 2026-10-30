@@ -107,7 +107,7 @@ class AutomaticHostEdit final : public ITfEditSession {
   std::function<HRESULT(TfEditCookie)> body_;
 };
 static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool local, const ModelConfig* brokerModel = nullptr, bool hostReview = false,
-                               bool memoryReview = false) {
+                               bool memoryReview = false, bool continuityReview = false) {
   auto handler = AddVectoredExceptionHandler(1, AutomaticException);
   struct Cleanup { void* handler; ~Cleanup() { if (handler) RemoveVectoredExceptionHandler(handler); } } cleanup{handler};
   std::cout << std::unitbuf;
@@ -150,6 +150,17 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     check(manager->Deactivate() == S_OK, "memory-only host deactivated without TIP activation");
     std::cout << "Memory analysis checks = " << checks << ", failures = " << failed << '\n';
     return !failed;
+  }
+  if (hostReview || continuityReview) {
+    #include "EditingContinuityChecks.inc"
+    if (continuityReview) {
+      #include "CompositionSyncChecks.inc"
+      #include "UndoRedoChecks.inc"
+      invalidate(service.Get()); service.Reset();
+      check(manager->Deactivate() == S_OK,"editing continuity deactivates only its synthetic manager");
+      std::cout << "Editing continuity checks = " << checks << ", failures = " << failed << '\n';
+      return !failed;
+    }
   }
   const HWND foreground = GetForegroundWindow();
   const InputScope fieldScopes[] = {IS_TEXT, IS_TEXT, IS_PASSWORD, IS_DEFAULT, IS_PRIVATE,

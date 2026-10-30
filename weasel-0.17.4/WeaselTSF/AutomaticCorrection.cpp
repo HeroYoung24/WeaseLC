@@ -291,10 +291,22 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
       window_ && IsWindowVisible(window_) && Focused(context) &&
       std::any_of(text.begin(), text.end(), [](wchar_t c) { return iswalnum(c) || (c >= 0x3400 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff); }))
     RecordBehavior(exposure_, correction::BehaviorOutcome::Ignored);
-  Cancel();
+  const bool retainSuggestion = previous && !accumulated.empty() && ready_ && checked_ &&
+      !scopeWaitUntil_ && !carriedDeadline && !process_ && !brokerCall_.Active() && !text.empty() &&
+      text.find_first_not_of(L"。，.,") == std::wstring::npos;
+  if (retainSuggestion) {
+    // This is an adjacent, range-verified commit from this IME. Appending only
+    // commas/stops does not alter an already verified spelling pair. Keep the
+    // suggestion/ticket; rebind caret/preedit and validate the extended source.
+    expectedSelection_.Release(); expectedPreedit_.clear(); expectedComposing_ = false;
+    positionValid_ = false;
+  } else Cancel();
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
-  if (!testing_ || testingBroker_)
+  if (!retainSuggestion && (!testing_ || testingBroker_))
+#else
+  if (!retainSuggestion)
 #endif
+  {
     if (!LoadBrokerPreferences()) {
       preferences_ = correction::Preferences{};
 #ifdef WEASELC_LOCAL_TEST_BUILD
@@ -304,6 +316,10 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
     }
 #ifdef WEASELC_LOCAL_TEST_BUILD
     else { preferenceRead.stage = correction::PreferencesStage::Ready; preferenceRead.error = ERROR_SUCCESS; }
+#endif
+  }
+#ifdef WEASELC_LOCAL_TEST_BUILD
+  if (retainSuggestion) { preferenceRead.stage = correction::PreferencesStage::Ready; preferenceRead.error = ERROR_SUCCESS; }
 #endif
 #ifdef WEASELC_LOCAL_TEST_BUILD
   gate.source = static_cast<DWORD>(preferenceRead.stage);
@@ -877,7 +893,10 @@ bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, boo
         (previousEscape.shown && correction::SameIdentity(previousContext, context) &&
          GetTickCount64() <= pendingEscapeUntil_));
     if (!up && (key == VK_ESCAPE || key == VK_LEFT || key == VK_RIGHT || key == VK_HOME ||
-        key == VK_END || key == VK_DELETE || key == VK_BACK || key == VK_SHIFT || key == VK_CONTROL || key == VK_MENU)) Cancel();
+        key == VK_END || key == VK_DELETE || key == VK_SHIFT || key == VK_CONTROL || key == VK_MENU)) Cancel();
+    // Backspace can edit only the current Rime preedit. Do not discard a valid
+    // earlier suggestion at the query stage. RecordInput rebinds the preedit;
+    // actual committed-text deletion still fails Observe/Validate before Tab.
     else if (!up && context_ && !Request(false, context)) Cancel();
     if (explicitEscape) {
       const auto vote = shown.shown ? shown : previousEscape;

@@ -61,6 +61,17 @@ bool ValidRequest(const CheckRequest& request) {
       !request.text.empty() && ValidText(request.text, kMaxTargetUnits) &&
       ValidText(request.before, kMaxNearbyUnits) && ValidText(request.after, kMaxNearbyUnits);
 }
+CheckRequest InferenceRequest(const CheckRequest& request) {
+  auto input = request;
+  if (request.source != Source::CommittedText || request.text.empty()) return input;
+  const auto lastWord = request.text.find_last_not_of(L"。，.,");
+  // Collapse only a repeated terminal comma/stop run in the model's view.
+  // Prefix offsets and the last boundary mark retain their meaning. Original
+  // document text remains the authority for review, IPC, validation and Tab.
+  if (lastWord != std::wstring::npos && request.text.size()-lastWord-1 > 1)
+    input.text = request.text.substr(0,lastWord+1) + request.text.back();
+  return input;
+}
 bool ProtectedChange(const CheckRequest& request, const Suggestion& suggestion) {
   // This checker handles short Chinese spelling corrections, not code style or
   // prose rewriting. Model self-scores cannot override these deterministic rules.
@@ -347,7 +358,8 @@ const char* CorrectionInstructions() {
 }
 std::string BuildCorrectionInput(const CheckRequest& request) {
   if (!ValidRequest(request)) throw std::runtime_error("input");
-  json::object input{{"target", Utf8(request.text)}, {"before", Utf8(request.before)},
+  const auto view = InferenceRequest(request);
+  json::object input{{"target", Utf8(view.text)}, {"before", Utf8(request.before)},
       {"after", Utf8(request.after)}, {"source", static_cast<unsigned>(request.source)}};
   return json::serialize(input);
 }
@@ -382,6 +394,7 @@ CheckResult ParseCorrectionAnswer(const std::string& content, const ModelConfig&
                                   const CheckRequest& request) {
   auto result = Tagged(State::InvalidResponse, request);
   if (content.size() > kMaxResponseBytes || !ValidRequest(request)) return result;
+  const auto view = InferenceRequest(request);
   try {
     json::parse_options options; options.max_depth = 16;
     auto answer = json::parse(content, {}, options).as_object();
@@ -402,17 +415,30 @@ CheckResult ParseCorrectionAnswer(const std::string& content, const ModelConfig&
           !ValidText(suggestion.original, kMaxTargetUnits) ||
           !ValidText(suggestion.replacement, 256) || !ValidText(suggestion.reason, 256) ||
           !std::isfinite(suggestion.score) || suggestion.score < 0 || suggestion.score > 1) return result;
-      suggestion.start = request.text.find(suggestion.original);
+      suggestion.start = view.text.find(suggestion.original);
       if (suggestion.start == std::wstring::npos ||
-          request.text.find(suggestion.original, suggestion.start + 1) != std::wstring::npos) return result;
+          view.text.find(suggestion.original, suggestion.start + 1) != std::wstring::npos) return result;
       for (const auto& other : checked)
         if (suggestion.start < other.start + other.original.size() &&
             other.start < suggestion.start + suggestion.original.size()) return result;
       checked.emplace_back(std::move(suggestion));
     }
-    for (auto& suggestion : checked)
-      if (suggestion.score >= EffectiveThreshold(config) && !ProtectedChange(request, suggestion))
-        result.suggestions.emplace_back(std::move(suggestion));
+    for (auto& suggestion : checked) {
+      if (suggestion.score < EffectiveThreshold(config) || ProtectedChange(view,suggestion)) continue;
+      if (request.text.compare(suggestion.start,suggestion.original.size(),suggestion.original) != 0) {
+        SpellingEditBounds bounds;
+        if (!SpellingEdit(suggestion.original,suggestion.replacement,&bounds)) continue;
+        // A model may quote the compressed boundary in otherwise unchanged
+        // context. Remove matching suffix only; never map the artificial mark
+        // into an arbitrary original document offset or relax text protection.
+        suggestion.original.resize(bounds.prefix+bounds.original);
+        suggestion.replacement.resize(bounds.prefix+bounds.replacement);
+      }
+      if (suggestion.original.empty() || suggestion.replacement.empty() ||
+          request.text.compare(suggestion.start,suggestion.original.size(),suggestion.original) != 0 ||
+          request.text.find(suggestion.original,suggestion.start+1) != std::wstring::npos || ProtectedChange(request,suggestion)) continue;
+      result.suggestions.emplace_back(std::move(suggestion));
+    }
     result.state = result.suggestions.empty() ? State::Filtered : State::Suggestions;
     return result;
   } catch (...) { return result; }
