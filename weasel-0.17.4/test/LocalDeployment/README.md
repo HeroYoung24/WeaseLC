@@ -1,8 +1,8 @@
 # 本机独立测试
 
-## 2026-10-30标点保留与强调色已更新，人工验收进行中
+## 2026-10-30标点实测失败；宿主写入修复待更新
 
-安装1be0b8d，双架构完整回归/后端、回退演练、200文件和原输入法基线通过，Edge基础用户通过；现Fixed、无模型，等待A/B/C标点/Tab/拼音结果，保留后端与测试页。[当前报告](../../docs/PUNCTUATION_PRESERVATION_2026-10-30.md)，恢复`output/LocalTest/punctuation-acceptance-state-20261030.json`。下方10月29日收尾及强调色未安装为历史。
+安装仍1be0b8d，基础通过但A/B/C按Tab瞬间丢标点，已Off/固定关闭/专用后端停止。补Chromium光标相对提交模型复现旧版可见丢尾部，锁内携带已核对尾部/重建范围的新源码双架构712项通过，未安装。下一步释放ChatGPT/Explorer/Edge旧DLL后更新新包，先只验A。[当前报告](../../docs/PUNCTUATION_PRESERVATION_2026-10-30.md)，恢复`output/LocalTest/punctuation-acceptance-state-20261030.json`。下方等待旧版测试及旧收尾为历史。
 
 ## 2026-10-29本轮高级验收已收尾
 

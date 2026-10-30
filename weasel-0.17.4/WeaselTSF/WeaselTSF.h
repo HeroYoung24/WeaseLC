@@ -139,6 +139,11 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   void ProbeCaptureCommit(ITfContext*, TfEditCookie, const std::wstring&);
   void ProbeCancelCapture();
+  HRESULT ProbeCompositionRange(ITfRange** range) {
+    if (!range) return E_POINTER;
+    *range = nullptr;
+    return _pComposition ? _pComposition->GetRange(range) : S_FALSE;
+  }
   void ProbeSetEditClient(TfClientId client) {
     if (!_pThreadMgr) _tfClientId = client;
   }

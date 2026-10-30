@@ -30,6 +30,7 @@ static const GUID c_guidProfile = WEASELC_TEST_PROFILE;
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticEnvironment=_WeaselProbeAutomaticEnvironment@12")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticKey=_WeaselProbeAutomaticKey@24")
 #pragma comment(linker, "/EXPORT:WeaselProbeAutomaticPreedit=_WeaselProbeAutomaticPreedit@16")
+#pragma comment(linker, "/EXPORT:WeaselProbeAutomaticPreeditOptions=_WeaselProbeAutomaticPreeditOptions@24")
 // WINAPI exports are decorated on x86. Give the diagnostic the same stable
 // names as x64; these aliases are absent from ordinary Weasel builds.
 #pragma comment(linker, "/EXPORT:WeaselProbeGetActivationStage=_WeaselProbeGetActivationStage@0")

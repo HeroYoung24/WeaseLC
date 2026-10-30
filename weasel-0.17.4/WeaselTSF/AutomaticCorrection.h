@@ -32,7 +32,7 @@ class AutomaticCorrection {
     std::wstring original, sourceText, preeditText;
     ULONGLONG revision = 0;
     size_t offset = 0;
-    bool detached = false, written = false, resumed = false;
+    bool detached = false, acknowledged = false, written = false, resumed = false;
   };
   HRESULT Edit(TfEditCookie, ITfContext*, bool apply, bool* applied, WriteVerification*);
   HRESULT VerifyWrite(TfEditCookie, ITfContext*, const WriteVerification&);
@@ -78,6 +78,7 @@ class AutomaticCorrection {
   bool EnsureWindow();
   bool Validate(TfEditCookie, ITfContext*);
   bool Request(bool apply, ITfContext*);
+  HRESULT WriteWordAndTail(TfEditCookie, ITfContext*, WriteVerification&, bool* applied = nullptr);
   bool StartWorker();
   void StopWorker();
   void DiscardSuggestion(bool completed);

@@ -122,5 +122,31 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeInvalidateEditSession
   static_cast<WeaselTSF*>(service)->_InvalidateEditSessions();
   return S_OK;
 }
+
+extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticPreeditOptions(
+    ITfTextInputProcessorEx* service, ITfContext* context, TfEditCookie cookie,
+    const WCHAR* text, BOOL inlinePreedit, LONG caretOffset) {
+  if (!service || !context || !text || (inlinePreedit != FALSE && inlinePreedit != TRUE) || caretOffset < 0)
+    return E_INVALIDARG;
+  auto* tsf = static_cast<WeaselTSF*>(service);
+  tsf->_BindEditContext(context);
+  ServerResponse response; response.config.inline_preedit = inlinePreedit; response.status.composing = TRUE;
+  auto content = std::make_shared<weasel::Context>(); content->preedit.str = text; response.context = content;
+  const auto hr = tsf->_ApplyCompositionResponse(cookie,context,response);
+  if (hr != S_OK) return hr;
+  com_ptr<ITfRange> range;
+  if (tsf->ProbeCompositionRange(&range) != S_OK || !range) return E_FAIL;
+  WCHAR buffer[1025]{}; ULONG units = 0;
+  if (range->GetText(cookie,0,buffer,_countof(buffer),&units) != S_OK || static_cast<ULONG>(caretOffset) > units) return E_INVALIDARG;
+  LONG moved = 0;
+  if (range->Collapse(cookie,TF_ANCHOR_START) != S_OK ||
+      range->ShiftEnd(cookie,caretOffset,&moved,nullptr) != S_OK || moved != caretOffset ||
+      range->Collapse(cookie,TF_ANCHOR_END) != S_OK) return E_FAIL;
+  TF_SELECTION selection{}; selection.range = range; selection.style.ase = TF_AE_NONE;
+  if (context->SetSelection(cookie,1,&selection) != S_OK) return E_FAIL;
+  tsf->Automatic().RecordInput(context,cookie); tsf->Automatic().Position(RECT{100,100,110,120});
+  SecureZeroMemory(buffer,sizeof(buffer));
+  return S_OK;
+}
 #endif
 

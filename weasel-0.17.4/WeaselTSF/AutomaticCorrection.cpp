@@ -25,7 +25,7 @@ bool Same(ITfRange* a, ITfRange* b, TfEditCookie cookie, TfAnchor aa, TfAnchor b
                                 : a->CompareEnd(cookie, b, bb, &difference)) == S_OK && !difference;
 }
 bool ReadExact(ITfRange* range, TfEditCookie cookie, const std::wstring& expected) {
-  WCHAR buffer[1025] = {};
+  WCHAR buffer[2049] = {};  // bounded source plus a bounded preedit prefix
   ULONG units = 0;
   const HRESULT hr = range->GetText(cookie, 0, buffer, _countof(buffer), &units);
   const bool equal = hr == S_OK && units == expected.size() &&
@@ -488,8 +488,8 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
   correction::SpellingEditBounds bounds;
   const std::wstring original(item.original, item.originalUnits), replacement(item.replacement, item.replacementUnits);
   if (!correction::SpellingEdit(original, replacement, &bounds)) return S_FALSE;
-  // Keep the phrase in the hint, but do not rewrite matching context or trailing
-  // punctuation. Pure insertion/deletion retains its original anchored span.
+  // Identify the minimal spelling delta while keeping the phrase in the hint.
+  // WriteWordAndTail separately preserves the host's caret-relative interval.
   if (bounds.original && bounds.replacement) {
     item.start += static_cast<unsigned>(bounds.prefix);
     item.originalUnits = static_cast<unsigned>(bounds.original);
@@ -497,6 +497,7 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
     wcscpy_s(item.original, original.substr(bounds.prefix, bounds.original).c_str());
     wcscpy_s(item.replacement, replacement.substr(bounds.prefix, bounds.replacement).c_str());
   }
+  if (sourceText.size() - item.originalUnits + item.replacementUnits > correction::kMaxTargetUnits) return S_FALSE;
   com_ptr<ITfRange> change;
   com_ptr<ITfRange> target = range_;
   com_ptr<ITfContext> held = context_;
@@ -544,44 +545,90 @@ HRESULT AutomaticCorrection::Edit(TfEditCookie cookie, ITfContext* context, bool
     Report(correction::AutomaticStage::TabRestoreUnconfirmed);
     return S_OK;
   }
-  // No preedit: retain the existing single-write path, with a temporary TSF
-  // correction composition and a separate post-lock verification.
-  const auto generation = owner_->_GetEditGeneration();
+  // No preedit: use the same caret-relative tail-preserving write. The browser
+  // can delete from its caret back to our replacement start at lock exit.
+  WriteVerification pending;
+  pending.range = change; pending.source = target; pending.selection = restore;
+  pending.original.assign(item.original,item.originalUnits);
+  pending.text.assign(item.replacement,item.replacementUnits);
+  pending.sourceText = sourceText; pending.offset = item.start;
+  pending.generation = owner_->_GetEditGeneration();
   Cancel();
-  const auto writeRevision = revision_;
-  // A host may reenter us while changing composition properties. No write may
-  // escape the document/lifecycle checked before that callback.
-  if (!Focused(context) || revision_ != writeRevision || !owner_->_IsEditSessionCurrent(generation)) return S_FALSE;
-  const HRESULT hr = change->SetText(cookie, TF_ST_CORRECTION, item.replacement, item.replacementUnits);
-  // An acknowledged write consumes this key once, even if verification fails:
-  // retrying or falling through could duplicate a write already made by a host.
-  // This flag is NOT evidence that the host retained the replacement.
-  if (SUCCEEDED(hr) && applied) *applied = true;
-  bool written = false;
-  if (SUCCEEDED(hr)) {
-    Report(correction::AutomaticStage::TabWriteUnconfirmed);
-    written = hr == S_OK && ReadExact(change, cookie, std::wstring(item.replacement, item.replacementUnits));
-    if (written) Report(correction::AutomaticStage::TabRestoreUnconfirmed);
-  }
-  if (FAILED(hr)) return hr;
-  selection.range = restore;
-  const HRESULT restored = owner_->_IsEditSessionCurrent(generation) ? context->SetSelection(cookie, 1, &selection) : TF_E_DISCONNECTED;
-  if (written && restored == S_OK && owner_->_IsEditSessionCurrent(generation) && Focused(context) &&
-      ReadExact(change, cookie, std::wstring(item.replacement, item.replacementUnits))) {
+  pending.revision = revision_;
+  const auto hr = WriteWordAndTail(cookie,context,pending,applied);
+  if (pending.acknowledged && applied) *applied = true;
+  if (hr == S_OK && pending.written) {
     Report(correction::AutomaticStage::TabPersistenceUnconfirmed);
-    if (verification) {
-      verification->range = change;
-      verification->text.assign(item.replacement, item.replacementUnits);
-      verification->generation = generation;
-      verification->source = target;
-      verification->sourceText = sourceText;
-      verification->sourceText.replace(item.start, item.originalUnits, item.replacement, item.replacementUnits);
-      verification->selection = restore;
-    }
+    if (verification) *verification = std::move(pending);
   }
-  // An in-lock read may still be a TSF cache. Request() verifies again only
-  // AFTER this write session returns, under a separate synchronous READ lock.
-  return S_OK;
+  return hr;
+}
+
+HRESULT AutomaticCorrection::WriteWordAndTail(TfEditCookie cookie, ITfContext* context, WriteVerification& pending, bool* applied) {
+  if (!pending.range || !pending.source || !pending.selection || owner_->_IsComposing() ||
+      !owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision || !Focused(context)) return S_FALSE;
+  if (pending.offset > pending.sourceText.size() || pending.original.size() > pending.sourceText.size()-pending.offset ||
+      !ReadExact(pending.source,cookie,pending.sourceText) || !ReadExact(pending.range,cookie,pending.original)) return S_FALSE;
+  std::wstring prefix;
+  if (pending.detached) {
+    com_ptr<ITfRange> beforeCaret;
+    WCHAR buffer[1025]{}; ULONG units = 0;
+    if (!pending.preedit || pending.preedit->Clone(&beforeCaret) != S_OK || !beforeCaret ||
+        beforeCaret->ShiftEndToRange(cookie,pending.selection,TF_ANCHOR_START) != S_OK ||
+        beforeCaret->GetText(cookie,0,buffer,_countof(buffer),&units) != S_OK || units > 1024) return S_FALSE;
+    prefix.assign(buffer,units); SecureZeroMemory(buffer,sizeof(buffer));
+    if (prefix.size() > pending.preeditText.size() || pending.preeditText.compare(0,prefix.size(),prefix) != 0 ||
+        (prefix.size() < pending.preeditText.size() && pending.preeditText[prefix.size()] >= 0xdc00 &&
+         pending.preeditText[prefix.size()] <= 0xdfff)) return S_FALSE;
+  } else if (!Same(pending.source,pending.selection,cookie,TF_ANCHOR_END,TF_ANCHOR_START)) return S_FALSE;
+  com_ptr<ITfRange> write;
+  if (pending.range->Clone(&write) != S_OK || !write ||
+      write->ShiftEndToRange(cookie,pending.selection,TF_ANCHOR_START) != S_OK) return S_FALSE;
+  const auto originalTail = pending.sourceText.substr(pending.offset) + prefix;
+  if (!ReadExact(write,cookie,originalTail)) return S_FALSE;
+  auto replacementTail = originalTail;
+  replacementTail.replace(0,pending.original.size(),pending.text);
+  auto sourceAfter = pending.sourceText;
+  sourceAfter.replace(pending.offset,pending.original.size(),pending.text);
+  if (sourceAfter.size() > correction::kMaxTargetUnits || replacementTail.size() > 2048 ||
+      !owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision || !Focused(context)) return S_FALSE;
+  // A Chromium SetText commit deletes the already-committed interval from its
+  // caret back to the replacement start. Supply that SAME bounded interval,
+  // including freshly checked punctuation/text/preedit prefix. Only the word
+  // differs. No clipboard, synthetic keys, stale whole-document restore or
+  // Rime replay. Existing anchors inside a replaced interval must be rebuilt.
+  const auto hr = write->SetText(cookie,TF_ST_CORRECTION,replacementTail.data(),static_cast<LONG>(replacementTail.size()));
+  pending.acknowledged = SUCCEEDED(hr);
+  if (pending.acknowledged && applied) *applied = true;  // Before any post-write COM callback/allocation can throw.
+  if (hr != S_OK) return hr;
+  Report(correction::AutomaticStage::TabWriteUnconfirmed);
+  if (!owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision || !Focused(context) ||
+      !ReadExact(write,cookie,replacementTail)) return S_FALSE;
+  pending.written = true;
+  com_ptr<ITfRange> source, word, preedit, caret;
+  LONG moved = 0;
+  if (write->Clone(&source) != S_OK || !source || source->Collapse(cookie,TF_ANCHOR_START) != S_OK ||
+      source->ShiftStart(cookie,-static_cast<LONG>(pending.offset),&moved,nullptr) != S_OK ||
+      moved != -static_cast<LONG>(pending.offset) || source->Collapse(cookie,TF_ANCHOR_START) != S_OK ||
+      source->ShiftEnd(cookie,static_cast<LONG>(sourceAfter.size()),&moved,nullptr) != S_OK ||
+      moved != static_cast<LONG>(sourceAfter.size()) || !ReadExact(source,cookie,sourceAfter)) return S_FALSE;
+  if (source->Clone(&word) != S_OK || !word ||
+      word->ShiftStart(cookie,static_cast<LONG>(pending.offset),&moved,nullptr) != S_OK || moved != static_cast<LONG>(pending.offset) ||
+      word->Collapse(cookie,TF_ANCHOR_START) != S_OK ||
+      word->ShiftEnd(cookie,static_cast<LONG>(pending.text.size()),&moved,nullptr) != S_OK || moved != static_cast<LONG>(pending.text.size()) ||
+      !ReadExact(word,cookie,pending.text)) return S_FALSE;
+  if (source->Clone(&preedit) != S_OK || !preedit || preedit->Collapse(cookie,TF_ANCHOR_END) != S_OK ||
+      preedit->ShiftEnd(cookie,static_cast<LONG>(pending.preeditText.size()),&moved,nullptr) != S_OK ||
+      moved != static_cast<LONG>(pending.preeditText.size()) || !ReadExact(preedit,cookie,pending.preeditText) ||
+      preedit->Clone(&caret) != S_OK || !caret || caret->Collapse(cookie,TF_ANCHOR_START) != S_OK ||
+      caret->ShiftEnd(cookie,static_cast<LONG>(prefix.size()),&moved,nullptr) != S_OK || moved != static_cast<LONG>(prefix.size()) ||
+      caret->Collapse(cookie,TF_ANCHOR_END) != S_OK) return S_FALSE;
+  if (!owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision || !Focused(context)) return S_FALSE;
+  pending.range = word; pending.source = source; pending.sourceText = std::move(sourceAfter);
+  pending.preedit = preedit; pending.selection = caret;
+  TF_SELECTION selection{}; selection.range = caret; selection.style.ase = TF_AE_NONE;
+  Report(correction::AutomaticStage::TabRestoreUnconfirmed);
+  return context->SetSelection(cookie,1,&selection);
 }
 HRESULT AutomaticCorrection::ContinueWrite(TfEditCookie cookie, ITfContext* context,
                                            WriteVerification& pending, bool resume) {
@@ -630,22 +677,7 @@ HRESULT AutomaticCorrection::ContinueWrite(TfEditCookie cookie, ITfContext* cont
     pending.resumed = true;
     return S_OK;
   }
-  if (!ReadExact(pending.range, cookie, pending.original)) return S_FALSE;
-  if (!owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision ||
-      owner_->_IsComposing() || !Focused(context)) return S_FALSE;
-  // Default TSF correction composition is now possible: our preedit is absent.
-  // Never retry an acknowledged write, including S_FALSE or a failed readback.
-  const auto written = pending.range->SetText(cookie, TF_ST_CORRECTION,
-      pending.text.data(), static_cast<LONG>(pending.text.size()));
-  if (written != S_OK) return written;
-  Report(correction::AutomaticStage::TabWriteUnconfirmed);
-  if (!ReadExact(pending.range, cookie, pending.text)) return S_FALSE;
-  pending.written = true;
-  Report(correction::AutomaticStage::TabRestoreUnconfirmed);
-  pending.sourceText.replace(pending.offset, pending.original.size(), pending.text);
-  selected.range = pending.selection;
-  if (!owner_->_IsEditSessionCurrent(pending.generation) || revision_ != pending.revision || !Focused(context)) return S_FALSE;
-  return context->SetSelection(cookie, 1, &selected);
+  return WriteWordAndTail(cookie,context,pending);
 }
 HRESULT AutomaticCorrection::VerifyWrite(TfEditCookie cookie, ITfContext* context, const WriteVerification& verification) {
   if (!verification.range || !verification.source || !verification.selection ||

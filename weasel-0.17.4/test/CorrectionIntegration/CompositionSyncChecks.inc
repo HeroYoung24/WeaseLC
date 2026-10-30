@@ -42,6 +42,48 @@ for (const InputScope scope : {IS_TEXT, IS_DEFAULT}) for (const bool composing :
   }
 }
 
+// Independent renderer projection of the caret-relative SetText branch. The
+// TSF cache and visible text are checked separately, with default placeholder,
+// inline pinyin and caret-inside-pinyin modes (not only the old inline fixture).
+using PreeditOptions = HRESULT(WINAPI*)(ITfTextInputProcessorEx*,ITfContext*,TfEditCookie,const WCHAR*,BOOL,LONG);
+const auto preeditOptions = reinterpret_cast<PreeditOptions>(GetProcAddress(module,"WeaselProbeAutomaticPreeditOptions"));
+for (unsigned mode = 0; mode < 4; ++mode) for (const auto& tail : {L"。",L"，，，",L"。。。",L"。后文🙂"}) {
+  for (const auto& replacement : {L"字",L"错字",L"错误字词"}) {
+    ComPtr<ITfTextInputProcessorEx> subject;
+    ComPtr<MemoryTextStore> host; host.Attach(new MemoryTextStore(IS_TEXT));
+    ComPtr<ITfDocumentMgr> document; ComPtr<ITfContext> context; TfEditCookie ignored = 0;
+    const bool made = factory->CreateInstance(nullptr,IID_ITfTextInputProcessorEx,
+        reinterpret_cast<void**>(subject.GetAddressOf())) == S_OK && manager->CreateDocumentMgr(&document) == S_OK &&
+        document->CreateContext(client,0,static_cast<ITextStoreACP*>(host.Get()),&context,&ignored) == S_OK && document->Push(context.Get()) == S_OK;
+    check(made,"caret-relative renderer projection owns its document"); if (!made) continue;
+    auto editOwned = [&](std::function<HRESULT(TfEditCookie)> body) {
+      ComPtr<ITfEditSession> session; session.Attach(new AutomaticHostEdit(std::move(body))); HRESULT result = E_FAIL;
+      return context->RequestEditSession(client,session.Get(),TF_ES_SYNC|TF_ES_READWRITE,&result) == S_OK && result == S_OK;
+    };
+    Preferences options; options.mode = Mode::Local; options.timing = mode ? 0 : 1; options.automatic.enabled = true;
+    const std::wstring sentence = std::wstring(L"这里有错子") + tail;
+    const std::wstring pinyin = mode == 2 ? L" " : mode == 3 ? L"nihaoshijie" : mode == 1 ? L"ni" : L"";
+    auto suggestion = reply; auto& proposed = suggestion.items[0]; proposed.replacementUnits = static_cast<unsigned>(wcslen(replacement));
+    wcscpy_s(proposed.replacement,replacement);
+    check(configure(subject.Get(),&options,client,L"") == S_OK && Commit(apply,subject.Get(),context.Get(),client,sentence.c_str()) &&
+        (!mode || (preeditOptions && editOwned([&](TfEditCookie ec) {
+          return preeditOptions(subject.Get(),context.Get(),ec,pinyin.c_str(),mode == 2 ? FALSE : TRUE,mode == 2 ? 0 : 2);
+        }))) && inject(subject.Get(),&suggestion) == S_OK,"renderer projection prepares tail and actual preedit/caret mode");
+    {
+      CaretReplacementProjection projection(*host.Get(),context.Get());
+      const std::wstring expected = std::wstring(L"这里有") + replacement + tail + pinyin;
+      BOOL handled = FALSE; key(subject.Get(),context.Get(),VK_TAB,0,1,&handled); key(subject.Get(),context.Get(),VK_TAB,0,0,&handled);
+      check(handled && projection.Valid() && projection.Visible() == expected && host->text == expected,
+          "renderer-visible replacement retains all punctuation, following text and pinyin, independently of TSF cache");
+      key(subject.Get(),context.Get(),VK_TAB,0,2,&handled);
+      check(Commit(apply,subject.Get(),context.Get(),client,L"你好") && projection.Valid() &&
+          projection.Visible() == std::wstring(L"这里有") + replacement + tail + L"你好" && host->text == projection.Visible(),
+          "renderer and TSF agree after selecting the next candidate once");
+    }
+    invalidate(subject.Get()); document->Pop(TF_POPF_ALL);
+  }
+}
+
 // A host may reconcile an untouched suffix when resuming composition. A
 // same-length corruption leaves word/preedit ranges intact: only a complete
 // source readback can detect it. Do not overwrite the host from an old snapshot.

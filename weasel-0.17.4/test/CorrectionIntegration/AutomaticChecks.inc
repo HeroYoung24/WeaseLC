@@ -13,6 +13,7 @@
 #include <ctffunc.h>
 #include <KeyDispatchDiagnostic.h>
 #include "CompositionProjection.h"
+#include "CaretReplacementProjection.h"
 #pragma comment(lib, "dbghelp.lib")
 static bool SaveOwnedHint(HWND window, const wchar_t* filename) {
   RECT rect{}; if (!GetClientRect(window, &rect) || IsRectEmpty(&rect)) return false;

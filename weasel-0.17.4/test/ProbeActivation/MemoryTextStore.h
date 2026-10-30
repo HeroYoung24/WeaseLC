@@ -88,6 +88,7 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
       else { pendingLock_ |= flags; *result = TS_S_ASYNC; }
       return S_OK;
     }
+    if (onBeforeLock) onBeforeLock();
     lock_ = flags;
     *result = sink_->OnLockGranted(flags);
     lock_ = 0;
@@ -155,6 +156,8 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
       text.replace(start, end - start, value ? value : L"", length);
     *change = {start, end, start + static_cast<LONG>(length)};
     selection_.acpStart = selection_.acpEnd = change->acpNewEnd;
+    if (onTextWritten && !acknowledgeWithoutWrite)
+      onTextWritten(start, end, std::wstring(value ? value : L"", length));
     if (onSetText) { auto callback = std::move(onSetText); onSetText = {}; callback(); }
     return S_OK;
   }
@@ -270,6 +273,8 @@ class MemoryTextStore final : public ITextStoreACP, public ITfUIElementSink,
   BOOL textClipped = FALSE;
   bool layoutAvailable = true;
   std::function<void()> onGetSelection;
+    std::function<void()> onBeforeLock;
+    std::function<void(LONG, LONG, const std::wstring&)> onTextWritten;
   std::function<void()> onAfterLock;
   std::function<void()> onSetText;
   LONG SelectionEnd() const { return selection_.acpEnd; }
