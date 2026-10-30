@@ -1,5 +1,7 @@
 # 本机独立测试
 
+**当前反馈：** fc841a9的Edge A区标点/Tab已由用户确认正常，加载哈希符合；现等待B/C三标点与长拼音，Fixed继续、无模型，保留页面/后端。之后再验撤销及真实模型/强调色。下面等待A为此前状态，最新结果见[报告](../../docs/PUNCTUATION_PRESERVATION_2026-10-30.md)。
+
 ## 2026-10-30当前：fc841a9已更新，等待A区实测
 
 包`UpdatePatch-20261030-104649`实际回退/更新、200文件/原版基线、双架构后端检查通过；当前Fixed、无模型，等待新Edge A区Tab时句号/拼音保留及下一次选词结果，保留后端和页面。新修复尚未实机通过，下面待释放/未安装为历史。[报告](../../docs/PUNCTUATION_PRESERVATION_2026-10-30.md)，恢复`output/LocalTest/punctuation-acceptance-state-20261030.json`。
