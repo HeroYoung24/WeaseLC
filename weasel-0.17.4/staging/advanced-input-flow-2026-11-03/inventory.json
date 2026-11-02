@@ -16,6 +16,22 @@
   "readOnlyDependency": "include/CorrectionModel.h (existing; not copied)",
   "files": [
     {
+      "path": "include/CorrectionFlowIdentity.h",
+      "kind": "new",
+      "futureTarget": "include/CorrectionFlowIdentity.h",
+      "sha256": "F6B63CB915E005A1D2F8547ABC3960DD2247AC79624C8243EA2C7AFF100128CD",
+      "bytes": 766,
+      "productionChanged": false
+    },
+    {
+      "path": "include/CorrectionHintKeyCycle.h",
+      "kind": "new",
+      "futureTarget": "include/CorrectionHintKeyCycle.h",
+      "sha256": "5314DB8995ED3AC98D4848B79FB8FCE09F28F4CC96B93372236F62C7E23A84B5",
+      "bytes": 3127,
+      "productionChanged": false
+    },
+    {
       "path": "include/CorrectionHintLifetime.h",
       "kind": "new",
       "futureTarget": "include/CorrectionHintLifetime.h",
@@ -32,6 +48,22 @@
       "productionChanged": false
     },
     {
+      "path": "include/CorrectionLatestCheck.h",
+      "kind": "new",
+      "futureTarget": "include/CorrectionLatestCheck.h",
+      "sha256": "B643CB1FECEC99FB8401F0FE6284403E8E31BA3E13CEEFB49463A4377A5E5262",
+      "bytes": 5415,
+      "productionChanged": false
+    },
+    {
+      "path": "include/CorrectionPendingHints.h",
+      "kind": "new",
+      "futureTarget": "include/CorrectionPendingHints.h",
+      "sha256": "8C60B362A85EC292DE41A05ED3077AD48C0220F31B858FBCCA12EEB9D919884F",
+      "bytes": 9793,
+      "productionChanged": false
+    },
+    {
       "path": "WeaselDeployer/CorrectionModel.cpp",
       "kind": "modified-copy",
       "futureTarget": "WeaselDeployer/CorrectionModel.cpp",
@@ -39,5 +71,13 @@
       "bytes": 25882,
       "productionChanged": false
     }
+  ],
+  "batch2BaseCommit": "68ada4be48b21b5a1ccc43f2b45451183323f6c4",
+  "pendingIntegration": [
+    "Stable identity and physical stroke adapter",
+    "Existing write transaction barrier and source/context revalidation",
+    "Timing settings/UI/protocol compatibility",
+    "Model transport cancellation and raw-answer remapping",
+    "Stable segmentation and broader input budget"
   ]
 }
