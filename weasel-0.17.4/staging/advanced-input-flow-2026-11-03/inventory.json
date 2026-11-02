@@ -1,0 +1,43 @@
+{
+  "format": 1,
+  "purpose": "inactive-advanced-input-flow-review",
+  "baselineCommit": "b463f408095d327c68d091dfdaaaceb7c6798c2e",
+  "copiedProductionFiles": 1,
+  "compiled": false,
+  "testsRun": false,
+  "integrated": false,
+  "deployed": false,
+  "original": {
+    "baselineCommit": "b463f408095d327c68d091dfdaaaceb7c6798c2e",
+    "original": "WeaselDeployer/CorrectionModel.cpp",
+    "sha256": "9BB206F208B9234AC2542F66F38569A6E0BB7E9DB5CF6E32B4115C278CA00933",
+    "bytes": 26326
+  },
+  "readOnlyDependency": "include/CorrectionModel.h (existing; not copied)",
+  "files": [
+    {
+      "path": "include/CorrectionHintLifetime.h",
+      "kind": "new",
+      "futureTarget": "include/CorrectionHintLifetime.h",
+      "sha256": "06EDC501F798670E382D341EB26F910B541C3445AAA45580F13E4112668FA6EF",
+      "bytes": 3951,
+      "productionChanged": false
+    },
+    {
+      "path": "include/CorrectionInferenceView.h",
+      "kind": "new",
+      "futureTarget": "include/CorrectionInferenceView.h",
+      "sha256": "0F1B1B752D2B631C14AA21E56326CA4445D7C76D9D48A94518146933AB347EDD",
+      "bytes": 2500,
+      "productionChanged": false
+    },
+    {
+      "path": "WeaselDeployer/CorrectionModel.cpp",
+      "kind": "modified-copy",
+      "futureTarget": "WeaselDeployer/CorrectionModel.cpp",
+      "sha256": "40E84A83F95CDF82168E7F1021D0CD843670D20748EB052F12A937298A712D89",
+      "bytes": 25882,
+      "productionChanged": false
+    }
+  ]
+}
