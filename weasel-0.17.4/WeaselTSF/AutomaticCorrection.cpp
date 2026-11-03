@@ -106,6 +106,8 @@ void AutomaticCorrection::Report(correction::AutomaticStage stage, correction::F
   correction::SaveAutomaticDiagnostic(diagnostic_);
 }
 void AutomaticCorrection::Hide() {
+  if(preferences_.automatic.advancedFlow && flowActive_.Valid() && !flowWriting_)
+    flowQueue_.Visibility(flowActive_,false,GetTickCount64());
   exposure_.shown = 0;
   if (window_ && IsWindowVisible(window_)) {
     ShowWindow(window_, SW_HIDE);
@@ -119,6 +121,7 @@ void AutomaticCorrection::StopWorker() {
   Close(job_); Close(process_); Close(output_);
 }
 void AutomaticCorrection::Cancel() {
+  if(!flowWriting_ && (flowInitialized_ || flowRecordCount_ || flowVersion_ || flowWork_)) FlowReset();
   pendingEscape_ = {}; pendingEscapeUntil_ = 0; escapeContext_.Release();
 #ifdef WEASELC_LOCAL_TEST_BUILD
   scopeReadTraceContext_.Release();
@@ -247,7 +250,8 @@ LRESULT CALLBACK AutomaticCorrection::WindowProc(HWND window, UINT message, WPAR
         std::wstring(self->item_.original, self->item_.originalUnits),
         std::wstring(self->item_.replacement, self->item_.replacementUnits), self->preferences_.automatic.tab,
         PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE, false,
-        self->owner_->_cand ? &self->owner_->_cand->style() : nullptr);
+        self->owner_->_cand ? &self->owner_->_cand->style() : nullptr,
+        self->preferences_.automatic.advancedFlow && self->flowQueue_.Size()?static_cast<unsigned>(self->flowQueue_.Size()-1):0);
     if (message == WM_PAINT) EndPaint(window, &ps);
     return 0;
   }
@@ -273,7 +277,7 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   com_ptr<ITfRange> previous;
   ULONGLONG carriedDeadline = 0;
   if (correction::SameIdentity(context_, context) && range_ && committed && SettingsCurrent() &&
-      GetTickCount64() - started_ < kLifetime && text_.size() + text.size() <= 1024 &&
+      GetTickCount64() - started_ < Lifetime() && text_.size() + text.size() <= 1024 &&
       (!scopeWaitUntil_ || GetTickCount64() < scopeWaitUntil_)) {
     const auto revision = revision_;
     const auto old = text_;
@@ -294,7 +298,9 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   const bool retainSuggestion = previous && !accumulated.empty() && ready_ && checked_ &&
       !scopeWaitUntil_ && !carriedDeadline && !process_ && !brokerCall_.Active() && !text.empty() &&
       text.find_first_not_of(L"。，.,") == std::wstring::npos;
-  if (retainSuggestion) {
+  const bool retainFlow=preferences_.automatic.advancedFlow && previous && !accumulated.empty() && !carriedDeadline;
+  const bool preserve=retainSuggestion || retainFlow;
+  if (preserve) {
     // This is an adjacent, range-verified commit from this IME. Appending only
     // commas/stops does not alter an already verified spelling pair. Keep the
     // suggestion/ticket; rebind caret/preedit and validate the extended source.
@@ -302,9 +308,9 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
     positionValid_ = false;
   } else Cancel();
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
-  if (!retainSuggestion && (!testing_ || testingBroker_))
+  if (!preserve && (!testing_ || testingBroker_))
 #else
-  if (!retainSuggestion)
+  if (!preserve)
 #endif
   {
     if (!LoadBrokerPreferences()) {
@@ -319,7 +325,7 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
 #endif
   }
 #ifdef WEASELC_LOCAL_TEST_BUILD
-  if (retainSuggestion) { preferenceRead.stage = correction::PreferencesStage::Ready; preferenceRead.error = ERROR_SUCCESS; }
+  if (preserve) { preferenceRead.stage = correction::PreferencesStage::Ready; preferenceRead.error = ERROR_SUCCESS; }
 #endif
 #ifdef WEASELC_LOCAL_TEST_BUILD
   gate.source = static_cast<DWORD>(preferenceRead.stage);
@@ -365,6 +371,7 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   if (!recovering) VerifiedCapture();
   if (!Arm()) { Report(correction::AutomaticStage::LayoutUnavailable); Cancel(); return; }
   RecordInput(context, cookie);
+  if(preferences_.automatic.advancedFlow && context_) FlowCapture();
 } catch (...) { Cancel(); }
 bool AutomaticCorrection::Validate(TfEditCookie cookie, ITfContext* context) {
   if (InputOnlyHost()) {Cancel();Report(correction::AutomaticStage::InputOnlyHost);return false;}
@@ -777,6 +784,9 @@ bool AutomaticCorrection::Request(bool apply, ITfContext* context) {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   if (testing_ && apply && !session->applied) fprintf(stderr, "Automatic write request/edit: %08lx/%08lx\n", hr, edit);
 #endif
+  if(apply && flowWriting_ && diagnostic_.stage==correction::AutomaticStage::TabApplied) {
+    if(!FlowRestore(context,session->verification)) FlowReset();
+  }
   // SYNC only: a refused lock must never leave a delayed document write queued.
   return apply ? session->applied : (hr == S_OK && edit == S_OK) ||
       (scopePending_ && context_ && GetTickCount64() < scopeWaitUntil_);
@@ -789,11 +799,16 @@ void AutomaticCorrection::Position(const RECT& caret) {
 void AutomaticCorrection::Refresh() {
   if (InputOnlyHost()) {Cancel();Report(correction::AutomaticStage::InputOnlyHost);return;}
   if (scopeWaitUntil_) { Hide(); return; }
+  if(preferences_.automatic.advancedFlow) FlowPresent();
+  if(preferences_.automatic.advancedFlow && ready_ && !flowWriting_ && !flowQueue_.CanShow(flowActive_,GetTickCount64())) {
+    flowQueue_.Finish(flowActive_,correction::input_flow::PendingHints::Outcome::Expired,GetTickCount64());
+    FlowPresent();
+  }
   if (ready_ && GetTickCount64() - started_ >= Lifetime()) { Cancel(); return; }
   if (!ready_ || !window_) { Hide(); return; }
   if (!positionValid_) { Report(correction::AutomaticStage::LayoutUnavailable); Hide(); return; }
   if (!Focused()) { Hide(); return; }
-  if (!preferences_.timing && !owner_->_IsComposing()) {
+  if ((!preferences_.automatic.advancedFlow || !flowEngaged_) && !preferences_.timing && !owner_->_IsComposing()) {
     Report(correction::AutomaticStage::WaitingComposition); Hide(); return;
   }
   RECT anchor = caret_;
@@ -824,7 +839,8 @@ void AutomaticCorrection::Refresh() {
     HDC dc = GetDC(window_);
     const auto layout = correction::MeasureHint(dc, size.cx, scale, options.font,
         std::wstring(item_.original, item_.originalUnits), std::wstring(item_.replacement, item_.replacementUnits),
-        options.tab, PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE);
+        options.tab, PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE,false,
+        options.advancedFlow && flowQueue_.Size()?static_cast<unsigned>(flowQueue_.Size()-1):0);
     ReleaseDC(window_, dc);
     measuredSize_ = {size.cx, layout.complete ? layout.height : -1}; measuredDpi_ = scale;
   }
@@ -849,6 +865,7 @@ void AutomaticCorrection::Refresh() {
     Report(correction::AutomaticStage::LayoutUnavailable); Hide(); return;
   }
   Report(correction::AutomaticStage::Shown);
+  if(preferences_.automatic.advancedFlow) {flowEngaged_=true;flowQueue_.Visibility(flowActive_,true,GetTickCount64());}
   if (!exposure_.shown) exposure_.shown = GetTickCount64();
   if (!wasVisible) {
     correction::AnnotateCorrectionHint(window_);
@@ -864,9 +881,12 @@ bool AutomaticCorrection::IntegratedKey(WPARAM key, LPARAM flags, BOOL* eaten) {
       key != VK_HOME && key != VK_END && key != VK_DELETE && key != VK_BACK &&
       key != VK_SHIFT && key != VK_CONTROL && key != VK_MENU) return false;
   com_ptr<ITfContext> target = context_;
+  const bool previous=flowIntegrated_; flowIntegrated_=true;
+  struct Restore {bool& field;bool value;~Restore(){field=value;}} restore{flowIntegrated_,previous};
   return Key(target, key, flags, false, false, eaten);
 }
 void AutomaticCorrection::RecordBehavior(const correction::BehaviorExposure& exposure, correction::BehaviorOutcome outcome) noexcept try {
+  if(preferences_.automatic.advancedFlow) return; // Queue items have no legacy single-item tickets.
   if (!exposure.shown || exposure.resolved || correction::EmptyBehaviorDigest(exposure.digest)) return;
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   if (testing_ && !testingBroker_) { ++testBehavior_[static_cast<DWORD>(outcome) - 1]; return; }
@@ -882,6 +902,15 @@ void AutomaticCorrection::RecordBehavior(const correction::BehaviorExposure& exp
 bool AutomaticCorrection::Key(ITfContext* context, WPARAM key, LPARAM flags, bool test, bool up, BOOL* eaten) try {
   if (!eaten) return false;
   if (InputOnlyHost()) {Cancel();ResetKeys();*eaten=FALSE;Report(correction::AutomaticStage::InputOnlyHost);return false;}
+  if(preferences_.automatic.advancedFlow) {
+    if(key==VK_TAB || key==VK_ESCAPE) {
+      if(key==VK_TAB || up || !owner_->_IsComposing()) return FlowKey(context,key,flags,test,up,eaten);
+      // Esc edits an active composition; do not reject or discard its suggestion.
+      if(!up && context_) Request(false,context);
+      return false;
+    }
+    if(!up && !flowEsc_.BlocksQueueAdvance()) flowEscBlocked_=false;
+  }
   if (key != VK_ESCAPE || up || (flags & (1LL << 30))) {
     pendingEscape_ = {}; pendingEscapeUntil_ = 0; escapeContext_.Release();
   }
@@ -944,6 +973,7 @@ bool AutomaticCorrection::AcceptReply(const correction::AutomaticReply& reply) {
         !correction::SpellingEdit(std::wstring(item.original, item.originalUnits),
             std::wstring(item.replacement, item.replacementUnits))) return false;
   }
+  if(preferences_.automatic.advancedFlow) return FlowReply(reply);
   checked_ = true;
   if (!reply.count) {
     // No displayable suggestion is a completed check, not a document reset.
@@ -973,8 +1003,9 @@ bool AutomaticCorrection::StartWorker() {
   {
     correction::BrokerRequest request; request.operation = correction::BrokerOperation::Check;
     request.requestId = ++brokerRequestId_; request.revision = brokerRevision_;
-    request.input.units = static_cast<DWORD>(text_.size());
-    memcpy(request.input.text, text_.data(), text_.size() * sizeof(WCHAR));
+    const auto& input=preferences_.automatic.advancedFlow && flowWork_?flowWork_->snapshot.text:text_;
+    request.input.units = static_cast<DWORD>(input.size());
+    memcpy(request.input.text, input.data(), input.size() * sizeof(WCHAR));
     const bool sent = brokerCall_.Begin(BrokerServer(), request);
     SecureZeroMemory(&request, sizeof(request)); return sent;
   }
@@ -1045,8 +1076,9 @@ bool AutomaticCorrection::StartWorker() {
     TerminateProcess(process.hProcess, 1); cleanup(); StopWorker(); return false;
   }
   correction::AutomaticRequest request;
-  request.units = static_cast<unsigned>(text_.size());
-  memcpy(request.text, text_.data(), text_.size() * sizeof(WCHAR));
+  const auto& workerInput=preferences_.automatic.advancedFlow && flowWork_?flowWork_->snapshot.text:text_;
+  request.units = static_cast<unsigned>(workerInput.size());
+  memcpy(request.text, workerInput.data(), workerInput.size() * sizeof(WCHAR));
   DWORD written = 0;
   const bool sent = WriteFile(write, &request, sizeof(request), &written, nullptr) && written == sizeof(request);
   SecureZeroMemory(&request, sizeof(request));
@@ -1058,6 +1090,7 @@ bool AutomaticCorrection::StartWorker() {
 #endif
 }
 void AutomaticCorrection::Poll() {
+  if(flowWriting_) return; // A host may pump timer messages during the staged write.
   if (InputOnlyHost()) {Cancel();Report(correction::AutomaticStage::InputOnlyHost);return;}
   if (polling_) return;
   polling_ = true;
@@ -1071,6 +1104,7 @@ void AutomaticCorrection::Poll() {
     nextValidation_ = now + 120;
   }
   if (scopePending_) return;  // Quarantined commits never reach the model.
+  if(preferences_.automatic.advancedFlow && !flowInitialized_) FlowCapture();
   if (now >= nextSettings_) {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
     if (!testing_ || testingBroker_)
@@ -1078,23 +1112,39 @@ void AutomaticCorrection::Poll() {
       if (!SettingsCurrent()) { Cancel(); return; }
     nextSettings_ = now + 500;
   }
-  if (!checked_ && !ready_ && !process_ && !brokerCall_.Active() && now - started_ >= preferences_.automatic.debounce) {
+  if(preferences_.automatic.advancedFlow && flowInitialized_ && !process_ && !brokerCall_.Active() && !flowWork_)
+    flowWork_=flowScheduler_.Take(now);
+  const bool start=preferences_.automatic.advancedFlow?flowWork_.has_value():
+      !checked_ && !ready_ && now-started_>=preferences_.automatic.debounce;
+  if (start && !process_ && !brokerCall_.Active()) {
     if (!Request(false, context_)) { Cancel(); return; }
     if (scopeWaitUntil_) return;  // Scope may have changed since the first read lock.
-    if (!StartWorker()) { InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
+    if (!StartWorker()) { if(preferences_.automatic.advancedFlow) FlowComplete(false); else InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
     Report(correction::AutomaticStage::WorkerStarted);
   }
   if (brokerCall_.Active()) {
     correction::BrokerReply reply;
     const int state = brokerCall_.Poll(reply);
-    if (state < 0) { InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
+    if (state < 0) { if(preferences_.automatic.advancedFlow) FlowComplete(false); else InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
     if (state == 1) {
       const bool valid = reply.status == correction::BrokerStatus::Ok &&
           reply.settings.revision == brokerRevision_ &&
           (reply.modelState == static_cast<DWORD>(correction::State::Suggestions) ||
            reply.modelState == static_cast<DWORD>(correction::State::NoSuggestion) ||
            reply.modelState == static_cast<DWORD>(correction::State::Filtered));
-      if (!valid) { SecureZeroMemory(&reply, sizeof(reply)); InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
+      if (!valid) { SecureZeroMemory(&reply, sizeof(reply)); if(preferences_.automatic.advancedFlow) FlowComplete(false); else InferenceFailed(correction::AutomaticStage::WorkerFailed); return; }
+      if(preferences_.automatic.advancedFlow) {
+        correction::CheckRequest latest;latest.session=flowEpoch_;latest.version=flowVersion_;latest.safeText=true;
+        latest.source=correction::Source::CommittedText;latest.text=text_;
+        const bool same=flowWork_ && correction::input_flow::EquivalentAutomaticInputs(
+            flowWork_->snapshot,flowEpoch_,brokerRevision_?brokerRevision_:1,latest,flowEpoch_,brokerRevision_?brokerRevision_:1);
+        if(!same) {FlowComplete(true);SecureZeroMemory(&reply,sizeof(reply));return;}
+        // The automatic reply contains validated spelling pairs. New trailing
+        // punctuation is equivalent only if every quoted original still matches
+        // below; offsets are never guessed across a changed lexical source.
+        if(flowWork_) flowScheduler_.Complete(flowWork_->serial,true,now);
+        flowWork_.reset();
+      }
       const bool accepted = AcceptReply(reply.result);
       SecureZeroMemory(&reply, sizeof(reply));
       if (!accepted) { InferenceFailed(correction::AutomaticStage::InvalidReply); return; }
@@ -1145,8 +1195,9 @@ bool AutomaticCorrection::LoadBrokerPreferences() {
   auto& a = value.automatic; a.enabled = saved.enabled != 0; a.tab = saved.tab != 0;
   a.wordLocalCompatibility = false;  // Retired option: never reenable Word correction.
   a.side = saved.side; a.gap = saved.gap; a.width = saved.width; a.font = saved.font; a.debounce = saved.debounce;
+  a.advancedFlow=saved.advancedFlow!=0;a.minimumVisibleMs=saved.minimumVisibleMs;a.maximumAgeMs=saved.maximumAgeMs;
   if (!saved.revision || saved.enabled > 1 || saved.tab > 1 || saved.timing > 1 || saved.wordLocalCompatibility != 0 ||
-      saved.timeoutSeconds < 2 || saved.timeoutSeconds > 60 || !std::isfinite(saved.threshold) ||
+      saved.advancedFlow>1 || saved.timeoutSeconds < 2 || saved.timeoutSeconds > 60 || !std::isfinite(saved.threshold) ||
       saved.threshold < 0 || saved.threshold > 1 || !correction::ValidAutomaticOptions(a)) return false;
   value.local.timeoutSeconds = saved.timeoutSeconds;
   value.local.useCustomThreshold = true; value.local.minimumScore = saved.threshold;
@@ -1155,9 +1206,9 @@ bool AutomaticCorrection::LoadBrokerPreferences() {
 }
 ULONGLONG AutomaticCorrection::Lifetime() const {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
-  if (testing_ && !testingBroker_) return kLifetime;
+  if (testing_ && !testingBroker_) return preferences_.automatic.advancedFlow?preferences_.automatic.maximumAgeMs:kLifetime;
 #endif
-  return (std::max)(kLifetime, preferences_.local.timeoutSeconds * 1000ULL + preferences_.automatic.debounce + 2000);
+  return (std::max)((std::max)(kLifetime,preferences_.automatic.advancedFlow?ULONGLONG(preferences_.automatic.maximumAgeMs):0ULL), preferences_.local.timeoutSeconds * 1000ULL + preferences_.automatic.debounce + 2000);
 }
 std::wstring AutomaticCorrection::BrokerServer() const {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
@@ -1277,3 +1328,5 @@ extern "C" __declspec(dllexport) HRESULT WINAPI WeaselProbeAutomaticKey(
       operation & 1, operation & 2, eaten) ? S_OK : S_FALSE;
 }
 #endif
+
+#include "AutomaticCorrectionFlow.inc"

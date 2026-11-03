@@ -516,6 +516,7 @@ static bool RunAutomaticChecks(HMODULE module, const std::wstring& worker, bool 
     invalidate(service.Get()); document->Pop(TF_POPF_ALL);
   }
   if (!brokerModel) {
+    #include "AdvancedFlowChecks.inc"
     #include "VisualChecks.inc"
     if (hostReview) {
       #include "CompositionSyncChecks.inc"

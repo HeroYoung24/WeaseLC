@@ -434,7 +434,7 @@ int wmain(int argc, wchar_t** argv) {
       decoded.local.model == L"test-model" && decoded.online.minimumScore == .75 &&
       decoded.local.bearerToken.empty() && !decoded.online.onlineConsent, "separate profile roundtrip");
   Check(!DecodePreferences("invalid", decoded), "invalid preferences");
-  auto settings = json::parse(encoded); settings.at("version") = 5;
+  auto settings = json::parse(encoded); settings.at("version") = 6;
   Check(!DecodePreferences(json::serialize(settings), decoded), "future preferences rejected");
   settings = json::parse(encoded); settings.at("local").at("timeout") = 0;
   Check(!DecodePreferences(json::serialize(settings), decoded), "invalid saved timeout");
@@ -464,6 +464,15 @@ int wmain(int argc, wchar_t** argv) {
     Check(!DecodePreferences(json::serialize(invalid), decoded), "automatic options bounds enforced");
   }
   RunInputFlowChecks();
+  preferences.automatic.advancedFlow=true;preferences.automatic.minimumVisibleMs=4000;preferences.automatic.maximumAgeMs=12000;
+  const auto flowEncoded=EncodePreferences(preferences);
+  Check(DecodePreferences(flowEncoded,decoded) && decoded.automatic.advancedFlow &&
+      decoded.automatic.minimumVisibleMs==4000 && decoded.automatic.maximumAgeMs==12000,"enhanced timing settings survive full codec roundtrip");
+  auto oldFlow=json::parse(flowEncoded);oldFlow.at("version")=4;
+  Check(DecodePreferences(json::serialize(oldFlow),decoded) && !decoded.automatic.advancedFlow &&
+      decoded.automatic.minimumVisibleMs==3000,"legacy config does not opt into enhanced behavior");
+  oldFlow=json::parse(flowEncoded);oldFlow.at("automatic").at("minimum_visible_ms")=13000;
+  Check(!DecodePreferences(json::serialize(oldFlow),decoded),"invalid enhanced timing rejected without replacing settings");
   std::cout << "Offline correction checks = " << checks << ", failures = " << failures << '\n';
   return failures ? 1 : 0;
 }

@@ -84,6 +84,11 @@
 #define IDC_AUTO_WIDTH                  1049
 #define IDC_AUTO_FONT                   1050
 #define IDC_AUTO_DEBOUNCE               1051
+#define IDC_AUTO_FLOW 1100
+#define IDC_AUTO_MINIMUM 1101
+#define IDC_AUTO_MAXIMUM 1102
+#define IDC_AUTO_SHORT 1103
+#define IDC_AUTO_LONG 1104
 #define IDC_AUTO_STATE                  1052
 #define IDC_AUTO_PREVIEW                1053
 #define IDD_CORRECTION_APPS             163

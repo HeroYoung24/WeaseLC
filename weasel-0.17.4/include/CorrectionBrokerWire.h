@@ -17,9 +17,10 @@ struct BrokerSettings {
   DWORD enabled = 0, timing = 0, tab = 1, side = 0, gap = 8, width = 320,
       font = 14, debounce = 250, timeoutSeconds = 30, wordLocalCompatibility = 0;
   double threshold = .90;
+  DWORD advancedFlow = 0, minimumVisibleMs = 3000, maximumAgeMs = 15000;
 };
 struct BrokerRequest {
-  DWORD magic = 0x32424357, version = 3;
+  DWORD magic = 0x32424357, version = 4;
   BrokerOperation operation = BrokerOperation::Settings;
   ULONGLONG requestId = 0, revision = 0;
   AutomaticRequest input;
@@ -28,7 +29,7 @@ struct BrokerRequest {
   BYTE data[40]{};
 };
 struct BrokerReply {
-  DWORD magic = 0x32524357, version = 3;
+  DWORD magic = 0x32524357, version = 4;
   BrokerStatus status = BrokerStatus::Unavailable;
   ULONGLONG requestId = 0;
   BrokerSettings settings;

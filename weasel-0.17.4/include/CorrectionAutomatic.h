@@ -19,10 +19,14 @@ struct AutomaticOptions {
   unsigned width = 320;
   unsigned font = 14;
   unsigned debounce = 250;
+  bool advancedFlow = false;  // Explicit opt-in; preserve legacy configurations.
+  unsigned minimumVisibleMs = 3000, maximumAgeMs = 15000;
 };
 inline bool ValidAutomaticOptions(const AutomaticOptions& o) {
   return o.side <= 2 && o.gap <= 48 && o.width >= 180 && o.width <= 640 &&
-      o.font >= 10 && o.font <= 24 && o.debounce >= 100 && o.debounce <= 2000;
+      o.font >= 10 && o.font <= 24 && o.debounce >= 100 && o.debounce <= 2000 &&
+      o.minimumVisibleMs >= 1000 && o.minimumVisibleMs <= 10000 &&
+      o.maximumAgeMs >= 5000 && o.maximumAgeMs <= 60000 && o.minimumVisibleMs <= o.maximumAgeMs;
 }
 // Private, bounded anonymous-pipe protocol. No pointers, filenames, handles,
 // credentials, host context or arbitrary commands cross this boundary.

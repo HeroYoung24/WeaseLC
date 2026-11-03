@@ -1,5 +1,5 @@
 #requires -Version 7.0
-param([Parameter(Mandatory)][ValidateSet('Off','Fixed','Model')][string]$Phase)
+param([Parameter(Mandatory)][ValidateSet('Off','Fixed','Model')][string]$Phase,[switch]$AdvancedFlow)
 $ErrorActionPreference = 'Stop'
 # Dedicated test identity only. Never touch ordinary Weasel/Sogou settings.
 $path = 'Software\Rime\WeaseLC-LocalTest\Correction'
@@ -9,9 +9,15 @@ try {
   $raw = $key.GetValue('SettingsV2',$null)
   if ($raw -isnot [byte[]] -or !$raw.Length -or $raw.Length -gt 16384) { throw 'Unexpected settings value.' }
   $settings = [Text.Encoding]::UTF8.GetString($raw) | ConvertFrom-Json
-  if ($settings.version -notin @(3,4)) { throw 'Version 3/4 settings required.' }
+  if ($settings.version -notin @(3,4,5)) { throw 'Version 3/4/5 settings required.' }
   $settings.mode = if ($Phase -eq 'Off') {0} else {1}
   $settings.automatic.enabled = $Phase -ne 'Off'
+  if($AdvancedFlow) {
+    $settings.version=5
+    $settings.automatic | Add-Member -NotePropertyName advanced_flow -NotePropertyValue $true -Force
+    $settings.automatic | Add-Member -NotePropertyName minimum_visible_ms -NotePropertyValue 3000 -Force
+    $settings.automatic | Add-Member -NotePropertyName maximum_age_ms -NotePropertyValue 15000 -Force
+  }
   if ($Phase -ne 'Off') {
     $settings.timing = 0
     $settings.automatic.tab = $true

@@ -345,10 +345,12 @@ bool ReadAutomaticOptions(HWND dialog, AutomaticDialogState& state, AutomaticOpt
   options.enabled = IsDlgButtonChecked(dialog, IDC_AUTO_ENABLED) == BST_CHECKED;
   options.tab = IsDlgButtonChecked(dialog, IDC_AUTO_TAB) == BST_CHECKED;
   options.wordLocalCompatibility = false;
+  options.advancedFlow = IsDlgButtonChecked(dialog, IDC_AUTO_FLOW) == BST_CHECKED;
   options.side = static_cast<unsigned>(SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_GETCURSEL, 0, 0));
   struct Field { int id; unsigned low, high; unsigned* output; };
   for (auto field : {Field{IDC_AUTO_GAP, 0, 48, &options.gap}, {IDC_AUTO_WIDTH, 180, 640, &options.width},
-       {IDC_AUTO_FONT, 10, 24, &options.font}, {IDC_AUTO_DEBOUNCE, 100, 2000, &options.debounce}}) {
+       {IDC_AUTO_FONT, 10, 24, &options.font}, {IDC_AUTO_DEBOUNCE, 100, 2000, &options.debounce},
+       {IDC_AUTO_MINIMUM, 1000, 10000, &options.minimumVisibleMs}, {IDC_AUTO_MAXIMUM, 5000, 60000, &options.maximumAgeMs}}) {
     unsigned value = 0;
     if (!ReadNumber(dialog, field.id, value) || value < field.low || value > field.high) {
       if (explain) {
@@ -360,7 +362,12 @@ bool ReadAutomaticOptions(HWND dialog, AutomaticDialogState& state, AutomaticOpt
     }
     *field.output = value;
   }
-  return ValidAutomaticOptions(options);
+  if (!ValidAutomaticOptions(options)) {
+    if (explain) SetDlgItemTextW(dialog, IDC_AUTO_STATE, state.owner.Text(
+        L"最短展示时间不能大于最长有效期。", L"Minimum display time must not exceed maximum age."));
+    return false;
+  }
+  return true;
 }
 INT_PTR CALLBACK AutomaticDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM l) {
   auto* state = reinterpret_cast<AutomaticDialogState*>(GetWindowLongPtrW(dialog, DWLP_USER));
@@ -370,14 +377,16 @@ INT_PTR CALLBACK AutomaticDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM
     const auto& options = state->working;
     CheckDlgButton(dialog, IDC_AUTO_ENABLED, options.enabled ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(dialog, IDC_AUTO_TAB, options.tab ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dialog, IDC_AUTO_FLOW, options.advancedFlow ? BST_CHECKED : BST_UNCHECKED);
     for (const auto* label : {state->owner.Text(L"右侧（默认）", L"Right (default)"),
          state->owner.Text(L"左侧", L"Left"), state->owner.Text(L"下方", L"Below")})
       SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label));
     SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_SETCURSEL, options.side, 0);
     for (const auto pair : {std::pair<int, unsigned>{IDC_AUTO_GAP, options.gap},
-         {IDC_AUTO_WIDTH, options.width}, {IDC_AUTO_FONT, options.font}, {IDC_AUTO_DEBOUNCE, options.debounce}}) {
+         {IDC_AUTO_WIDTH, options.width}, {IDC_AUTO_FONT, options.font}, {IDC_AUTO_DEBOUNCE, options.debounce},
+         {IDC_AUTO_MINIMUM, options.minimumVisibleMs}, {IDC_AUTO_MAXIMUM, options.maximumAgeMs}}) {
       SetNumber(dialog, pair.first, pair.second);
-      SendDlgItemMessageW(dialog, pair.first, EM_SETLIMITTEXT, 4, 0);
+      SendDlgItemMessageW(dialog, pair.first, EM_SETLIMITTEXT, 5, 0);
     }
     return TRUE;
   }
@@ -392,6 +401,11 @@ INT_PTR CALLBACK AutomaticDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM
   auto close = [&](int result) { if (state->modeless) DestroyWindow(dialog); else EndDialog(dialog, result); };
   if (message == WM_CLOSE) { close(IDCANCEL); return TRUE; }
   if (message != WM_COMMAND) return FALSE;
+  if (LOWORD(w) == IDC_AUTO_SHORT || LOWORD(w) == IDC_AUTO_LONG) {
+    SetNumber(dialog, IDC_AUTO_MINIMUM, LOWORD(w) == IDC_AUTO_LONG ? 5000 : 3000);
+    SetNumber(dialog, IDC_AUTO_MAXIMUM, 15000);
+    return TRUE;
+  }
   if (LOWORD(w) == IDC_AUTO_PREVIEW || (state->preview.Window() &&
       (HIWORD(w) == EN_CHANGE || HIWORD(w) == CBN_SELCHANGE || LOWORD(w) == IDC_AUTO_TAB))) {
     AutomaticOptions options;
@@ -910,6 +924,17 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
           SendDlgItemMessageW(autoDialog, IDC_AUTO_SIDE, CB_GETCOUNT, 0, 0) == 3 &&
           SendDlgItemMessageW(autoDialog, IDC_AUTO_SIDE, CB_GETCURSEL, 0, 0) == 0,
           "automatic opt-in defaults and layout choices");
+      check(GetDlgItem(autoDialog,IDC_AUTO_FLOW) && GetDlgItem(autoDialog,IDC_AUTO_MINIMUM) &&
+          GetDlgItem(autoDialog,IDC_AUTO_MAXIMUM),"enhanced timing controls exist in each language");
+      AutomaticOptions timingDraft;
+      SendMessageW(autoDialog,WM_COMMAND,IDC_AUTO_LONG,0);
+      check(ReadAutomaticOptions(autoDialog,automatic,timingDraft,false) && timingDraft.minimumVisibleMs==5000 &&
+          timingDraft.maximumAgeMs==15000,"long-passage reference populates valid timing");
+      SetDlgItemInt(autoDialog,IDC_AUTO_MINIMUM,9000,FALSE);SetDlgItemInt(autoDialog,IDC_AUTO_MAXIMUM,5000,FALSE);
+      check(!ReadAutomaticOptions(autoDialog,automatic,timingDraft,false),"minimum greater than age cannot save");
+      SendMessageW(autoDialog,WM_COMMAND,IDC_AUTO_SHORT,0);
+      check(ReadAutomaticOptions(autoDialog,automatic,timingDraft,false) && timingDraft.minimumVisibleMs==3000 &&
+          !timingDraft.advancedFlow,"preset does not silently activate enhanced mode");
       if (language == MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED)) SaveDialogPreview(autoDialog, "CorrectionAutomaticPreview.bmp");
       check(GetDlgItem(autoDialog, IDC_AUTO_PREVIEW) != nullptr, "offline preview control present");
       SendMessageW(autoDialog, WM_COMMAND, IDC_AUTO_PREVIEW, 0);

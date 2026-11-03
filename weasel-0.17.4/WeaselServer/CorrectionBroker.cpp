@@ -129,6 +129,7 @@ struct CorrectionBroker::Impl {
     const auto& a = value.automatic;
     saved.timing = value.timing; saved.tab = a.tab; saved.side = a.side; saved.gap = a.gap;
     saved.width = a.width; saved.font = a.font; saved.debounce = a.debounce;
+    saved.advancedFlow = a.advancedFlow; saved.minimumVisibleMs = a.minimumVisibleMs; saved.maximumAgeMs = a.maximumAgeMs;
     saved.timeoutSeconds = value.local.timeoutSeconds; saved.threshold = EffectiveThreshold(value.local);
     saved.wordLocalCompatibility = 0;  // Retired wire field; cannot enable Word correction.
     if (preferences) *preferences = std::move(value);
@@ -226,7 +227,8 @@ struct CorrectionBroker::Impl {
       fixedFixture = true;
       const auto verdict = FixedAutomaticVerdict(input.text);
       if (verdict == FixedVerdict::Reject) { reply.status = BrokerStatus::InvalidRequest; return; }
-      selected = std::make_unique<FixedAutomaticTransport>(verdict == FixedVerdict::Suggest);
+      selected = std::make_unique<FixedAutomaticTransport>(verdict == FixedVerdict::Suggest || verdict == FixedVerdict::Both,
+          verdict == FixedVerdict::LibraryOnly || verdict == FixedVerdict::Both);
     }
 #endif
     auto client = CreateModelClient(Provider::ChatCompletions, std::move(selected));
@@ -294,7 +296,7 @@ struct CorrectionBroker::Impl {
       SecureZeroMemory(&request, sizeof(request)); SecureZeroMemory(&reply, sizeof(reply));
     } } erase{request, reply};
     if (!Transfer(pipe, &request, sizeof(request), true, stop.value) || !access.AllowsClient(pipe) ||
-        request.magic != 0x32424357 || request.version != 3) return;
+        request.magic != 0x32424357 || request.version != 4) return;
     reply.requestId = request.requestId;
     try {
       switch (request.operation) {

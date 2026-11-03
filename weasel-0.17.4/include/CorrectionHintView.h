@@ -34,8 +34,13 @@ inline const wchar_t* HintFooter(bool tab, bool chinese, bool preview = false) {
   return tab ? (chinese ? L"Tab 接受建议  ·  Esc 忽略" : L"Tab accepts  ·  Esc dismisses") :
       (chinese ? L"仅提示（Tab 已关闭）  ·  Esc 忽略" : L"Hints only (Tab off)  ·  Esc dismisses");
 }
+inline std::wstring HintFooterText(bool tab,bool chinese,bool preview,unsigned pending) {
+  auto text=std::wstring(HintFooter(tab,chinese,preview));
+  if(pending && !preview) text+=(chinese?L" · 另有 ":L" · more: ")+std::to_wstring(pending);
+  return text;
+}
 inline HintLayout MeasureHint(HDC dc, LONG width, UINT dpi, unsigned font,
-    const std::wstring& original, const std::wstring& replacement, bool tab, bool chinese, bool preview = false) {
+    const std::wstring& original, const std::wstring& replacement, bool tab, bool chinese, bool preview = false,unsigned pending=0) {
   HintLayout result;
   const LONG padding = MulDiv(12, dpi, 96), gap = MulDiv(8, dpi, 96);
   LONG y = padding;
@@ -52,14 +57,14 @@ inline HintLayout MeasureHint(HDC dc, LONG width, UINT dpi, unsigned font,
   measure(HintTitle(chinese, preview), title.Get(), result.title);
   measure(HintOriginal(original, chinese), body.Get(), result.original);
   measure(HintReplacement(replacement, chinese), suggestion.Get(), result.replacement);
-  measure(HintFooter(tab, chinese, preview), footer.Get(), result.footer);
+  measure(HintFooterText(tab, chinese, preview,pending), footer.Get(), result.footer);
   result.height = y - gap + padding;
   return result;
 }
 inline void PaintHint(HDC dc, RECT bounds, UINT dpi, unsigned font,
     const std::wstring& original, const std::wstring& replacement, bool tab, bool chinese,
-    bool preview = false, const weasel::UIStyle* style = nullptr) {
-  const auto layout = MeasureHint(dc, bounds.right - bounds.left, dpi, font, original, replacement, tab, chinese, preview);
+    bool preview = false, const weasel::UIStyle* style = nullptr,unsigned pending=0) {
+  const auto layout = MeasureHint(dc, bounds.right - bounds.left, dpi, font, original, replacement, tab, chinese, preview,pending);
   const auto palette = CurrentHintPalette(style);
   HBRUSH background = CreateSolidBrush(palette.background), border = CreateSolidBrush(palette.border);
   FillRect(dc, &bounds, background);
@@ -81,7 +86,7 @@ inline void PaintHint(HDC dc, RECT bounds, UINT dpi, unsigned font,
   paint(HintTitle(chinese, preview), title.Get(), layout.title, false);
   paint(HintOriginal(original, chinese), body.Get(), layout.original, false);
   paint(HintReplacement(replacement, chinese), suggestion.Get(), layout.replacement, true);
-  paint(HintFooter(tab, chinese, preview), footer.Get(), layout.footer, false);
+  paint(HintFooterText(tab, chinese, preview,pending), footer.Get(), layout.footer, false);
   RestoreDC(dc, saved);
 }
 }  // namespace correction

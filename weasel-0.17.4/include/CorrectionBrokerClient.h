@@ -60,7 +60,7 @@ class BrokerCall {
       pending_ = false;
     }
     if (phase_ == 1) { phase_ = 2; if (!Issue(true)) return -1; if (pending_) return Poll(result, 0); }
-    if (reply_.magic != 0x32524357 || reply_.version != 3 || reply_.requestId != request_.requestId ||
+    if (reply_.magic != 0x32524357 || reply_.version != 4 || reply_.requestId != request_.requestId ||
         reply_.status > BrokerStatus::ModelFailure) { Reset(); return -1; }
     result = reply_; Reset(); return 1;
   }

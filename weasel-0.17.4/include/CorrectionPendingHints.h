@@ -155,6 +155,12 @@ class PendingHints {
       if (entries_[i].lifetime.Expired(nowMs)) Remove(i, Outcome::Expired, nowMs); else ++i;
   }
   std::size_t Size() const { return count_; }
+  bool CanShow(const HintIdentity& identity,std::uint64_t nowMs) const {
+    const auto at=Find(identity);
+    return !applying_ && sourceReady_ && at && IsActive(identity) && entries_[*at].validated &&
+        entries_[*at].lifetime.CanReveal(nowMs);
+  }
+  bool Contains(const HintIdentity& identity) const { return Find(identity).has_value(); }
   bool AdmissionClosed() const { return closed_; }
   bool WritePending() const { return applying_; }
   void ResetForNewScope() { *this = PendingHints{}; }

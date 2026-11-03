@@ -4,6 +4,9 @@
 #include <CorrectionBrokerClient.h>
 #include <CorrectionHintTheme.h>
 #include <CorrectionBehavior.h>
+#include <CorrectionPendingHints.h>
+#include <CorrectionHintKeyCycle.h>
+#include <CorrectionLatestCheck.h>
 #include "../WeaselDeployer/CorrectionPreferences.h"
 
 class WeaselTSF;
@@ -14,7 +17,7 @@ class AutomaticCorrection {
   explicit AutomaticCorrection(WeaselTSF* owner) : owner_(owner) {}
   ~AutomaticCorrection();
   void Cancel();
-  void ResetKeys() { downTab_ = false; }
+  void ResetKeys() { downTab_ = false; flowTab_.ResetAfterFocusLoss(); flowEsc_.ResetAfterFocusLoss(); flowTabStroke_ = flowEscStroke_ = 0; }
   void Capture(ITfContext*, TfEditCookie, ITfRange*, const std::wstring&);
   void Observe(ITfContext*, TfEditCookie);
   void RecordInput(ITfContext*, TfEditCookie);
@@ -55,7 +58,7 @@ class AutomaticCorrection {
   bool InjectTest(const correction::AutomaticReply&);
   HWND TestWindow() const { return window_; }
   bool TestReady() const { return ready_; }
-  void ExpireTest() { started_ = GetTickCount64() - 10000; }
+  void ExpireTest() { started_ = GetTickCount64() - Lifetime(); }
   void FocusTest(bool focused) { testFocused_ = focused; }
   DWORD ProcessTest() const { return process_ ? GetProcessId(process_) : 0; }
   correction::AutomaticDiagnostic DiagnosticTest() const { return diagnostic_; }
@@ -90,6 +93,14 @@ class AutomaticCorrection {
   void VerifiedCapture();
   bool AcceptReply(const correction::AutomaticReply&);
   void Hide();
+  void FlowReset();
+  void FlowCapture();
+  bool FlowReply(const correction::AutomaticReply&);
+  void FlowPresent();
+  void FlowRevalidate();
+  void FlowComplete(bool success);
+  bool FlowRestore(ITfContext*, const WriteVerification&);
+  bool FlowKey(ITfContext*, WPARAM, LPARAM, bool, bool, BOOL*);
   void RecordBehavior(const correction::BehaviorExposure&, correction::BehaviorOutcome) noexcept;
   TfClientId Client() const;
   bool SettingsCurrent() const;
@@ -127,6 +138,19 @@ class AutomaticCorrection {
   correction::BehaviorExposure exposure_, pendingEscape_;
   ULONGLONG pendingEscapeUntil_ = 0;
   com_ptr<ITfContext> escapeContext_;
+  struct FlowRecord { correction::input_flow::HintIdentity identity; correction::AutomaticReply::Item item; };
+  std::array<FlowRecord,64> flowRecords_{};
+  size_t flowRecordCount_ = 0;
+  size_t flowShownCount_ = 0;
+  correction::input_flow::PendingHints flowQueue_;
+  correction::input_flow::LatestCheck flowScheduler_;
+  correction::input_flow::HintKeyCycle flowTab_, flowEsc_;
+  correction::input_flow::HintIdentity flowActive_;
+  std::optional<correction::input_flow::CheckWork> flowWork_;
+  ULONGLONG flowEpoch_ = 1, flowVersion_ = 0, flowSerial_ = 0, flowKeySerial_ = 0;
+  ULONGLONG flowTabStroke_ = 0, flowEscStroke_ = 0;
+  bool flowInitialized_ = false, flowWriting_ = false, flowEscBlocked_ = false, flowIntegrated_ = false, flowEngaged_ = false;
+  std::wstring flowLastView_;
 #ifdef WEASELC_LOCAL_TEST_BUILD
   com_ptr<ITfContext> scopeReadTraceContext_;
 #endif

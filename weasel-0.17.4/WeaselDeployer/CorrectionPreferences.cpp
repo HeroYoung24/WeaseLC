@@ -54,10 +54,11 @@ void ReadProfile(const json::value& value, ModelConfig& config) {
 }  // namespace
 std::string EncodePreferences(const Preferences& preferences) {
   const auto& a = preferences.automatic;
-  return json::serialize(json::object{{"version", 4},
+  return json::serialize(json::object{{"version", 5},
       {"mode", static_cast<unsigned>(preferences.mode)}, {"timing", preferences.timing},
       {"automatic", {{"enabled", a.enabled}, {"tab", a.tab}, {"word_local_compatibility", false}, {"side", a.side},
-          {"gap", a.gap}, {"width", a.width}, {"font", a.font}, {"debounce", a.debounce}}},
+          {"gap", a.gap}, {"width", a.width}, {"font", a.font}, {"debounce", a.debounce},
+          {"advanced_flow", a.advancedFlow}, {"minimum_visible_ms", a.minimumVisibleMs}, {"maximum_age_ms", a.maximumAgeMs}}},
       {"local", Profile(preferences.local)}, {"online", Profile(preferences.online)}});
 }
 bool DecodePreferences(const std::string& encoded, Preferences& preferences) {
@@ -66,7 +67,7 @@ bool DecodePreferences(const std::string& encoded, Preferences& preferences) {
     json::parse_options options; options.max_depth = 8;
     auto object = json::parse(encoded, {}, options).as_object();
     const auto version = object.at("version").as_int64();
-    if (version != 2 && version != 3 && version != 4) return false;
+    if (version != 2 && version != 3 && version != 4 && version != 5) return false;
     Preferences decoded;
     const auto mode = json::value_to<unsigned>(object.at("mode"));
     decoded.timing = json::value_to<unsigned>(object.at("timing"));
@@ -78,12 +79,17 @@ bool DecodePreferences(const std::string& encoded, Preferences& preferences) {
       const auto& saved = object.at("automatic").as_object();
       auto& a = decoded.automatic;
       a.enabled = saved.at("enabled").as_bool(); a.tab = saved.at("tab").as_bool();
-      if (version == 4) (void)saved.at("word_local_compatibility").as_bool(); // Validate legacy data, never enable it.
+      if (version >= 4) (void)saved.at("word_local_compatibility").as_bool(); // Validate legacy data, never enable it.
       a.side = json::value_to<unsigned>(saved.at("side"));
       a.gap = json::value_to<unsigned>(saved.at("gap"));
       a.width = json::value_to<unsigned>(saved.at("width"));
       a.font = json::value_to<unsigned>(saved.at("font"));
       a.debounce = json::value_to<unsigned>(saved.at("debounce"));
+      if (version >= 5) {
+        a.advancedFlow = saved.at("advanced_flow").as_bool();
+        a.minimumVisibleMs = json::value_to<unsigned>(saved.at("minimum_visible_ms"));
+        a.maximumAgeMs = json::value_to<unsigned>(saved.at("maximum_age_ms"));
+      }
       if (!ValidAutomaticOptions(a)) return false;
     }
     preferences = std::move(decoded);

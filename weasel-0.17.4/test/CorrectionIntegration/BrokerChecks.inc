@@ -21,13 +21,16 @@ if (!local) {
       RegCloseKey(key); return ok;
     };
     check(save(), "backend settings provisioned independently of injected preferences");
-    std::atomic_bool fail{false}, hold{false}, entered{false}, cancelled{false};
+    std::atomic_bool fail{false}, hold{false}, entered{false}, cancelled{false}, multiple{false};
+    std::atomic_uint posts{0};
     class Fixture final : public IModelTransport {
      public:
-      Fixture(std::atomic_bool& fail, std::atomic_bool& hold, std::atomic_bool& entered, std::atomic_bool& cancelled)
-          : fail_(fail), hold_(hold), entered_(entered), cancelled_(cancelled) {}
+      Fixture(std::atomic_bool& fail, std::atomic_bool& hold, std::atomic_bool& entered, std::atomic_bool& cancelled,
+              std::atomic_bool& multiple,std::atomic_uint& posts)
+          : fail_(fail), hold_(hold), entered_(entered), cancelled_(cancelled),multiple_(multiple),posts_(posts) {}
       TransportResult Post(const ModelConfig& config, const Endpoint& endpoint, const std::string& body,
           const std::atomic_bool& cancelled) override {
+        ++posts_;
         if (fail_.load()) { TransportResult result; result.state = State::Timeout; return result; }
         if (hold_.load()) {
           entered_.store(true);
@@ -37,12 +40,13 @@ if (!local) {
             cancelled_.store(true); TransportResult result; result.state = State::Cancelled; return result;
           }
         }
-        FixedAutomaticTransport fixed(true); return fixed.Post(config, endpoint, body, cancelled);
+        FixedAutomaticTransport fixed(true,multiple_.load()); return fixed.Post(config, endpoint, body, cancelled);
       }
      private: std::atomic_bool &fail_, &hold_, &entered_, &cancelled_;
+      std::atomic_bool& multiple_; std::atomic_uint& posts_;
     };
     std::function<std::unique_ptr<IModelTransport>()> transportFactory;
-    if (!brokerModel) transportFactory = [&]() { return std::make_unique<Fixture>(fail, hold, entered, cancelled); };
+    if (!brokerModel) transportFactory = [&]() { return std::make_unique<Fixture>(fail, hold, entered, cancelled,multiple,posts); };
     CorrectionBroker broker(registry, std::move(transportFactory));
     const bool started = broker.Start(); check(started, "normal-process broker starts without TIP registration");
     if (started) {
@@ -97,6 +101,26 @@ if (!local) {
             "backend disabled state wins over injected enabled settings and leaves Tab alone");
         saved.automatic.enabled = true; save();
         if (!brokerModel) {
+          saved.automatic.advancedFlow=true;saved.timing=1;multiple=true;save();
+          configure(service.Get(),&injected,client,backend.c_str());
+          const auto beforeAdvanced=host->text;
+          check(Commit(apply,service.Get(),context.Get(),client,L"这里有错子，也在图书管。") &&
+              pump([&]{return state().first && IsWindowVisible(state().second);}),
+              "enhanced settings and multiple model answers travel through real broker/parser without injection");
+          const auto beforeMarks=posts.load();
+          for(unsigned mark=0;mark<5;++mark) Commit(apply,service.Get(),context.Get(),client,L"。");
+          poll(service.Get());
+          check(state().first && posts.load()==beforeMarks,"equivalent punctuation preserves active hint without another model request");
+          key(service.Get(),context.Get(),VK_TAB,0,1,&consumed);key(service.Get(),context.Get(),VK_TAB,0,0,&consumed);
+          check(consumed && host->text==beforeAdvanced+L"这里有错字，也在图书管。。。。。。",
+              "real broker enhanced first Tab preserves all six stops");
+          key(service.Get(),context.Get(),VK_TAB,0,2,&consumed);
+          check(pump([&]{return state().first;}),"real broker queue advances after confirmed write");
+          key(service.Get(),context.Get(),VK_TAB,0,1,&consumed);key(service.Get(),context.Get(),VK_TAB,0,0,&consumed);
+          check(consumed && host->text==beforeAdvanced+L"这里有错字，也在图书馆。。。。。。",
+              "real broker second Tab replaces the next spelling in order");
+          key(service.Get(),context.Get(),VK_TAB,0,2,&consumed);
+          multiple=false;saved.automatic.advancedFlow=false;saved.timing=0;save();
           fail = true;
           configure(service.Get(), &injected, client, backend.c_str());
           Commit(apply, service.Get(), context.Get(), client, L"这里有错子。");

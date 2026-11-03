@@ -7,15 +7,16 @@ namespace correction {
 // kept-term/threshold checks still run. There is no public fixture switch.
 class FixedAutomaticTransport final : public IModelTransport {
  public:
-  explicit FixedAutomaticTransport(bool typo) : typo_(typo) {}
+  explicit FixedAutomaticTransport(bool typo, bool library=false) : typo_(typo), library_(library) {}
   TransportResult Post(const ModelConfig&, const Endpoint&, const std::string&, const std::atomic_bool&) override {
     TransportResult result; result.state = State::NoSuggestion; result.httpStatus = 200;
-    result.body = typo_
-      ? R"({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\"version\":1,\"decision\":\"suggestions\",\"suggestions\":[{\"original\":\"\u9519\u5b50\",\"replacement\":\"\u9519\u5b57\",\"reason\":\"fixture\",\"score\":0.99}]}"}}]})"
-      : R"({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\"version\":1,\"decision\":\"no_change\",\"suggestions\":[]}"}}]})";
+    std::string items=typo_?R"({\"original\":\"\u9519\u5b50\",\"replacement\":\"\u9519\u5b57\",\"reason\":\"fixture\",\"score\":0.99})":"";
+    if(library_) {if(!items.empty())items+=",";items+=R"({\"original\":\"\u56fe\u4e66\u7ba1\",\"replacement\":\"\u56fe\u4e66\u9986\",\"reason\":\"fixture\",\"score\":0.99})";}
+    result.body=std::string(R"({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\"version\":1,\"decision\":\")")+
+        (items.empty()?"no_change":"suggestions")+R"(\",\"suggestions\":[)"+items+R"(]}"}}]})";
     return result;
   }
  private:
-  bool typo_;
+  bool typo_, library_;
 };
 }
