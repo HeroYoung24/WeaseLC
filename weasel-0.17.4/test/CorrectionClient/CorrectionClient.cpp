@@ -47,7 +47,13 @@ struct MockTransport : IModelTransport {
   }
 };
 #include "QualityChecks.inc"
+#include "InputFlowChecks.inc"
 int wmain(int argc, wchar_t** argv) {
+  if (argc == 2 && !wcscmp(argv[1], L"--input-flow")) {
+    RunInputFlowChecks();
+    std::cout << "Input flow checks = " << checks << ", failures = " << failures << '\n';
+    return failures ? 1 : 0;
+  }
   if (argc > 1 && !wcscmp(argv[1], L"--quality")) {
     if (argc < 7 || argc > 9) return 2;
     try {
@@ -457,6 +463,7 @@ int wmain(int argc, wchar_t** argv) {
     auto invalid = json::parse(encoded); invalid.at("automatic").at(field) = 99999;
     Check(!DecodePreferences(json::serialize(invalid), decoded), "automatic options bounds enforced");
   }
+  RunInputFlowChecks();
   std::cout << "Offline correction checks = " << checks << ", failures = " << failures << '\n';
   return failures ? 1 : 0;
 }

@@ -10,6 +10,7 @@
 #include <boost/json/src.hpp>
 #include <CorrectionModel.h>
 #include <CorrectionSpellingEdit.h>
+#include <CorrectionInferenceView.h>
 
 #pragma comment(lib, "winhttp.lib")
 
@@ -63,13 +64,7 @@ bool ValidRequest(const CheckRequest& request) {
 }
 CheckRequest InferenceRequest(const CheckRequest& request) {
   auto input = request;
-  if (request.source != Source::CommittedText || request.text.empty()) return input;
-  const auto lastWord = request.text.find_last_not_of(L"。，.,");
-  // Collapse only a repeated terminal comma/stop run in the model's view.
-  // Prefix offsets and the last boundary mark retain their meaning. Original
-  // document text remains the authority for review, IPC, validation and Tab.
-  if (lastWord != std::wstring::npos && request.text.size()-lastWord-1 > 1)
-    input.text = request.text.substr(0,lastWord+1) + request.text.back();
+  input.text = input_flow::InferenceTarget(request);
   return input;
 }
 bool ProtectedChange(const CheckRequest& request, const Suggestion& suggestion) {

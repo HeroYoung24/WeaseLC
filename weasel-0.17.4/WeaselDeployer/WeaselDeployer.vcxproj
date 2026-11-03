@@ -231,6 +231,14 @@
     <ResourceCompile Include="WeaselDeployer.rc" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\include\CorrectionInferenceView.h" />
+    <ClInclude Include="..\include\CorrectionFlowIdentity.h" />
+    <ClInclude Include="..\include\CorrectionHintLifetime.h" />
+    <ClInclude Include="..\include\CorrectionHintKeyCycle.h" />
+    <ClInclude Include="..\include\CorrectionPendingHints.h" />
+    <ClInclude Include="..\include\CorrectionLatestCheck.h" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\WeaselIPC\WeaselIPC.vcxproj">
       <Project>{ce11a2df-8d20-4b07-a935-4b0d03f0303d}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>

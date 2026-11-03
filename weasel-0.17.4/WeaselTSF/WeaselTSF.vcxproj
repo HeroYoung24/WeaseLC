@@ -508,6 +508,12 @@
     <ClInclude Include="Globals.h" />
     <ClInclude Include="ServerResponse.h" />
     <ClInclude Include="..\include\CorrectionCapture.h" />
+    <ClInclude Include="..\include\CorrectionFlowIdentity.h" />
+    <ClInclude Include="..\include\CorrectionHintLifetime.h" />
+    <ClInclude Include="..\include\CorrectionHintKeyCycle.h" />
+    <ClInclude Include="..\include\CorrectionPendingHints.h" />
+    <ClInclude Include="..\include\CorrectionLatestCheck.h" />
+    <ClInclude Include="..\include\CorrectionInferenceView.h" />
     <ClInclude Include="LanguageBar.h" />
     <ClInclude Include="Register.h" />
     <ClInclude Include="RegistrationWorkflow.h" />
