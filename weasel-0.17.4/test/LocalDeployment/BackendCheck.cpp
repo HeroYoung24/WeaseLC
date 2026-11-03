@@ -3,6 +3,7 @@
 #include <string>
 #include <WeaselIPC.h>
 #include <ResponseParser.h>
+#include <CorrectionBrokerClient.h>
 
 #ifndef WEASELC_LOCAL_TEST_BUILD
 #error This check must never connect to the daily backend
@@ -54,6 +55,19 @@ static int WordKeyContract() {
   return failures ? 1 : 0;
 }
 int wmain(int argc,wchar_t** argv) {
+  if(argc==3 && !wcscmp(argv[1],L"--correction-settings")) {
+    using namespace correction;
+    std::cout<<"wire request="<<sizeof(BrokerRequest)<<" reply="<<sizeof(BrokerReply)<<" version="<<BrokerRequest{}.version<<'\n';
+    for(DWORD budget:{20UL,500UL}) for(unsigned i=0;i<3;++i) {
+      BrokerRequest request;BrokerReply reply;BrokerCall call;const auto start=GetTickCount64();
+      const bool ok=call.Exchange(argv[2],request,reply,budget);
+      std::cout<<"settings ok="<<ok<<" budget="<<budget<<" ms="<<GetTickCount64()-start;
+      if(ok)std::cout<<" status="<<static_cast<DWORD>(reply.status)<<" enabled="<<reply.settings.enabled
+          <<" advanced="<<reply.settings.advancedFlow<<" minimum="<<reply.settings.minimumVisibleMs<<" maximum="<<reply.settings.maximumAgeMs;
+      std::cout<<'\n';
+    }
+    return 0;
+  }
   if(argc==2 && !wcscmp(argv[1],L"--word-key-contract"))return WordKeyContract();
   if(argc!=1)return 2;
   // Send only fixed synthetic keystrokes into a new private Rime session.

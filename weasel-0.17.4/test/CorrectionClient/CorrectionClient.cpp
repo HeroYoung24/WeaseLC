@@ -473,6 +473,11 @@ int wmain(int argc, wchar_t** argv) {
       decoded.automatic.minimumVisibleMs==3000,"legacy config does not opt into enhanced behavior");
   oldFlow=json::parse(flowEncoded);oldFlow.at("automatic").at("minimum_visible_ms")=13000;
   Check(!DecodePreferences(json::serialize(oldFlow),decoded),"invalid enhanced timing rejected without replacing settings");
+  auto migratedFlow=json::parse(flowEncoded);migratedFlow.at("automatic").as_object().erase("word_local_compatibility");
+  Check(!DecodePreferences(json::serialize(migratedFlow),decoded),"v3-to-v5 migration must supply retired policy field");
+  migratedFlow.at("automatic").as_object()["word_local_compatibility"]=false;
+  Check(DecodePreferences(json::serialize(migratedFlow),decoded) && decoded.automatic.advancedFlow,
+      "complete migrated v5 settings enable enhanced flow");
   std::cout << "Offline correction checks = " << checks << ", failures = " << failures << '\n';
   return failures ? 1 : 0;
 }

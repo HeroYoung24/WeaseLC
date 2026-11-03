@@ -18,6 +18,11 @@ try {
     $settings.automatic | Add-Member -NotePropertyName minimum_visible_ms -NotePropertyValue 3000 -Force
     $settings.automatic | Add-Member -NotePropertyName maximum_age_ms -NotePropertyValue 15000 -Force
   }
+  # v3 did not contain the retired Word-policy field. Both v4 and v5 require
+  # its explicit false value; changing only the version makes decoding fail.
+  if($settings.version -ge 4) {
+    $settings.automatic | Add-Member -NotePropertyName word_local_compatibility -NotePropertyValue $false -Force
+  }
   if ($Phase -ne 'Off') {
     $settings.timing = 0
     $settings.automatic.tab = $true
