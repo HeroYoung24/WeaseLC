@@ -49,8 +49,8 @@ void AutomaticCorrection::FlowCapture() {
 bool AutomaticCorrection::FlowReply(const correction::AutomaticReply& reply) {
   using Q=correction::input_flow::PendingHints;
   const auto now=GetTickCount64();
-  // Latest answer is authoritative for this same canonical source; an absent
-  // old suggestion is removed rather than kept through changed semantics.
+  // Verified adjacent commits may trigger a new check. A reply that omits the
+  // hint already shown to the user must not truncate its display lifetime.
   for(size_t r=0;r<flowRecordCount_;++r) if(flowQueue_.Contains(flowRecords_[r].identity)) {
     const auto& old=flowRecords_[r].item; bool found=false;
     for(DWORD i=0;i<reply.count;++i) {
@@ -58,7 +58,11 @@ bool AutomaticCorrection::FlowReply(const correction::AutomaticReply& reply) {
       if(old.start==item.start && old.originalUnits==item.originalUnits && old.replacementUnits==item.replacementUnits &&
           !wcscmp(old.original,item.original) && !wcscmp(old.replacement,item.replacement)) {found=true;break;}
     }
-    if(!found) flowQueue_.Finish(flowRecords_[r].identity,Q::Outcome::Invalidated,now);
+    const auto& record = flowRecords_[r];
+    const bool carryShown = record.identity == flowActive_ &&
+        record.sourceVersion < flowVersion_ && flowQueue_.WasShown(record.identity);
+    if (!found && !carryShown)
+      flowQueue_.Finish(record.identity,Q::Outcome::Invalidated,now);
   }
   for(DWORD i=0;i<reply.count;++i) {
     const auto& item=reply.items[i]; size_t index=flowRecordCount_;
@@ -70,7 +74,7 @@ bool AutomaticCorrection::FlowReply(const correction::AutomaticReply& reply) {
       if(flowRecordCount_==flowRecords_.size()) continue;
       flowRecords_[index].identity={flowEpoch_,index+1,1}; ++flowRecordCount_;
     }
-    auto& record=flowRecords_[index]; record.item=item;
+    auto& record=flowRecords_[index]; record.item=item; record.sourceVersion=flowVersion_;
     correction::input_flow::PendingHint hint;
     hint.identity=record.identity; hint.session=flowEpoch_; hint.modelRevision=brokerRevision_?brokerRevision_:1;
     hint.sourceVersion=flowVersion_; hint.start=item.start; hint.originalUnits=item.originalUnits; hint.replacementUnits=item.replacementUnits;

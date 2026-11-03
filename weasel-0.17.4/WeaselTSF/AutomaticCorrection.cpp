@@ -341,6 +341,7 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
         !correction::ValidAutomaticOptions(preferences_.automatic) ? 3 : !context || !committed ? 4 : 5;
     correction::SaveFrontendDiagnostic(L"LastGate", gate);
 #endif
+    if (preserve) Cancel();
     return;
   }
 #ifdef WEASELC_LOCAL_TEST_BUILD
@@ -855,6 +856,10 @@ void AutomaticCorrection::Refresh() {
     InvalidateRect(window_, nullptr, TRUE);
   }
   if (EqualRect(&previous, &placed) && IsWindowVisible(window_)) {
+    // Source revalidation suspends the visibility clock even when the HWND
+    // stays visible and does not move.
+    if (preferences_.automatic.advancedFlow)
+      flowQueue_.Visibility(flowActive_, true, GetTickCount64());
     if (!exposure_.shown) exposure_.shown = GetTickCount64();
     return;
   }
@@ -1147,7 +1152,13 @@ void AutomaticCorrection::Poll() {
       }
       const bool accepted = AcceptReply(reply.result);
       SecureZeroMemory(&reply, sizeof(reply));
-      if (!accepted) { InferenceFailed(correction::AutomaticStage::InvalidReply); return; }
+      if (!accepted) {
+        if (preferences_.automatic.advancedFlow)
+          Report(correction::AutomaticStage::InvalidReply);
+        else
+          InferenceFailed(correction::AutomaticStage::InvalidReply);
+        return;
+      }
       if (!Request(false, context_)) { Cancel(); return; }
     }
   }

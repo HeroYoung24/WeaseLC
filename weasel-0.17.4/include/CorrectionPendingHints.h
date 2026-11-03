@@ -119,7 +119,11 @@ class PendingHints {
     Sweep(nowMs);
     const auto at = Find(identity);
     if (!at || !IsActive(identity) || (visible && (!sourceReady_ || !entries_[*at].validated))) return false;
-    if (entries_[*at].lifetime.SetVisible(visible, nowMs)) return true;
+    auto& entry = entries_[*at];
+    if (entry.lifetime.SetVisible(visible, nowMs)) {
+      entry.shown = entry.shown || visible;
+      return true;
+    }
     Remove(*at, Outcome::Expired, nowMs);
     return false;
   }
@@ -161,12 +165,21 @@ class PendingHints {
         entries_[*at].lifetime.CanReveal(nowMs);
   }
   bool Contains(const HintIdentity& identity) const { return Find(identity).has_value(); }
+  bool WasShown(const HintIdentity& identity) const {
+    const auto at = Find(identity);
+    return at && entries_[*at].shown;
+  }
   bool AdmissionClosed() const { return closed_; }
   bool WritePending() const { return applying_; }
   void ResetForNewScope() { *this = PendingHints{}; }
 
  private:
-  struct Entry { PendingHint hint; HintLifetime lifetime; bool validated = false; };
+  struct Entry {
+    PendingHint hint;
+    HintLifetime lifetime;
+    bool validated = false;
+    bool shown = false;
+  };
   struct Mark { HintIdentity identity; Outcome outcome = Outcome::Invalidated; };
   bool Valid(const PendingHint& hint) const {
     return begun_ && hint.identity.Valid() && hint.identity.editingEpoch == epoch_ &&

@@ -1,6 +1,6 @@
 // Exercise the actual opt-in TSF controller, not just the pure policy headers.
-auto flowPumpUntil=[&](std::function<bool()> done) {
-  const auto deadline=GetTickCount64()+1500;
+auto flowPumpUntil=[&](std::function<bool()> done, ULONGLONG timeout=1500) {
+  const auto deadline=GetTickCount64()+timeout;
   do {MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
     if(done())return true;Sleep(5);
   } while(GetTickCount64()<deadline);
@@ -90,6 +90,16 @@ for(unsigned scenario=0;scenario<9;++scenario) {
         "next composition exposes enhanced hint");
     check(Commit(apply,subject.Get(),context.Get(),client,L"你好") && isReady() && IsWindowVisible(window),
         "once seen enhanced hint survives fast short-word confirmation");
+    AutomaticReply noSuggestion;
+    check(inject(subject.Get(),&noSuggestion)==S_OK && isReady() && IsWindowVisible(window),
+        "new check omitting a visible hint does not dismiss it after a verified append");
+    const auto afterMinimum = GetTickCount64() + options.automatic.minimumVisibleMs + 100;
+    check(flowPumpUntil([&]{return GetTickCount64() >= afterMinimum;},
+        options.automatic.minimumVisibleMs + 500) && isReady() && IsWindowVisible(window),
+        "visible hint outlives the minimum display interval");
+    key(subject.Get(),context.Get(),VK_TAB,0,1,&eaten);key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
+    check(eaten && host->text==L"这里有错字，也在图书管。你好",
+        "carried hint still edits only the original spelling");
   }
   invalidate(subject.Get());document->Pop(TF_POPF_ALL);
 }

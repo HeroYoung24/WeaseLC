@@ -138,7 +138,11 @@ class AutomaticCorrection {
   correction::BehaviorExposure exposure_, pendingEscape_;
   ULONGLONG pendingEscapeUntil_ = 0;
   com_ptr<ITfContext> escapeContext_;
-  struct FlowRecord { correction::input_flow::HintIdentity identity; correction::AutomaticReply::Item item; };
+  struct FlowRecord {
+    correction::input_flow::HintIdentity identity;
+    correction::AutomaticReply::Item item;
+    ULONGLONG sourceVersion;
+  };
   std::array<FlowRecord,64> flowRecords_{};
   size_t flowRecordCount_ = 0;
   size_t flowShownCount_ = 0;
