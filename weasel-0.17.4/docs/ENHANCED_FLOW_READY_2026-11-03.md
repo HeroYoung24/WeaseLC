@@ -2,6 +2,12 @@
 
 2026-11-03：已完成实际TSF、配置、窗口和协调器适配，最终双架构构建/完整回归通过。可以准备独立实机包；本文件中的“通过”指自动或隔离宿主结果，尚不等于Edge人工验收。
 
+## 已成套安装，等待基础反馈
+
+5153914已通过output/LocalTest/UpdatePatch-20261103-155422更新到独立测试安装。安装前未发现旧DLL占用，实际回退演练/应用/200文件哈希及日常基线通过，双架构后端中文及各3项选词/标点检查、输入项启用检查通过。x64 DLL SHA256为AA46B4CF5C47C48DA57B1C89A5DBE8C72999F84E3572C7ACE2292A0193C1C025。
+
+当前普通64位专用后端运行，Edge合成页已打开，等待用户A/B/C基础输入/中断/搜狗反馈；纠错Off、增强Off、学习Off且原1组记录保留，没有真实模型运行。通过基础后才用Fixed -AdvancedFlow开启增强，随后真实4B。旧配置备份在output/FlowAdapter-20261103/before-install-settings.json，阶段恢复入口为output/LocalTest/advanced-flow-acceptance-20261103.json。不把新控制器的隔离通过当成人工通过。
+
 ## 实际接入
 
 - 新增AutomaticCorrectionFlow.inc，在原控制器中接入5项队列、64项有界终态标记、单次Tab/Esc、年龄/可见时间及一个在途/一个最新快照调度；原尾部/拼音写回和写后确认仍是唯一修改通道。
