@@ -33,6 +33,15 @@ bool ReadExact(ITfRange* range, TfEditCookie cookie, const std::wstring& expecte
   SecureZeroMemory(buffer, sizeof(buffer));
   return equal;
 }
+// Work only within the tail of the current IME commit. Requiring a separator
+// avoids starting the model input halfway through a word or a surrogate pair.
+size_t RecentCommitStart(const std::wstring& text) {
+  if (text.size() <= correction::kMaxTargetUnits) return 0;
+  const auto boundary = text.find_first_of(L"。！？；，.!?;, \t\r\n", text.size() - correction::kMaxTargetUnits - 1);
+  if (boundary == std::wstring::npos) return text.size();
+  const auto start = text.find_first_not_of(L" \t\r\n", boundary + 1);
+  return start == std::wstring::npos ? text.size() : start;
+}
 class AutomaticEdit : public CEditSession {
  public:
   AutomaticEdit(WeaselTSF* owner, ITfContext* context, bool apply)
@@ -333,9 +342,13 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
   gate.flags |= (static_cast<DWORD>(preferences_.mode) << 8) |
       (preferences_.automatic.enabled ? 0x10000 : 0);
 #endif
+  const auto sourceStart = preferences_.automatic.advancedFlow ? RecentCommitStart(text) : 0;
+  const auto sourceUnits = text.size() - sourceStart;
   if (!preferences_.automatic.enabled || preferences_.mode != correction::Mode::Local ||
       !correction::ValidAutomaticOptions(preferences_.automatic) || !context || !committed ||
-      !correction::ValidAutomaticText(text.c_str(), static_cast<unsigned>(text.size()), 1024)) {
+      sourceUnits > correction::kMaxTargetUnits ||
+      !correction::ValidAutomaticText(text.c_str() + sourceStart, static_cast<unsigned>(sourceUnits),
+                                      correction::kMaxTargetUnits)) {
 #ifdef WEASELC_LOCAL_TEST_BUILD
     gate.stage = !preferences_.automatic.enabled || preferences_.mode != correction::Mode::Local ? 2 :
         !correction::ValidAutomaticOptions(preferences_.automatic) ? 3 : !context || !committed ? 4 : 5;
@@ -354,14 +367,25 @@ void AutomaticCorrection::Capture(ITfContext* context, TfEditCookie cookie,
     if (range_->ShiftEndToRange(cookie, committed, TF_ANCHOR_END) != S_OK) { Report(correction::AutomaticStage::RangeMismatch); Cancel(); return; }
     accumulated += text;
   } else {
-    accumulated = text;
+    accumulated.assign(text, sourceStart, sourceUnits);
     if (committed->Clone(&range_) != S_OK) { Report(correction::AutomaticStage::RangeMismatch); Cancel(); return; }
+    if (sourceStart) {
+      LONG moved = 0, fromStart = -1;
+      const auto offset = -static_cast<LONG>(sourceUnits);
+      if (range_->Collapse(cookie, TF_ANCHOR_END) != S_OK ||
+          range_->ShiftStart(cookie, offset, &moved, nullptr) != S_OK || moved != offset ||
+          range_->CompareStart(cookie, committed, TF_ANCHOR_START, &fromStart) != S_OK || fromStart < 0) {
+        Report(correction::AutomaticStage::RangeMismatch);
+        Cancel();
+        return;
+      }
+    }
   }
   if (!range_ ||
       range_->SetGravity(cookie, TF_GRAVITY_BACKWARD, TF_GRAVITY_BACKWARD) != S_OK) { Report(correction::AutomaticStage::RangeMismatch); Cancel(); return; }
   text_ = std::move(accumulated);
   started_ = GetTickCount64();
-  lastAddedUnits_ = static_cast<DWORD>(text.size());
+  lastAddedUnits_ = static_cast<DWORD>(sourceUnits);
   scopeWaitUntil_ = carriedDeadline;
   const bool recovering = scopeWaitUntil_ != 0;
   if (!Validate(cookie, context)) {
@@ -1116,7 +1140,7 @@ void AutomaticCorrection::Poll() {
     nextSettings_ = now + 500;
   }
   if(preferences_.automatic.advancedFlow && flowInitialized_ && !process_ && !brokerCall_.Active() && !flowWork_)
-    flowWork_=flowScheduler_.Take(now);
+    flowWork_=flowScheduler_.Take(GetTickCount64());
   const bool start=preferences_.automatic.advancedFlow?flowWork_.has_value():
       !checked_ && !ready_ && now-started_>=preferences_.automatic.debounce;
   if (start && !process_ && !brokerCall_.Active()) {
@@ -1145,10 +1169,12 @@ void AutomaticCorrection::Poll() {
         // The automatic reply contains validated spelling pairs. New trailing
         // punctuation is equivalent only if every quoted original still matches
         // below; offsets are never guessed across a changed lexical source.
-        if(flowWork_) flowScheduler_.Complete(flowWork_->serial,true,now);
-        flowWork_.reset();
       }
       const bool accepted = AcceptReply(reply.result);
+      if (preferences_.automatic.advancedFlow && flowWork_) {
+        flowScheduler_.Complete(flowWork_->serial, accepted, GetTickCount64());
+        flowWork_.reset();
+      }
       SecureZeroMemory(&reply, sizeof(reply));
       if (!accepted) {
         if (preferences_.automatic.advancedFlow)

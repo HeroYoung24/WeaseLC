@@ -6,7 +6,7 @@ auto flowPumpUntil=[&](std::function<bool()> done, ULONGLONG timeout=1500) {
   } while(GetTickCount64()<deadline);
   return done();
 };
-for(unsigned scenario=0;scenario<10;++scenario) {
+for(unsigned scenario=0;scenario<13;++scenario) {
   ComPtr<ITfTextInputProcessorEx> subject;
   ComPtr<MemoryTextStore> host;host.Attach(new MemoryTextStore(IS_TEXT));
   ComPtr<ITfDocumentMgr> document;ComPtr<ITfContext> context;TfEditCookie ignored=0;
@@ -29,9 +29,29 @@ for(unsigned scenario=0;scenario<10;++scenario) {
   if(scenario==7) {answer.items[0].replacementUnits=3;wcscpy_s(answer.items[0].replacement,L"错别字");}
   Preferences options;options.mode=Mode::Local;options.automatic.enabled=true;options.automatic.advancedFlow=true;
   options.timing=scenario==8?0:1;
+  BOOL eaten=FALSE;
+  if (scenario == 10 || scenario == 11) {
+    std::wstring prefix(correction::kMaxTargetUnits + 20, L'甲');
+    if (scenario == 10) prefix += L"\xD83D\xDE42。";
+    const auto passage = prefix + (scenario == 10 ? text : L"这里有错子");
+    check(configure(subject.Get(),&options,client,L"")==S_OK &&
+        Commit(apply,subject.Get(),context.Get(),client,passage) && host->text==passage,
+        "oversized IME commit reaches the host unchanged");
+    if (scenario == 10) {
+      check(inject(subject.Get(),&answer)==S_OK && isReady(),
+          "oversized commit admits only the range-verified tail after its separator");
+      key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
+      check(eaten && host->text==prefix+L"这里有错字，也在图书管。",
+          "tail Tab preserves the excluded prefix and its surrogate pair");
+    } else {
+      check(inject(subject.Get(),&answer)!=S_OK && !isReady(),
+          "no safe nonempty suffix means no correction for the oversized commit");
+    }
+    invalidate(subject.Get());document->Pop(TF_POPF_ALL);
+    continue;
+  }
   check(configure(subject.Get(),&options,client,L"")==S_OK && Commit(apply,subject.Get(),context.Get(),client,text.c_str()) &&
       inject(subject.Get(),&answer)==S_OK && isReady(),"advanced controller accepts multiple verified hints in next-input mode");
-  BOOL eaten=FALSE;
   if(scenario==0) {
     check(Commit(apply,subject.Get(),context.Get(),client,L"你好") && isReady(),"short word commit does not discard active hint");
     key(subject.Get(),context.Get(),VK_TAB,0,1,&eaten);key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
@@ -100,7 +120,7 @@ for(unsigned scenario=0;scenario<10;++scenario) {
     key(subject.Get(),context.Get(),VK_TAB,0,1,&eaten);key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
     check(eaten && host->text==L"这里有错字，也在图书管。你好",
         "carried hint still edits only the original spelling");
-  } else {
+  } else if(scenario==9) {
     key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
     check(eaten && host->text==L"这里有错字，也在图书管。",
         "actual-only Tab accepts a visible hint without a TSF query");
@@ -112,6 +132,16 @@ for(unsigned scenario=0;scenario<10;++scenario) {
     key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
     check(eaten && host->text==L"这里有错字，也在图书馆。",
         "a fresh actual-only Tab accepts the next hint");
+  } else {
+    check(Commit(apply,subject.Get(),context.Get(),client,L"你好") && isReady(),
+        "visible hint carries over an adjacent commit before rechecking");
+    answer.count=1;
+    answer.items[0].replacementUnits=3;
+    wcscpy_s(answer.items[0].replacement,L"错别字");
+    check(inject(subject.Get(),&answer)==S_OK && isReady(),"new overlapping correction replaces the carried proposal");
+    key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
+    check(eaten && host->text==L"这里有错别字，也在图书管。你好",
+        "Tab applies the new proposal instead of a superseded overlapping hint");
   }
   invalidate(subject.Get());document->Pop(TF_POPF_ALL);
 }

@@ -50,16 +50,18 @@ bool AutomaticCorrection::FlowReply(const correction::AutomaticReply& reply) {
   using Q=correction::input_flow::PendingHints;
   const auto now=GetTickCount64();
   // Verified adjacent commits may trigger a new check. A reply that omits the
-  // hint already shown to the user must not truncate its display lifetime.
+  // hint already shown to the user must not truncate its display lifetime,
+  // but a different correction over the same text requires re-evaluation.
   for(size_t r=0;r<flowRecordCount_;++r) if(flowQueue_.Contains(flowRecords_[r].identity)) {
-    const auto& old=flowRecords_[r].item; bool found=false;
+    const auto& old=flowRecords_[r].item; bool found=false, overlaps=false;
     for(DWORD i=0;i<reply.count;++i) {
       const auto& item=reply.items[i];
       if(old.start==item.start && old.originalUnits==item.originalUnits && old.replacementUnits==item.replacementUnits &&
           !wcscmp(old.original,item.original) && !wcscmp(old.replacement,item.replacement)) {found=true;break;}
+      overlaps |= item.start < old.start + old.originalUnits && old.start < item.start + item.originalUnits;
     }
     const auto& record = flowRecords_[r];
-    const bool carryShown = record.identity == flowActive_ &&
+    const bool carryShown = !overlaps && record.identity == flowActive_ &&
         record.sourceVersion < flowVersion_ && flowQueue_.WasShown(record.identity);
     if (!found && !carryShown)
       flowQueue_.Finish(record.identity,Q::Outcome::Invalidated,now);
