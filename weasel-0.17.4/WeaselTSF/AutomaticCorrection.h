@@ -153,7 +153,7 @@ class AutomaticCorrection {
   std::optional<correction::input_flow::CheckWork> flowWork_;
   ULONGLONG flowEpoch_ = 1, flowVersion_ = 0, flowSerial_ = 0, flowKeySerial_ = 0;
   ULONGLONG flowTabStroke_ = 0, flowEscStroke_ = 0;
-  bool flowInitialized_ = false, flowWriting_ = false, flowEscBlocked_ = false, flowIntegrated_ = false, flowEngaged_ = false;
+  bool flowInitialized_ = false, flowWriting_ = false, flowEscBlocked_ = false, flowEngaged_ = false;
   std::wstring flowLastView_;
 #ifdef WEASELC_LOCAL_TEST_BUILD
   com_ptr<ITfContext> scopeReadTraceContext_;

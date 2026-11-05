@@ -36,12 +36,13 @@ class HintKeyCycle {
     return Decision::Attempt;
   }
 
-  // Explicit route for an integrated candidate callback with no TSF query.
-  // Do not use this to bypass a query that declined a now-visible suggestion.
-  Decision ActualOnly(std::uint64_t stroke, const HintIdentity& hint, bool eligible, bool repeat) {
-    if (open_ && claimed_) return Decision::Consume;
-    if (open_ && (stroke == stroke_ || repeat)) return Decision::Pass;
+  // Hosts may send an actual key without a preceding query. A matching
+  // query, including one that declined the key, still owns its decision.
+  Decision ActualWithOptionalQuery(std::uint64_t stroke, const HintIdentity& hint, bool eligible, bool repeat) {
+    if (open_ && (stroke == stroke_ || claimed_ || repeat))
+      return Actual(stroke, hint, eligible, repeat);
     if (open_) ResetAfterFocusLoss();  // An unclaimed earlier stroke has ended.
+    if (!eligible) return Decision::Pass;
     if (Query(stroke, hint, eligible, repeat) == Decision::Pass) return Decision::Pass;
     return Actual(stroke, hint, eligible, repeat);
   }

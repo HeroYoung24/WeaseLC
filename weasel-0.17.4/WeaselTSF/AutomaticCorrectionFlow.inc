@@ -164,7 +164,7 @@ bool AutomaticCorrection::FlowKey(ITfContext* context,WPARAM key,LPARAM flags,bo
   if(eligible && (!Request(false,context) || !ready_ || !IsWindowVisible(window_))) eligible=false;
   const auto identity=flowActive_;
   const auto result=test?gate.Query(stroke,identity,eligible,repeat):
-      flowIntegrated_?gate.ActualOnly(stroke,identity,eligible,repeat):gate.Actual(stroke,identity,eligible,repeat);
+      gate.ActualWithOptionalQuery(stroke,identity,eligible,repeat);
   if(result==Gate::Decision::Pass) return false;
   *eaten=TRUE;
   if(result!=Gate::Decision::Attempt) return true;

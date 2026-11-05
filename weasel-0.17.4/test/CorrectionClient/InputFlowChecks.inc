@@ -25,13 +25,13 @@ void RunInputFlowChecks() {
 
   using D=HintKeyCycle::Decision;
   HintKeyCycle key;
-  Check(key.Query(1,a,false,false)==D::Pass && key.Actual(1,a,true,false)==D::Pass,
+  Check(key.Query(1,a,false,false)==D::Pass && key.ActualWithOptionalQuery(1,a,true,false)==D::Pass,
       "flow hint appearing after declined query cannot steal Tab");
   key.Release(1,false);
   Check(key.Query(2,a,true,false)==D::Consume && key.Actual(2,b,true,false)==D::Consume,
       "flow changed hint does not acquire old key offer");
   key.Release(2,false);
-  Check(key.Query(3,a,true,false)==D::Consume && key.Actual(3,a,true,false)==D::Attempt,
+  Check(key.Query(3,a,true,false)==D::Consume && key.ActualWithOptionalQuery(3,a,true,false)==D::Attempt,
       "flow exactly one actual action after query");
   for(unsigned i=0;i<32;++i)
     Check(key.Query(3,b,true,true)==D::Consume && key.Actual(3,b,true,true)==D::Consume,
@@ -39,8 +39,9 @@ void RunInputFlowChecks() {
   key.InvalidateOffer();
   Check(key.Release(3,true)==D::Consume && key.BlocksQueueAdvance(), "flow query key-up cannot release latch");
   Check(key.Release(3,false)==D::Consume && !key.BlocksQueueAdvance(), "flow actual key-up releases latch");
-  Check(key.ActualOnly(4,b,true,false)==D::Attempt && key.ActualOnly(4,b,true,false)==D::Consume,
-      "flow integrated route attempts only once");
+  Check(key.ActualWithOptionalQuery(4,b,true,false)==D::Attempt &&
+      key.ActualWithOptionalQuery(4,b,true,true)==D::Consume,
+      "flow actual-only route attempts only once");
   key.Release(4,false);
   Check(key.Actual(5,a,true,false)==D::Pass, "flow unmatched actual cannot create an offer");
 

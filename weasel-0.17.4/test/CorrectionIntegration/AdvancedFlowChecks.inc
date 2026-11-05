@@ -6,7 +6,7 @@ auto flowPumpUntil=[&](std::function<bool()> done, ULONGLONG timeout=1500) {
   } while(GetTickCount64()<deadline);
   return done();
 };
-for(unsigned scenario=0;scenario<9;++scenario) {
+for(unsigned scenario=0;scenario<10;++scenario) {
   ComPtr<ITfTextInputProcessorEx> subject;
   ComPtr<MemoryTextStore> host;host.Attach(new MemoryTextStore(IS_TEXT));
   ComPtr<ITfDocumentMgr> document;ComPtr<ITfContext> context;TfEditCookie ignored=0;
@@ -83,7 +83,7 @@ for(unsigned scenario=0;scenario<9;++scenario) {
     check(flowPumpUntil(isReady),"queue revalidates after spelling length change");
     key(subject.Get(),context.Get(),VK_TAB,0,1,&eaten);key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
     check(eaten && host->text==L"这里有错别字，也在图书馆。","next spelling uses rebuilt offset after length change");
-  } else {
+  } else if(scenario==8) {
     DWORD value=0;HWND window=nullptr;status(subject.Get(),&value,&window);
     check(!IsWindowVisible(window),"enhanced first hint still honors next-input timing preference");
     check(edit([&](TfEditCookie ec){return preedit(subject.Get(),context.Get(),ec,L"ni");}) && IsWindowVisible(window),
@@ -100,6 +100,18 @@ for(unsigned scenario=0;scenario<9;++scenario) {
     key(subject.Get(),context.Get(),VK_TAB,0,1,&eaten);key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
     check(eaten && host->text==L"这里有错字，也在图书管。你好",
         "carried hint still edits only the original spelling");
+  } else {
+    key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
+    check(eaten && host->text==L"这里有错字，也在图书管。",
+        "actual-only Tab accepts a visible hint without a TSF query");
+    key(subject.Get(),context.Get(),VK_TAB,1LL<<30,0,&eaten);
+    check(eaten && host->text==L"这里有错字，也在图书管。",
+        "actual-only autorepeat cannot accept a second hint");
+    key(subject.Get(),context.Get(),VK_TAB,0,2,&eaten);
+    check(flowPumpUntil(isReady),"actual-only release lets the second hint advance");
+    key(subject.Get(),context.Get(),VK_TAB,0,0,&eaten);
+    check(eaten && host->text==L"这里有错字，也在图书馆。",
+        "a fresh actual-only Tab accepts the next hint");
   }
   invalidate(subject.Get());document->Pop(TF_POPF_ALL);
 }

@@ -886,8 +886,6 @@ bool AutomaticCorrection::IntegratedKey(WPARAM key, LPARAM flags, BOOL* eaten) {
       key != VK_HOME && key != VK_END && key != VK_DELETE && key != VK_BACK &&
       key != VK_SHIFT && key != VK_CONTROL && key != VK_MENU) return false;
   com_ptr<ITfContext> target = context_;
-  const bool previous=flowIntegrated_; flowIntegrated_=true;
-  struct Restore {bool& field;bool value;~Restore(){field=value;}} restore{flowIntegrated_,previous};
   return Key(target, key, flags, false, false, eaten);
 }
 void AutomaticCorrection::RecordBehavior(const correction::BehaviorExposure& exposure, correction::BehaviorOutcome outcome) noexcept try {
