@@ -447,12 +447,12 @@ std::unique_ptr<IModelClient> CreateModelClient(Provider provider,
 const wchar_t* StateText(State state, bool chinese) {
   const wchar_t* hans[] = {L"纠错已关闭。", L"模型未给出修改建议；不代表全文无错。",
       L"建议因提示阈值、保留词或文本保护规则被隐藏。", L"检测到可供参考的建议。", L"文本为空、过长或含无效字符。",
-      L"请检查模式、模型名、地址、超时及联网授权；Codex CLI 尚未开放。", L"未知或受保护文本，未发送。",
+      L"请检查接口地址、模型名、超时设置和联网授权。", L"未知或受保护文本，未发送。",
       L"检查已取消。", L"请求超时。", L"无法连接模型服务，请确认服务已启动。",
       L"服务返回非成功状态。", L"模型返回格式不符合要求，未显示建议。"};
   const wchar_t* english[] = {L"Correction is off.", L"No suggestion; this does not prove the text is error-free.",
       L"Suggestions were hidden by threshold, kept terms or text protection.", L"Suggestions are available for review.",
-      L"Text is empty, too long or invalid.", L"Check mode, model, endpoint, timeout and consent. Codex CLI is reserved.",
+      L"Text is empty, too long or invalid.", L"Check the endpoint, model name, timeout, and permission to send text.",
       L"Unknown or protected text was not sent.", L"Check cancelled.", L"Request timed out.",
       L"Cannot connect. Check that the model service is running.", L"Service returned an unsuccessful status.",
       L"Invalid model response; suggestions were suppressed."};

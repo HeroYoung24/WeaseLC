@@ -198,7 +198,7 @@ STDAPI CLangBarItemButton::GetInfo(TF_LANGBARITEMINFO* pInfo) {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   lstrcpyW(pInfo->szDescription, L"Weasel Context Probe");
 #else
-  lstrcpyW(pInfo->szDescription, L"WeaselTSF Button");
+  lstrcpyW(pInfo->szDescription, get_weasel_ime_name().c_str());
 #endif
   return S_OK;
 }
@@ -278,6 +278,9 @@ STDAPI CLangBarItemButton::OnClick(TfLBIClick click,
 }
 
 void CLangBarItemButton::UpdateCorrectionMenu(HMENU menu) {
+#if !defined(WEASELC_LOCAL_TEST_BUILD) && !defined(WEASEL_CORRECTION_PROBE_BUILD)
+  DeleteMenu(menu, ID_WEASELTRAY_CORRECTION_PROBE, MF_BYCOMMAND);
+#endif
   const bool inputOnly = correction::InputOnlyExecutable(correction::CurrentAppName().c_str());
   const bool paused = correction::UserPausedHost(true);
   const bool foreground = correction::CorrectionMenuTargetsForeground(
@@ -333,7 +336,7 @@ STDAPI CLangBarItemButton::GetText(BSTR* pbstrText) {
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
   *pbstrText = SysAllocString(L"Weasel Context Probe");
 #else
-  *pbstrText = SysAllocString(L"WeaselTSF Button");
+  *pbstrText = SysAllocString(get_weasel_ime_name().c_str());
 #endif
   return (*pbstrText == NULL) ? E_OUTOFMEMORY : S_OK;
 }
@@ -422,6 +425,7 @@ void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
       } else MessageBoxW(nullptr, L"无法保存应用纠错偏好。 / Could not save application preference.", L"WeaseLC", MB_OK | MB_ICONINFORMATION);
       break;
     }
+#if defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASEL_CORRECTION_PROBE_BUILD)
     case ID_WEASELTRAY_CORRECTION_PROBE: {
       _correctionProbePending = false;
       _correctionProbeContext = nullptr;
@@ -445,6 +449,7 @@ void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
       }
       break;
     }
+#endif
     case ID_WEASELTRAY_RERUN_SERVICE:
     case ID_WEASELTRAY_INSTALLDIR:
       if (RegGetStringValue(HKEY_LOCAL_MACHINE, GetWeaselRegName(),

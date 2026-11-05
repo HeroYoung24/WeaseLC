@@ -7,8 +7,6 @@
 #include <mutex>
 #include <thread>
 #include <vector>
-#include <CorrectionProbe.h>
-#include <CorrectionDiagnostics.h>
 #include <CorrectionReview.h>
 #include <CorrectionLexicon.h>
 #include <CorrectionServiceControl.h>
@@ -579,31 +577,11 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
       SendDlgItemMessageW(dialog, pair.first, EM_SETLIMITTEXT, pair.second, 0);
     LoadProfile(dialog, *state);
     if (state->demo) SetDlgItemTextW(dialog, IDC_CORRECTION_TEST_TEXT, L"这里有错子。");
-    const auto probe = LoadProbeResult();
-    const wchar_t* zh[] = {L"尚未测试宿主上下文。", L"等待同一输入框编辑。", L"上次探测可读取邻近文字。",
-        L"无可用上下文。", L"焦点改变，探测已取消。", L"输入类型未知，未读取。", L"受保护字段，未读取。",
-        L"选区不可用。", L"读取失败或被宿主拒绝。"};
-    const wchar_t* en[] = {L"Host context not tested.", L"Waiting for an edit in the same field.", L"Last probe could read nearby text.",
-        L"No context available.", L"Focus changed; probe cancelled.", L"Unknown field; skipped.", L"Protected field; skipped.",
-        L"Selection unavailable.", L"Host context read failed or was denied."};
-    const auto probeIndex = static_cast<unsigned>(probe.status);
-    std::wstring probeText = state->chinese ? zh[probeIndex] : en[probeIndex];
-    const auto diagnostic = correction::LoadAutomaticDiagnostic();
-    if (diagnostic.stage != correction::AutomaticStage::NotRun) {
-      probeText = state->Text(L"上次自动检查：", L"Last automatic check: ");
-      probeText += correction::AutomaticStageText(diagnostic.stage, state->chinese);
-      if (diagnostic.stage == correction::AutomaticStage::FocusBlocked)
-        probeText += std::wstring(L" · ") + correction::FocusStageText(diagnostic.focus, state->chinese);
-      if (diagnostic.stage == correction::AutomaticStage::ScopeUnavailable ||
-          diagnostic.stage == correction::AutomaticStage::ProtectedField)
-        probeText += std::wstring(L" · ") + correction::ScopeStageText(correction::LoadScopeDiagnostic().stage, state->chinese);
-    }
-    SetDlgItemTextW(dialog, IDC_CORRECTION_PROBE_STATUS, probeText.c_str());
     SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,
         state->demo ? state->Text(L"离线演示：点击“检查文本”查看模拟建议；不调用模型，不保存设置。",
                                   L"Offline demo: Check text for fixture suggestions. No model calls or saved settings.") :
-            state->Text(L"填写模型名后可手动检查；自动提示需在左下方单独开启（仅本地模型）。",
-                        L"Set a model for manual checks. Enable automatic hints separately (local only)."));
+            state->Text(L"填写接口地址和模型名后，点击“检查文本”。",
+                        L"Enter the endpoint and model name, then choose Check text."));
     if (!state->lexiconReady) SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,
         state->Text(L"保留词表读取失败，请在“管理保留词”中清空并保存后重试。",
                     L"Kept terms could not be read. Clear/save them in Manage kept terms before checking."));
@@ -853,7 +831,7 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
     for (int id : {IDC_CORRECTION_OFF, IDC_CORRECTION_LOCAL, IDC_CORRECTION_ONLINE,
         IDC_CORRECTION_ENDPOINT, IDC_CORRECTION_MODEL, IDC_CORRECTION_TOKEN, IDC_CORRECTION_TIMEOUT,
         IDC_CORRECTION_SCORE, IDC_CORRECTION_TEST_TEXT, IDC_CORRECTION_STATE, IDC_CORRECTION_RESULT,
-        IDC_CORRECTION_CHECK, IDC_CORRECTION_CANCEL_CHECK, IDC_CORRECTION_CLI_RESERVED,
+        IDC_CORRECTION_CHECK, IDC_CORRECTION_CANCEL_CHECK,
         IDC_CORRECTION_JSON_MODE, IDC_CORRECTION_CONSENT, IDC_CORRECTION_DEFAULTS,
         IDC_CORRECTION_SUGGESTIONS, IDC_CORRECTION_APPLY, IDC_CORRECTION_IGNORE,
         IDC_CORRECTION_TERMS, IDC_CORRECTION_AUTOMATIC, IDC_CORRECTION_APPS,
