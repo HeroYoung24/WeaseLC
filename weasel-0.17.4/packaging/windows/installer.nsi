@@ -21,6 +21,8 @@ VIAddVersionKey /LANG=2052 "FileVersion" "${DISPLAY_VERSION}"
 VIAddVersionKey /LANG=2052 "LegalCopyright" "WeaseLC contributors; RIME Developers"
 !define MUI_ICON "..\..\resource\weasel.ico"
 !define MUI_ABORTWARNING
+!define MUI_CUSTOMFUNCTION_ABORT GuardInstallAbort
+!define MUI_CUSTOMFUNCTION_UNABORT un.GuardInstallAbort
 !define MUI_FINISHPAGE_TITLE "WeaseLC 已安装"
 !define MUI_FINISHPAGE_TEXT "请从开始菜单打开 WeaseLC，选择输入方案和配色。完成后，按 Win+空格切换输入法。$\r$\n$\r$\n自动纠错默认关闭。需要使用时，请先准备本地模型，再从输入法图标打开“管理纠错”。"
 !insertmacro MUI_PAGE_LICENSE "..\..\LICENSE.txt"
@@ -45,12 +47,12 @@ Var SelectedFolder
 Var SelectedStartup
 Var ChangingFiles
 
-Function .onUserAbort
+Function GuardInstallAbort
   ${If} $ChangingFiles == 1
     Abort
   ${EndIf}
 FunctionEnd
-Function un.onUserAbort
+Function un.GuardInstallAbort
   ${If} $ChangingFiles == 1
     Abort
   ${EndIf}
