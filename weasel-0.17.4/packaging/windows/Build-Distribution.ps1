@@ -39,6 +39,10 @@ foreach ($arch in 'x64','Win32') {
   $destination = if ($arch -eq 'x64') {$payload.FullName} else {Join-Path $payload 'Win32'}
   foreach ($name in 'WeaselServer.exe','WeaselDeployer.exe',$(if ($arch -eq 'x64') {'weaselx64.dll'} else {'weasel.dll'})) {
     $binary = Join-Path $root "$arch\$name"
+    $version = (Get-Item -LiteralPath $binary).VersionInfo
+    if ($version.FileVersion -ne '0.1.0.1' -or $version.ProductVersion -ne '0.1.0-beta.1' -or $version.ProductName -ne 'WeaseLC') {
+      throw "Wrong product metadata in $binary."
+    }
     $bytes = [IO.File]::ReadAllBytes($binary)
     if ($bytes.Length -lt 256 -or [BitConverter]::ToUInt16($bytes,0) -ne 0x5a4d) { throw 'Invalid binary.' }
     $machine = [BitConverter]::ToUInt16($bytes,[BitConverter]::ToInt32($bytes,0x3c)+4)

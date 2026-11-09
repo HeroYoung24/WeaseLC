@@ -2,6 +2,7 @@
 // Microsoft Visual C++ generated resource script.
 //
 #include "resource.h"
+#include "../include/WeaselVersion.h"
 #ifndef APSTUDIO_INVOKED
  #define STRZ2(x) #x
  #define STRZ(x) STRZ2(x)
@@ -323,8 +324,8 @@ IDI_DEPLOY              ICON                    "..\\resource\\weasel.ico"
 //
 #ifndef APSTUDIO_INVOKED
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,0
- PRODUCTVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,0
+ FILEVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,VERSION_BUILD
+ PRODUCTVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,VERSION_BUILD
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -340,13 +341,13 @@ BEGIN
         BLOCK "080404b0"
         BEGIN
             VALUE "Comments", "Powered by RIME | 中州韵输入法引擎"
-            VALUE "CompanyName", "式恕堂"
+            VALUE "CompanyName", "WeaseLC contributors"
             VALUE "FileDescription", "小狼毫部署应用"
-            VALUE "FileVersion", FILE_VERSION
+            VALUE "FileVersion", STRZ(FILE_VERSION)
             VALUE "InternalName", "WeaselDeployer"
             VALUE "LegalCopyright", "式恕堂 版权所无"
             VALUE "OriginalFilename", "WeaselDeployer"
-            VALUE "ProductName", "小狼毫"
+            VALUE "ProductName", "WeaseLC"
             VALUE "ProductVersion", STRZ(PRODUCT_VERSION)
         END
     END
@@ -602,8 +603,8 @@ END
 
 #ifndef APSTUDIO_INVOKED
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,0
- PRODUCTVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,0
+ FILEVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,VERSION_BUILD
+ PRODUCTVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,VERSION_BUILD
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -619,13 +620,13 @@ BEGIN
         BLOCK "040404b0"
         BEGIN
             VALUE "Comments", "Powered by RIME | 中州韻輸入法引擎"
-            VALUE "CompanyName", "式恕堂"
+            VALUE "CompanyName", "WeaseLC contributors"
             VALUE "FileDescription", "小狼毫部署應用"
-            VALUE "FileVersion", FILE_VERSION
+            VALUE "FileVersion", STRZ(FILE_VERSION)
             VALUE "InternalName", "WeaselDeployer"
             VALUE "LegalCopyright", "式恕堂 版權所無"
             VALUE "OriginalFilename", "WeaselDeployer"
-            VALUE "ProductName", "小狼毫"
+            VALUE "ProductName", "WeaseLC"
             VALUE "ProductVersion", STRZ(PRODUCT_VERSION)
         END
     END
@@ -924,8 +925,8 @@ END
 
 #ifndef APSTUDIO_INVOKED
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,0
- PRODUCTVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,0
+ FILEVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,VERSION_BUILD
+ PRODUCTVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,VERSION_BUILD
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -941,13 +942,13 @@ BEGIN
         BLOCK "040404b0"
         BEGIN
             VALUE "Comments", "Powered by RIME | Rime Input Method Engine"
-            VALUE "CompanyName", "Shishutang"
-            VALUE "FileDescription", "Weasel Deployer"
-            VALUE "FileVersion", FILE_VERSION
+            VALUE "CompanyName", "WeaseLC contributors"
+            VALUE "FileDescription", "WeaseLC Settings"
+            VALUE "FileVersion", STRZ(FILE_VERSION)
             VALUE "InternalName", "WeaselDeployer"
             VALUE "LegalCopyright", "Copyleft RIME Developers"
             VALUE "OriginalFilename", "WeaselDeployer"
-            VALUE "ProductName", "Weasel"
+            VALUE "ProductName", "WeaseLC"
             VALUE "ProductVersion", STRZ(PRODUCT_VERSION)
         END
     END

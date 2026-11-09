@@ -15,6 +15,7 @@
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName).pch</PrecompiledHeaderOutputFile>
       <ProgramDataBaseFileName>$(IntDir)vc.pdb</ProgramDataBaseFileName>
     </ClCompile>
+    <ResourceCompile><PreprocessorDefinitions>WEASELC_DISTRIBUTION_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions></ResourceCompile>
     <Link><OutputFile>$(TargetPath)</OutputFile><ImportLibrary>$(OutDir)$(TargetName).lib</ImportLibrary><ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile></Link>
     <Lib><OutputFile>$(TargetPath)</OutputFile></Lib>
   </ItemDefinitionGroup>
