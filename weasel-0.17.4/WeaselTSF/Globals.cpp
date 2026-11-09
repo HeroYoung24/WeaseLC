@@ -7,7 +7,10 @@ LONG g_cRefDll = -1;
 
 CRITICAL_SECTION g_cs;
 
-#if defined(WEASELC_LOCAL_TEST_BUILD)
+#if defined(WEASELC_DISTRIBUTION_BUILD)
+static const GUID c_clsidTextService = WEASELC_PRODUCT_CLSID;
+static const GUID c_guidProfile = WEASELC_PRODUCT_PROFILE;
+#elif defined(WEASELC_LOCAL_TEST_BUILD)
 static const GUID c_clsidTextService = WEASELC_TEST_CLSID;
 static const GUID c_guidProfile = WEASELC_TEST_PROFILE;
 #elif defined(WEASEL_CORRECTION_PROBE_BUILD)

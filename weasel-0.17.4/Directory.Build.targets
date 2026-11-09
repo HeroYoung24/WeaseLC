@@ -1,0 +1,25 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Condition="'$(WEASELC_DISTRIBUTION_BUILD)'=='1'">
+    <OutDir>$(MSBuildThisFileDirectory)output\Distribution\$(Platform)\</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)msbuild\Distribution\$(Platform)\$(ProjectName)\</IntDir>
+    <TargetPath>$(OutDir)$(TargetName)$(TargetExt)</TargetPath>
+    <TargetDir>$(OutDir)</TargetDir>
+    <TLogLocation>$(IntDir)$(ProjectName).tlog\</TLogLocation>
+    <DesktopDeployRecipeFile>$(IntDir)$(TargetName).recipe</DesktopDeployRecipeFile>
+    <VERSION_MAJOR>0</VERSION_MAJOR><VERSION_MINOR>1</VERSION_MINOR><VERSION_PATCH>0</VERSION_PATCH>
+    <PRODUCT_VERSION>0.1.0-beta.1</PRODUCT_VERSION><FILE_VERSION>0.1.0.1</FILE_VERSION>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(WEASELC_DISTRIBUTION_BUILD)'=='1'">
+    <ClCompile>
+      <PreprocessorDefinitions>WEASELC_DISTRIBUTION_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName).pch</PrecompiledHeaderOutputFile>
+      <ProgramDataBaseFileName>$(IntDir)vc.pdb</ProgramDataBaseFileName>
+    </ClCompile>
+    <Link><OutputFile>$(TargetPath)</OutputFile><ImportLibrary>$(OutDir)$(TargetName).lib</ImportLibrary><ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile></Link>
+    <Lib><OutputFile>$(TargetPath)</OutputFile></Lib>
+  </ItemDefinitionGroup>
+  <Target Name="ValidateDistributionBuild" BeforeTargets="PrepareForBuild" Condition="'$(WEASELC_DISTRIBUTION_BUILD)'=='1'">
+    <Error Condition="'$(WEASELC_LOCAL_TEST_BUILD)'=='1' Or '$(WEASEL_CORRECTION_PROBE_BUILD)'=='1' Or '$(Configuration)'!='Release' Or ('$(Platform)'!='x64' And '$(Platform)'!='Win32')" Text="Distribution requires a separate Release x64/Win32 build." />
+    <Error Condition="'$(MSBuildProjectName)'=='WeaselSetup' Or '$(MSBuildProjectName)'=='WeaselIME'" Text="Distribution uses its dedicated installer and TSF registration, without legacy system-file installation." />
+  </Target>
+</Project>

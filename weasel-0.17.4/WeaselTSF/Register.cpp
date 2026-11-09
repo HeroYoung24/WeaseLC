@@ -6,7 +6,7 @@
 
 #define CLSID_STRLEN 38  // strlen("{xxxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxx}")
 
-#if defined(WEASEL_CORRECTION_PROBE_BUILD) || defined(WEASELC_LOCAL_TEST_BUILD)
+#if defined(WEASEL_CORRECTION_PROBE_BUILD) || defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASELC_DISTRIBUTION_BUILD)
 static const char c_szInfoKeyPrefix[] = "Software\\Classes\\CLSID\\";
 static const HKEY kRegistrationHive = HKEY_LOCAL_MACHINE;
 #else
@@ -102,7 +102,7 @@ HRESULT RegisterProfiles() {
         hkl, 0, enable, 0);
   };
 
-#if defined(WEASEL_CORRECTION_PROBE_BUILD) || defined(WEASELC_LOCAL_TEST_BUILD)
+#if defined(WEASEL_CORRECTION_PROBE_BUILD) || defined(WEASELC_LOCAL_TEST_BUILD) || defined(WEASELC_DISTRIBUTION_BUILD)
   const HKL hkl_hans = NULL;
   const HKL hkl_hant = NULL;
 #else
@@ -159,7 +159,7 @@ const GUID SupportCategories0[] = {
     GUID_TFCAT_CATEGORY_OF_TIP, GUID_TFCAT_TIP_KEYBOARD,
     // GUID_TFCAT_TIP_SPEECH,
     // GUID_TFCAT_TIP_HANDWRITING,
-#ifndef WEASELC_LOCAL_TEST_BUILD
+#if !defined(WEASELC_LOCAL_TEST_BUILD) && !defined(WEASELC_DISTRIBUTION_BUILD)
     GUID_TFCAT_TIPCAP_SECUREMODE,
 #endif
     GUID_TFCAT_TIPCAP_UIELEMENTENABLED,
