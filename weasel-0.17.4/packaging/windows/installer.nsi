@@ -43,6 +43,18 @@ Var Autostart
 Var SelectedHant
 Var SelectedFolder
 Var SelectedStartup
+Var ChangingFiles
+
+Function .onUserAbort
+  ${If} $ChangingFiles == 1
+    Abort
+  ${EndIf}
+FunctionEnd
+Function un.onUserAbort
+  ${If} $ChangingFiles == 1
+    Abort
+  ${EndIf}
+FunctionEnd
 
 Function .onInit
   ${IfNot} ${RunningX64}
@@ -184,6 +196,9 @@ Section "WeaseLC"
     Goto empty_check
   ${EndIf}
   FindClose $0
+  StrCpy $ChangingFiles 1
+  GetDlgItem $0 $HWNDPARENT 2
+  EnableWindow $0 0
   SetOverwrite on
   ClearErrors
   !insertmacro InstallPayload
@@ -203,14 +218,18 @@ Section "WeaseLC"
   ${Else}
     System::Call 'kernel32::SetEnvironmentVariableW(w "TEXTSERVICE_PROFILE", w "hans")'
   ${EndIf}
+  ClearErrors
   ExecWait '"$SYSDIR\regsvr32.exe" /s "$INSTDIR\Win32\weasel.dll"' $0
-  ${If} $0 != 0
+  ${If} ${Errors}
+  ${OrIf} $0 != 0
     Goto failed
   ${EndIf}
   ${DisableX64FSRedirection}
+  ClearErrors
   ExecWait '"$WINDIR\System32\regsvr32.exe" /s "$INSTDIR\weaselx64.dll"' $0
   ${EnableX64FSRedirection}
-  ${If} $0 != 0
+  ${If} ${Errors}
+  ${OrIf} $0 != 0
     Goto failed
   ${EndIf}
   ClearErrors
@@ -239,10 +258,34 @@ Section "WeaseLC"
   ${EndIf}
   Goto done
   failed:
-    ExecWait '"$SYSDIR\regsvr32.exe" /u /s "$INSTDIR\Win32\weasel.dll"'
+    StrCpy $2 0
+    ClearErrors
+    ExecWait '"$SYSDIR\regsvr32.exe" /u /s "$INSTDIR\Win32\weasel.dll"' $0
+    ${If} ${Errors}
+    ${OrIf} $0 != 0
+      StrCpy $2 1
+    ${Else}
+      WriteRegDWORD HKLM "Software\WeaseLC" "Unregistered32" 1
+    ${EndIf}
     ${DisableX64FSRedirection}
-    ExecWait '"$WINDIR\System32\regsvr32.exe" /u /s "$INSTDIR\weaselx64.dll"'
+    ClearErrors
+    ExecWait '"$WINDIR\System32\regsvr32.exe" /u /s "$INSTDIR\weaselx64.dll"' $0
     ${EnableX64FSRedirection}
+    ${If} ${Errors}
+    ${OrIf} $0 != 0
+      StrCpy $2 1
+    ${Else}
+      WriteRegDWORD HKLM "Software\WeaseLC" "Unregistered64" 1
+    ${EndIf}
+    ${If} $2 == 1
+      ; Preserve DLLs when registration cleanup cannot be confirmed.
+      WriteUninstaller "$INSTDIR\Uninstall.exe"
+      WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "DisplayName" "WeaseLC（安装未完成）"
+      WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "UninstallString" '"$INSTDIR\Uninstall.exe"'
+      MessageBox MB_ICONSTOP "安装未完成，部分输入组件未能注销。已保留程序文件，请切换到其他输入法，从安装目录运行 Uninstall.exe 后再重试。"
+      StrCpy $ChangingFiles 0
+      Abort
+    ${EndIf}
     Delete "$SMSTARTUP\WeaseLC.lnk"
     Delete "$SMPROGRAMS\WeaseLC\WeaseLC.lnk"
     Delete "$SMPROGRAMS\WeaseLC\卸载 WeaseLC.lnk"
@@ -255,8 +298,10 @@ Section "WeaseLC"
     DeleteRegKey HKLM "Software\WeaseLC"
     DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC"
     MessageBox MB_ICONSTOP "安装未完成，已回退本次安装。请检查权限和文件占用后重试。"
+    StrCpy $ChangingFiles 0
     Abort
   done:
+  StrCpy $ChangingFiles 0
 !endif
 SectionEnd
 
@@ -265,23 +310,47 @@ Section "Uninstall"
   SetRegView 64
   MessageBox MB_OKCANCEL|MB_ICONINFORMATION "将移除 WeaseLC 程序。用户词典、个人设置和本地模型文件会保留。请先切换到其他输入法并保存工作。" IDOK +2
   Abort
+  StrCpy $ChangingFiles 1
+  GetDlgItem $0 $HWNDPARENT 2
+  EnableWindow $0 0
+  ClearErrors
   ExecWait '"$INSTDIR\WeaselServer.exe" /q' $0
-  ${If} $0 != 0
+  ${If} ${Errors}
+  ${OrIf} $0 != 0
     MessageBox MB_ICONSTOP "无法停止 WeaseLC。请关闭它后重试。"
+    StrCpy $ChangingFiles 0
     Abort
   ${EndIf}
   ExecWait '"$INSTDIR\WeaseLC.exe" /remove' $0
+  ; Successful architecture cleanup is checkpointed so a retry does not
+  ; depend on TSF accepting a second unregister of an absent profile.
+  StrCpy $1 0
+  ReadRegDWORD $1 HKLM "Software\WeaseLC" "Unregistered32"
+  ${If} $1 != 1
+  ClearErrors
   ExecWait '"$SYSDIR\regsvr32.exe" /u /s "$INSTDIR\Win32\weasel.dll"' $0
-  ${If} $0 != 0
+  ${If} ${Errors}
+  ${OrIf} $0 != 0
     MessageBox MB_ICONSTOP "32 位输入法注销失败，请保留程序并重试卸载。"
+    StrCpy $ChangingFiles 0
     Abort
   ${EndIf}
+  WriteRegDWORD HKLM "Software\WeaseLC" "Unregistered32" 1
+  ${EndIf}
+  StrCpy $1 0
+  ReadRegDWORD $1 HKLM "Software\WeaseLC" "Unregistered64"
+  ${If} $1 != 1
   ${DisableX64FSRedirection}
+  ClearErrors
   ExecWait '"$WINDIR\System32\regsvr32.exe" /u /s "$INSTDIR\weaselx64.dll"' $0
   ${EnableX64FSRedirection}
-  ${If} $0 != 0
+  ${If} ${Errors}
+  ${OrIf} $0 != 0
     MessageBox MB_ICONSTOP "64 位输入法注销失败，请保留程序并重试卸载。"
+    StrCpy $ChangingFiles 0
     Abort
+  ${EndIf}
+  WriteRegDWORD HKLM "Software\WeaseLC" "Unregistered64" 1
   ${EndIf}
   Delete "$SMSTARTUP\WeaseLC.lnk"
   Delete "$SMPROGRAMS\WeaseLC\WeaseLC.lnk"
@@ -298,4 +367,5 @@ Section "Uninstall"
   ${If} ${RebootFlag}
     MessageBox MB_ICONINFORMATION "部分文件将在重启 Windows 后移除。"
   ${EndIf}
+  StrCpy $ChangingFiles 0
 SectionEnd
