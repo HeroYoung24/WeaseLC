@@ -2,6 +2,7 @@
 #include <msctf.h>
 #include <shellapi.h>
 #include <string>
+#include <filesystem>
 #include <LocalTestIdentity.h>
 #ifndef WEASELC_DISTRIBUTION_BUILD
 #error This launcher requires the distribution identity
@@ -26,11 +27,31 @@ static bool InitializePreferences() {
   DWORD bytes = 0;
   if (RegQueryValueExW(key, L"Hant", nullptr, nullptr, nullptr, &bytes) == ERROR_FILE_NOT_FOUND)
     ok = RegSetValueExW(key, L"Hant", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&hant), sizeof(hant)) == ERROR_SUCCESS;
-  bytes = 0;
-  if (RegQueryValueExW(key, L"RimeUserDir", nullptr, nullptr, nullptr, &bytes) == ERROR_FILE_NOT_FOUND) {
-    const std::wstring folder = L"%APPDATA%\\WeaseLC";
+  wchar_t savedFolder[32768]{};
+  bytes = sizeof(savedFolder);
+  const LSTATUS readFolder = RegGetValueW(key, nullptr, L"RimeUserDir",
+      RRF_RT_REG_SZ, nullptr, savedFolder, &bytes);
+  if (readFolder == ERROR_FILE_NOT_FOUND ||
+      (readFolder == ERROR_SUCCESS && !wcscmp(savedFolder, L"%APPDATA%\\WeaseLC"))) {
+    // RimeUserDir is a literal REG_SZ. Also migrate the first beta's token.
+    const DWORD length = ExpandEnvironmentStringsW(L"%APPDATA%\\WeaseLC",
+        savedFolder, _countof(savedFolder));
+    if (!length || length > _countof(savedFolder)) ok = false;
+    const std::wstring folder = savedFolder;
     if (ok) ok = RegSetValueExW(key, L"RimeUserDir", 0, REG_SZ,
         reinterpret_cast<const BYTE*>(folder.c_str()), static_cast<DWORD>((folder.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+  } else if (readFolder != ERROR_SUCCESS) {
+    ok = false;
+  }
+  if (ok) {
+    // Reject relative paths and report directory errors before starting Rime.
+    const std::filesystem::path folder(savedFolder);
+    std::error_code error;
+    if (!folder.is_absolute()) ok = false;
+    else {
+      std::filesystem::create_directories(folder, error);
+      ok = !error && std::filesystem::is_directory(folder, error) && !error;
+    }
   }
   RegCloseKey(key);
   return ok;

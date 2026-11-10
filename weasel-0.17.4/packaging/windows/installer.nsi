@@ -88,6 +88,9 @@ Function .onInit
   ${If} $0 != ""
     StrCpy $SelectedFolder $0
   ${EndIf}
+  ${If} $SelectedFolder == "$APPDATA\WeaseLC"
+    StrCpy $SelectedFolder "%APPDATA%\WeaseLC"
+  ${EndIf}
 FunctionEnd
 
 Function OptionsCreate
@@ -254,6 +257,12 @@ Section "WeaseLC"
   ${EndIf}
   ; Account-local preferences must never become a shared machine data folder.
   WriteRegDWORD HKCU "Software\WeaseLC" "Hant" $SelectedHant
+  ${If} $SelectedFolder == "%APPDATA%\WeaseLC"
+    ; The existing RimeUserDir reader consumes REG_SZ as a literal path.
+    SetShellVarContext current
+    StrCpy $SelectedFolder "$APPDATA\WeaseLC"
+    SetShellVarContext all
+  ${EndIf}
   WriteRegStr HKCU "Software\WeaseLC" "RimeUserDir" "$SelectedFolder"
   ${If} ${Errors}
     MessageBox MB_ICONEXCLAMATION "部分账户设置未能保存，首次启动将使用已保存或默认设置。"
