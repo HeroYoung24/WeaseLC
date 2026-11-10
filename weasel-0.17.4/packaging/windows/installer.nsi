@@ -47,6 +47,22 @@ Var SelectedFolder
 Var SelectedStartup
 Var ChangingFiles
 
+!macro VerifyRegistrationAbsent
+  ; Generic COM E_FAIL is accepted only after both native helpers prove absence.
+  StrCpy $2 1
+  ClearErrors
+  ExecWait '"$INSTDIR\WeaseLC.exe" /unregistered' $0
+  ${IfNot} ${Errors}
+  ${AndIf} $0 == 0
+    ClearErrors
+    ExecWait '"$INSTDIR\Win32\WeaseLC.exe" /unregistered' $0
+    ${IfNot} ${Errors}
+    ${AndIf} $0 == 0
+      StrCpy $2 0
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 Function GuardInstallAbort
   ${If} $ChangingFiles == 1
     Abort
@@ -291,6 +307,9 @@ Section "WeaseLC"
       WriteRegDWORD HKLM "Software\WeaseLC" "Unregistered64" 1
     ${EndIf}
     ${If} $2 == 1
+      !insertmacro VerifyRegistrationAbsent
+    ${EndIf}
+    ${If} $2 == 1
       ; Preserve DLLs when registration cleanup cannot be confirmed.
       WriteUninstaller "$INSTDIR\Uninstall.exe"
       WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "DisplayName" "WeaseLC（安装未完成）"
@@ -337,6 +356,7 @@ Section "Uninstall"
   ExecWait '"$INSTDIR\WeaseLC.exe" /remove' $0
   ; Successful architecture cleanup is checkpointed so a retry does not
   ; depend on TSF accepting a second unregister of an absent profile.
+  StrCpy $2 0
   StrCpy $1 0
   ReadRegDWORD $1 HKLM "Software\WeaseLC" "Unregistered32"
   ${If} $1 != 1
@@ -344,11 +364,10 @@ Section "Uninstall"
   ExecWait '"$SYSDIR\regsvr32.exe" /u /s "$INSTDIR\Win32\weasel.dll"' $0
   ${If} ${Errors}
   ${OrIf} $0 != 0
-    MessageBox MB_ICONSTOP "32 位输入法注销失败，请保留程序并重试卸载。"
-    StrCpy $ChangingFiles 0
-    Abort
+    StrCpy $2 1
+  ${Else}
+    WriteRegDWORD HKLM "Software\WeaseLC" "Unregistered32" 1
   ${EndIf}
-  WriteRegDWORD HKLM "Software\WeaseLC" "Unregistered32" 1
   ${EndIf}
   StrCpy $1 0
   ReadRegDWORD $1 HKLM "Software\WeaseLC" "Unregistered64"
@@ -359,12 +378,21 @@ Section "Uninstall"
   ${EnableX64FSRedirection}
   ${If} ${Errors}
   ${OrIf} $0 != 0
-    MessageBox MB_ICONSTOP "64 位输入法注销失败，请保留程序并重试卸载。"
+    StrCpy $2 1
+  ${Else}
+    WriteRegDWORD HKLM "Software\WeaseLC" "Unregistered64" 1
+  ${EndIf}
+  ${EndIf}
+  !insertmacro VerifyRegistrationAbsent
+  ${If} $2 == 1
+    MessageBox MB_ICONSTOP "输入组件仍有注册残留，或无法确认注销状态。已保留程序，请稍后重试卸载。"
     StrCpy $ChangingFiles 0
     Abort
   ${EndIf}
-  WriteRegDWORD HKLM "Software\WeaseLC" "Unregistered64" 1
-  ${EndIf}
+  SetRegView 32
+  DeleteRegKey HKCU "Software\Microsoft\CTF\TIP\{69C4CD90-CA76-4367-A307-EE18A40EE6D9}"
+  SetRegView 64
+  DeleteRegKey HKCU "Software\Microsoft\CTF\TIP\{69C4CD90-CA76-4367-A307-EE18A40EE6D9}"
   Delete "$SMSTARTUP\WeaseLC.lnk"
   Delete "$SMPROGRAMS\WeaseLC\WeaseLC.lnk"
   Delete "$SMPROGRAMS\WeaseLC\卸载 WeaseLC.lnk"

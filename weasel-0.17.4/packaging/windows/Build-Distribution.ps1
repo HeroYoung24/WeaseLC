@@ -37,7 +37,7 @@ $null = New-Item -ItemType Directory (Join-Path $payload 'Win32')
 $licenses = New-Item -ItemType Directory (Join-Path $payload 'licenses')
 foreach ($arch in 'x64','Win32') {
   $destination = if ($arch -eq 'x64') {$payload.FullName} else {Join-Path $payload 'Win32'}
-  foreach ($name in 'WeaselServer.exe','WeaselDeployer.exe',$(if ($arch -eq 'x64') {'weaselx64.dll'} else {'weasel.dll'})) {
+  foreach ($name in 'WeaselServer.exe','WeaselDeployer.exe','WeaseLC.exe',$(if ($arch -eq 'x64') {'weaselx64.dll'} else {'weasel.dll'})) {
     $binary = Join-Path $root "$arch\$name"
     $version = (Get-Item -LiteralPath $binary).VersionInfo
     if ($version.FileVersion -ne '0.1.0.1' -or $version.ProductVersion -ne '0.1.0-beta.1' -or $version.ProductName -ne 'WeaseLC') {
@@ -61,7 +61,6 @@ foreach ($arch in 'x64','Win32') {
   Copy-Item -LiteralPath (Join-Path $source $rime) -Destination $destination
   Copy-Item -LiteralPath (Join-Path $source 'output\data') -Destination (Join-Path $destination 'data') -Recurse
 }
-Copy-Item -LiteralPath (Join-Path $root 'x64\WeaseLC.exe') -Destination $payload
 Copy-Item -LiteralPath (Join-Path $source 'LICENSE.txt') -Destination $payload
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'INSTALL-NOTES.txt') -Destination $payload
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') -Destination $payload

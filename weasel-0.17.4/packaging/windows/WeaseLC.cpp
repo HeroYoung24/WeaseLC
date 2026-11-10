@@ -89,6 +89,17 @@ static bool SetProfile(bool remove) {
   bool ok = install != nullptr;
   for (const LANGID language : {LANGID(0x0804), LANGID(0x0404)}) {
     if (!remove && language != (hant ? 0x0404 : 0x0804)) continue;
+    if (remove) {
+      IEnumTfLanguageProfiles* enumeration = nullptr;
+      if (FAILED(profiles->EnumLanguageProfiles(language, &enumeration)) || !enumeration) { ok = false; continue; }
+      TF_LANGUAGEPROFILE item{}; ULONG count = 0; bool present = false;
+      while (enumeration->Next(1, &item, &count) == S_OK && count == 1) {
+        if (IsEqualCLSID(item.clsid, clsid) && IsEqualGUID(item.guidProfile, profile)) { present = true; break; }
+      }
+      enumeration->Release();
+      // Removing a nonexistent language can create an empty Windows language entry.
+      if (!present) continue;
+    }
     const std::wstring entry = std::wstring(language == 0x0804 ? L"0804:" : L"0404:") +
         WEASELC_PRODUCT_CLSID_TEXT + WEASELC_PRODUCT_PROFILE_TEXT;
     if (install && !install(entry.c_str(), remove ? 1 : 0)) ok = false;
@@ -123,6 +134,30 @@ static bool Run(const std::wstring& path, const wchar_t* arguments, bool wait) {
   return ok;
 }
 
+static bool RegistrationAbsent() {
+  for (const REGSAM view : {KEY_WOW64_32KEY, KEY_WOW64_64KEY}) {
+    for (const auto prefix : {L"Software\\Classes\\CLSID\\", L"Software\\Microsoft\\CTF\\TIP\\"}) {
+      const std::wstring path = std::wstring(prefix) + WEASELC_PRODUCT_CLSID_TEXT;
+      HKEY key = nullptr;
+      const auto status = RegOpenKeyExW(HKEY_LOCAL_MACHINE, path.c_str(), 0, KEY_QUERY_VALUE | view, &key);
+      if (key) RegCloseKey(key);
+      if (status != ERROR_FILE_NOT_FOUND && status != ERROR_PATH_NOT_FOUND) return false;
+    }
+  }
+  ITfCategoryMgr* categories = nullptr;
+  if (FAILED(CoCreateInstance(CLSID_TF_CategoryMgr, nullptr, CLSCTX_INPROC_SERVER,
+      IID_PPV_ARGS(&categories)))) return false;
+  const GUID clsid = WEASELC_PRODUCT_CLSID;
+  IEnumGUID* enumeration = nullptr;
+  const HRESULT opened = categories->EnumCategoriesInItem(clsid, &enumeration);
+  categories->Release();
+  if (FAILED(opened) || !enumeration) return false;
+  GUID category{}; ULONG count = 0;
+  const HRESULT next = enumeration->Next(1, &category, &count);
+  enumeration->Release();
+  return next == S_FALSE && count == 0;
+}
+
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   int count = 0;
   auto args = CommandLineToArgvW(GetCommandLineW(), &count);
@@ -130,9 +165,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   const std::wstring option = count == 1 ? L"/configure" : count == 2 ? args[1] : L"invalid";
   LocalFree(args);
   if (option == L"/identity") return 0; // Read-only packaging smoke check.
-  if (option != L"/configure" && option != L"/start" && option != L"/enable" && option != L"/remove") return 2;
+  if (option != L"/configure" && option != L"/start" && option != L"/enable" && option != L"/remove" && option != L"/unregistered") return 2;
   const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   if (FAILED(initialized)) return 3;
+  if (option == L"/unregistered") {
+    const bool absent = RegistrationAbsent();
+    CoUninitialize(); return absent ? 0 : 1;
+  }
   bool ok = true;
   if (option == L"/remove") {
     SetProfile(true);
