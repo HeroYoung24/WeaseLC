@@ -18,6 +18,23 @@ static DWORD ReadNumber(HKEY hive, const wchar_t* name, DWORD fallback) {
       RRF_RT_REG_DWORD | RRF_SUBKEY_WOW6464KEY, nullptr, &value, &bytes) == ERROR_SUCCESS ? value : fallback;
 }
 
+static bool SeedFirstSchema(const std::filesystem::path& folder, DWORD hant) {
+  const auto file = folder / L"default.custom.yaml";
+  HANDLE output = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr,
+      CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (output == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_EXISTS;
+  // No customization map: the native first-run scheme/theme wizard still runs.
+  // CREATE_NEW preserves every existing dictionary and configuration file.
+  const std::string content = std::string("patch:\n  schema_list:\n    - schema: ") +
+      (hant ? "luna_pinyin_tw\n" : "luna_pinyin_simp\n");
+  DWORD written = 0;
+  const bool ok = WriteFile(output, content.data(), static_cast<DWORD>(content.size()), &written, nullptr) &&
+      written == content.size();
+  CloseHandle(output);
+  if (!ok) DeleteFileW(file.c_str());
+  return ok;
+}
+
 static bool InitializePreferences() {
   HKEY key = nullptr;
   if (RegCreateKeyExW(HKEY_CURRENT_USER, WEASEL_PRODUCT_REG_KEY, 0, nullptr, 0,
@@ -51,6 +68,7 @@ static bool InitializePreferences() {
     else {
       std::filesystem::create_directories(folder, error);
       ok = !error && std::filesystem::is_directory(folder, error) && !error;
+      if (ok) ok = SeedFirstSchema(folder, ReadNumber(HKEY_CURRENT_USER, L"Hant", hant));
     }
   }
   RegCloseKey(key);

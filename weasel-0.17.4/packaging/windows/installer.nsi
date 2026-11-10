@@ -213,7 +213,9 @@ Section "WeaseLC"
   WriteRegStr HKLM "Software\WeaseLC" "WeaselRoot" "$INSTDIR"
   WriteRegDWORD HKLM "Software\WeaseLC" "DefaultHant" $SelectedHant
   SetRegView 32
-  WriteRegStr HKLM "Software\WeaseLC" "WeaselRoot" "$INSTDIR\Win32"
+  ; Both TSF architectures use the single native backend in the main folder.
+  ; DLL registration still points separately to Win32\weasel.dll.
+  WriteRegStr HKLM "Software\WeaseLC" "WeaselRoot" "$INSTDIR"
   SetRegView 64
   ${If} ${Errors}
     Goto failed
