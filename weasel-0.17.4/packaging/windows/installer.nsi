@@ -14,6 +14,7 @@ RequestExecutionLevel user
 RequestExecutionLevel admin
 !endif
 SetCompressor /SOLID lzma
+ShowUninstDetails nevershow
 VIProductVersion "0.1.0.1"
 VIAddVersionKey /LANG=2052 "ProductName" "WeaseLC"
 VIAddVersionKey /LANG=2052 "FileDescription" "WeaseLC 安装程序"
@@ -24,13 +25,17 @@ VIAddVersionKey /LANG=2052 "LegalCopyright" "WeaseLC contributors; RIME Develope
 !define MUI_CUSTOMFUNCTION_ABORT GuardInstallAbort
 !define MUI_CUSTOMFUNCTION_UNABORT un.GuardInstallAbort
 !define MUI_FINISHPAGE_TITLE "WeaseLC 已安装"
-!define MUI_FINISHPAGE_TEXT "请从开始菜单打开 WeaseLC，选择输入方案和配色。完成后，按 Win+空格切换输入法。$\r$\n$\r$\n自动纠错默认关闭。需要使用时，请先准备本地模型，再从输入法图标打开“管理纠错”。"
+!define MUI_FINISHPAGE_TEXT "完成后将打开输入方案和配色设置。也可稍后从开始菜单打开 WeaseLC。按 Win+空格切换输入法。$\r$\n$\r$\n自动纠错默认关闭，可从图标的模型管理及管理纠错中配置。"
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_TEXT "选择输入方案和配色"
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchFirstRun
 !insertmacro MUI_PAGE_LICENSE "..\..\LICENSE.txt"
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE ValidateDirectory
 !insertmacro MUI_PAGE_DIRECTORY
 Page custom OptionsCreate OptionsLeave
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
-!insertmacro MUI_UNPAGE_CONFIRM
+UninstPage custom un.OptionsCreate un.OptionsLeave
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_UNPAGE_FINISH
 !insertmacro MUI_LANGUAGE "SimpChinese"
@@ -46,6 +51,8 @@ Var SelectedHant
 Var SelectedFolder
 Var SelectedStartup
 Var ChangingFiles
+Var KeepPreferences
+Var UninstallOrigin
 
 !macro VerifyRegistrationAbsent
   ; Generic COM E_FAIL is accepted only after both native helpers prove absence.
@@ -87,6 +94,9 @@ Function .onInit
     MessageBox MB_ICONSTOP "本安装包需要 Windows 10 或更高版本。"
     Abort
   ${EndIf}
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=RootGuard.exe "${GUARD_HELPER}"
   SetRegView 64
   ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "UninstallString"
   ${If} $0 != ""
@@ -106,6 +116,100 @@ Function .onInit
   ${EndIf}
   ${If} $SelectedFolder == "$APPDATA\WeaseLC"
     StrCpy $SelectedFolder "%APPDATA%\WeaseLC"
+  ${EndIf}
+FunctionEnd
+
+Function ValidateDirectory
+  System::Call 'kernel32::SetEnvironmentVariableW(w "WEASELC_INSTALL_ROOT", w "$INSTDIR")'
+  ClearErrors
+  ExecWait '"$PLUGINSDIR\RootGuard.exe" /guard-destination' $0
+  ${IfNot} ${Errors}
+  ${AndIf} $0 == 3
+    MessageBox MB_ICONINFORMATION "该位置有等待重启完成的文件操作，请重启 Windows 后再试；也可选择其他独立空目录。"
+    Abort
+  ${EndIf}
+  ${IfNot} ${Errors}
+  ${AndIf} $0 == 2
+    MessageBox MB_ICONINFORMATION "所选文件夹已有内容，请选择独立空文件夹。若这是旧 WeaseLC 目录，请先完成卸载或重启以释放占用。不要覆盖其他输入法的目录。"
+    Abort
+  ${EndIf}
+  ${If} ${Errors}
+  ${OrIf} $0 != 0
+    MessageBox MB_ICONSTOP "请选择路径不超过160字符的独立本地程序文件夹，避开盘符根目录、系统目录、用户资料及链接目录。建议通过浏览选择。"
+    Abort
+  ${EndIf}
+FunctionEnd
+
+Function LaunchFirstRun
+!ifndef WEASELC_UI_PREVIEW
+  ClearErrors
+  ExecWait '"$INSTDIR\WeaseLC.exe" /launch-setup' $0
+  ${If} ${Errors}
+  ${OrIf} $0 != 0
+    MessageBox MB_ICONINFORMATION "无法自动打开用户设置。请从开始菜单打开 WeaseLC，完成输入方案和配色设置。"
+  ${EndIf}
+!endif
+FunctionEnd
+
+Function un.onInit
+  StrCpy $UninstallOrigin "$INSTDIR"
+  StrCpy $SelectedStartup 1
+  IfSilent 0 +3
+    MessageBox MB_ICONSTOP "请使用交互式卸载，以确认文件占用和个人偏好选项。"
+    Abort
+  SetRegView 64
+  ReadRegStr $INSTDIR HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "InstallLocation"
+  ${If} $INSTDIR == ""
+    ; Earlier beta builds did not write InstallLocation. The registered worker
+    ; root is the only supported legacy source, never the command-line _?= path.
+    ReadRegStr $INSTDIR HKLM "Software\WeaseLC" "WeaselRoot"
+  ${EndIf}
+  ${If} $INSTDIR == ""
+    MessageBox MB_ICONSTOP "找不到有效安装记录，可能已重装系统。未删除任何文件。若确认系统已无 WeaseLC 注册，请备份资料后在资源管理器手动删除所属的程序文件夹。需要重新安装时，可先将旧程序文件夹重命名备份，再运行安装包。词典与模型请另行保留。"
+    Abort
+  ${EndIf}
+  ${If} $UninstallOrigin != $INSTDIR
+    MessageBox MB_ICONSTOP "卸载器位置与安装记录不一致，可能移动过文件夹。未删除任何文件。请从原快捷方式属性核对原位置，移回后重试；不要把卸载器复制到其他目录运行。若系统已重装、记录已失效，请备份资料后手动处理程序文件。"
+    Abort
+  ${EndIf}
+  ClearErrors
+  ExecWait '"$INSTDIR\WeaseLC.exe" /validate-install' $0
+  ${If} ${Errors}
+  ${OrIf} $0 != 0
+    MessageBox MB_ICONSTOP "程序位置、注册、组件或清单无法核实，可能移动过目录或文件不完整。未删除任何文件。请移回原安装位置后重试；缺失组件可从同版本安装包解包恢复后再卸载。若系统已重装且不再有 WeaseLC 注册，请备份资料后手动删除确认属于本程序的文件夹。"
+    Abort
+  ${EndIf}
+FunctionEnd
+
+Function un.OptionsCreate
+  !insertmacro MUI_HEADER_TEXT "卸载 WeaseLC" "仅移除此程序，不影响其他输入法"
+  nsDialogs::Create 1018
+  Pop $Dialog
+  ${If} $Dialog == error
+    Abort
+  ${EndIf}
+  ${NSD_CreateLabel} 0 0 100% 46u "请先切换到其他输入法并保存工作。将停止 WeaseLC 自己启动的模型与后台服务，只移除安装清单中的程序文件。不会强制关闭其他应用，也不会删除词典或模型。"
+  Pop $0
+  ${NSD_CreateCheckbox} 0 58u 100% 14u "保留个人偏好（纠错及模型配置，推荐）"
+  Pop $KeepPreferences
+  ${NSD_Check} $KeepPreferences
+  ${NSD_CreateLabel} 0 82u 100% 42u "未勾选时，清除本账户的纠错设置、暂停名单和模型路径记录。输入方案、配色、词典、模型文件始终保留。下一步会检查文件占用并给出处理指引。"
+  Pop $0
+  nsDialogs::Show
+FunctionEnd
+
+Function un.OptionsLeave
+  ${If} $KeepPreferences == 0
+    MessageBox MB_ICONSTOP "无法读取卸载选项，未开始卸载。请重新打开卸载器。"
+    Abort
+  ${EndIf}
+  ${NSD_GetState} $KeepPreferences $SelectedStartup
+  ClearErrors
+  ExecWait '"$INSTDIR\WeaseLC.exe" /prepare-uninstall' $0
+  ${If} ${Errors}
+  ${OrIf} $0 != 0
+    MessageBox MB_ICONINFORMATION "卸载尚未开始。请先保存并关闭占用应用，或从模型管理停止模型后重试。"
+    Abort
   ${EndIf}
 FunctionEnd
 
@@ -202,6 +306,7 @@ Section "WeaseLC"
   MessageBox MB_ICONINFORMATION "界面预览已结束。本程序不执行安装。"
   Abort
 !else
+  Call ValidateDirectory
   SetRegView 64
   SetShellVarContext all
   FindFirst $0 $1 "$INSTDIR\*"
@@ -210,7 +315,7 @@ Section "WeaseLC"
     ${If} $1 != "."
     ${AndIf} $1 != ".."
       FindClose $0
-      MessageBox MB_ICONSTOP "安装文件夹已有内容。请选择一个空文件夹。"
+      MessageBox MB_ICONSTOP "所选文件夹已有内容，请选择新的独立空文件夹，不要使用其他输入法或个人资料目录。若这是旧 WeaseLC 目录，请先完成其卸载；占用时可重启后重试。"
       Abort
     ${EndIf}
     FindNext $0 $1
@@ -258,6 +363,7 @@ Section "WeaseLC"
   ClearErrors
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "DisplayName" "WeaseLC"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "DisplayVersion" "${DISPLAY_VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "DisplayIcon" "$INSTDIR\WeaselServer.exe"
@@ -266,6 +372,8 @@ Section "WeaseLC"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "NoRepair" 1
   CreateDirectory "$SMPROGRAMS\WeaseLC"
   CreateShortcut "$SMPROGRAMS\WeaseLC\WeaseLC.lnk" "$INSTDIR\WeaseLC.exe" "/configure" "$INSTDIR\WeaselServer.exe"
+  CreateShortcut "$SMPROGRAMS\WeaseLC\模型管理.lnk" "$INSTDIR\WeaselDeployer.exe" "/local-model" "$INSTDIR\WeaselServer.exe"
+  CreateShortcut "$SMPROGRAMS\WeaseLC\管理纠错.lnk" "$INSTDIR\WeaselDeployer.exe" "/correction" "$INSTDIR\WeaselServer.exe"
   CreateShortcut "$SMPROGRAMS\WeaseLC\卸载 WeaseLC.lnk" "$INSTDIR\Uninstall.exe"
   ${If} $SelectedStartup == 1
     CreateShortcut "$SMSTARTUP\WeaseLC.lnk" "$INSTDIR\WeaseLC.exe" "/start" "$INSTDIR\WeaselServer.exe"
@@ -320,6 +428,8 @@ Section "WeaseLC"
     ${EndIf}
     Delete "$SMSTARTUP\WeaseLC.lnk"
     Delete "$SMPROGRAMS\WeaseLC\WeaseLC.lnk"
+  Delete "$SMPROGRAMS\WeaseLC\模型管理.lnk"
+  Delete "$SMPROGRAMS\WeaseLC\管理纠错.lnk"
     Delete "$SMPROGRAMS\WeaseLC\卸载 WeaseLC.lnk"
     RMDir "$SMPROGRAMS\WeaseLC"
     !insertmacro RemovePayload
@@ -340,8 +450,6 @@ SectionEnd
 Section "Uninstall"
   SetShellVarContext all
   SetRegView 64
-  MessageBox MB_OKCANCEL|MB_ICONINFORMATION "将移除 WeaseLC 程序。用户词典、个人设置和本地模型文件会保留。请先切换到其他输入法并保存工作。" IDOK +2
-  Abort
   StrCpy $ChangingFiles 1
   GetDlgItem $0 $HWNDPARENT 2
   EnableWindow $0 0
@@ -395,16 +503,21 @@ Section "Uninstall"
   DeleteRegKey HKCU "Software\Microsoft\CTF\TIP\{69C4CD90-CA76-4367-A307-EE18A40EE6D9}"
   Delete "$SMSTARTUP\WeaseLC.lnk"
   Delete "$SMPROGRAMS\WeaseLC\WeaseLC.lnk"
+  Delete "$SMPROGRAMS\WeaseLC\模型管理.lnk"
+  Delete "$SMPROGRAMS\WeaseLC\管理纠错.lnk"
   Delete "$SMPROGRAMS\WeaseLC\卸载 WeaseLC.lnk"
   RMDir "$SMPROGRAMS\WeaseLC"
   !insertmacro RemovePayload
   Delete /REBOOTOK "$INSTDIR\Uninstall.exe"
-  RMDir "$INSTDIR"
+  RMDir /REBOOTOK "$INSTDIR"
   SetRegView 32
   DeleteRegKey HKLM "Software\WeaseLC"
   SetRegView 64
   DeleteRegKey HKLM "Software\WeaseLC"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC"
+  ${If} $SelectedStartup == 0
+    DeleteRegKey HKCU "Software\WeaseLC"
+  ${EndIf}
   ${If} ${RebootFlag}
     MessageBox MB_ICONINFORMATION "部分文件将在重启 Windows 后移除。"
   ${EndIf}

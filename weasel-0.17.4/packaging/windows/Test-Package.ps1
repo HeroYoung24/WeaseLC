@@ -22,6 +22,26 @@ $process=Start-Process -FilePath $launcher -ArgumentList /identity -WindowStyle 
 if (!$process.WaitForExit(5000) -or $process.ExitCode -ne 0) { throw 'Launcher identity smoke check failed.' }
 if ((Test-Path 'HKCU:\Software\WeaseLC') -ne $before) { throw 'Read-only launcher check touched settings.' }
 foreach ($arch in 'x64','Win32') {
+  $guard = if ($arch -eq 'x64') {$launcher} else {Join-Path $extract 'Win32\WeaseLC.exe'}
+  $process=Start-Process -FilePath $guard -ArgumentList /guard-selftest -WindowStyle Hidden -PassThru
+  if (!$process.WaitForExit(10000) -or $process.ExitCode -ne 0) { throw "Uninstall boundary checks failed for $arch." }
+  $cases=@(
+    @{root=(Join-Path ([IO.Path]::GetPathRoot($env:windir)) ('WeaseLC-boundary-'+[Guid]::NewGuid().ToString('N')));exit=0},
+    @{root=([IO.Path]::GetPathRoot($source));exit=1},
+    @{root=$env:windir;exit=1},
+    @{root=[Environment]::GetFolderPath('ProgramFiles');exit=1},
+    @{root=[Environment]::GetFolderPath('ProgramFilesX86');exit=1},
+    @{root=(Join-Path $env:windir '..\WeaseLC-safe-boundary-test');exit=1},
+    @{root=(Join-Path $env:ProgramData 'WeaseLC-safe-boundary-test');exit=1}
+  )
+  foreach($case in $cases) {
+    $info=[Diagnostics.ProcessStartInfo]::new($guard,'/guard-destination')
+    $info.UseShellExecute=$false;$info.CreateNoWindow=$true
+    $info.Environment['WEASELC_INSTALL_ROOT']=$case.root
+    $check=[Diagnostics.Process]::Start($info)
+    try {if(!$check.WaitForExit(10000) -or $check.ExitCode -ne $case.exit){throw "Destination safety check failed for $arch."}}
+    finally {$check.Dispose()}
+  }
   $directory = New-Item -ItemType Directory (Join-Path $packageRoot "ui-checks\$arch") -Force
   $deployer = if ($arch -eq 'x64') {Join-Path $extract 'WeaselDeployer.exe'} else {Join-Path $extract 'Win32\WeaselDeployer.exe'}
   $process = Start-Process -FilePath $deployer -ArgumentList /correction-selftest -WorkingDirectory $directory.FullName -WindowStyle Hidden -PassThru
@@ -30,6 +50,6 @@ foreach ($arch in 'x64','Win32') {
   if ($report -match ' = 0$') { throw "Packaged UI assertion failed for $arch." }
 }
 $result=[ordered]@{payloadFiles=$manifest.files.Count;allExtractedHashesMatch=$true;readOnlyLauncherPassed=$true;
-  packagedUiPassed=$true;sourceCommit=$manifest.sourceCommit;dirtySource=$manifest.dirtySource;installed=$false}
+  packagedUiPassed=$true;uninstallBoundaryPassed=$true;sourceCommit=$manifest.sourceCommit;dirtySource=$manifest.dirtySource;installed=$false}
 $result | ConvertTo-Json | Set-Content (Join-Path $packageRoot 'package-check.json') -Encoding utf8
 $result | ConvertTo-Json

@@ -64,6 +64,10 @@ void WeaselServerApp::SetupMenuHandlers() {
       ID_WEASELTRAY_CORRECTION,
       std::bind(execute, dir / L"WeaselDeployer.exe",
                 std::wstring(L"/correction")));
+  m_server.AddMenuHandler(ID_WEASELTRAY_MODEL_CONTROL,
+      std::bind(execute,dir / L"WeaselDeployer.exe",std::wstring(L"/local-model")));
+  m_server.AddMenuHandler(ID_WEASELTRAY_CORRECTION_TOGGLE,
+      std::bind(execute,dir / L"WeaselDeployer.exe",std::wstring(L"/toggle-correction")));
   m_server.AddMenuHandler(
       ID_WEASELTRAY_DICT_MANAGEMENT,
       std::bind(execute, dir / L"WeaselDeployer.exe", std::wstring(L"/dict")));

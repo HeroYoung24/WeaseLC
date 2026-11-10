@@ -14,6 +14,7 @@
 #include "Resource.h"
 #include "CorrectionPreferences.h"
 #include "CorrectionSettingsDialog.h"
+#include <CorrectionSeconds.h>
 #include "CorrectionHintPreview.h"
 #include "CorrectionThemeChecks.h"
 #include <CorrectionAppPolicy.h>
@@ -347,8 +348,7 @@ bool ReadAutomaticOptions(HWND dialog, AutomaticDialogState& state, AutomaticOpt
   options.side = static_cast<unsigned>(SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_GETCURSEL, 0, 0));
   struct Field { int id; unsigned low, high; unsigned* output; };
   for (auto field : {Field{IDC_AUTO_GAP, 0, 48, &options.gap}, {IDC_AUTO_WIDTH, 180, 640, &options.width},
-       {IDC_AUTO_FONT, 10, 24, &options.font}, {IDC_AUTO_DEBOUNCE, 100, 2000, &options.debounce},
-       {IDC_AUTO_MINIMUM, 1000, 10000, &options.minimumVisibleMs}, {IDC_AUTO_MAXIMUM, 5000, 60000, &options.maximumAgeMs}}) {
+       {IDC_AUTO_FONT, 10, 24, &options.font}, {IDC_AUTO_DEBOUNCE, 100, 2000, &options.debounce}}) {
     unsigned value = 0;
     if (!ReadNumber(dialog, field.id, value) || value < field.low || value > field.high) {
       if (explain) {
@@ -359,6 +359,14 @@ bool ReadAutomaticOptions(HWND dialog, AutomaticDialogState& state, AutomaticOpt
       return false;
     }
     *field.output = value;
+  }
+  for (auto field : {Field{IDC_AUTO_MINIMUM,1000,10000,&options.minimumVisibleMs},
+                     Field{IDC_AUTO_MAXIMUM,5000,60000,&options.maximumAgeMs}}) {
+    if (!ParseSeconds(Text(dialog,field.id),field.low,field.high,*field.output)) {
+      if (explain) SetDlgItemTextW(dialog,IDC_AUTO_STATE,state.owner.Text(
+          L"请填写范围内的秒数，最多三位小数。",L"Enter seconds in range, with up to three decimals."));
+      return false;
+    }
   }
   if (!ValidAutomaticOptions(options)) {
     if (explain) SetDlgItemTextW(dialog, IDC_AUTO_STATE, state.owner.Text(
@@ -381,11 +389,13 @@ INT_PTR CALLBACK AutomaticDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM
       SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label));
     SendDlgItemMessageW(dialog, IDC_AUTO_SIDE, CB_SETCURSEL, options.side, 0);
     for (const auto pair : {std::pair<int, unsigned>{IDC_AUTO_GAP, options.gap},
-         {IDC_AUTO_WIDTH, options.width}, {IDC_AUTO_FONT, options.font}, {IDC_AUTO_DEBOUNCE, options.debounce},
-         {IDC_AUTO_MINIMUM, options.minimumVisibleMs}, {IDC_AUTO_MAXIMUM, options.maximumAgeMs}}) {
+         {IDC_AUTO_WIDTH, options.width}, {IDC_AUTO_FONT, options.font}, {IDC_AUTO_DEBOUNCE, options.debounce}}) {
       SetNumber(dialog, pair.first, pair.second);
       SendDlgItemMessageW(dialog, pair.first, EM_SETLIMITTEXT, 5, 0);
     }
+    SetDlgItemTextW(dialog,IDC_AUTO_MINIMUM,FormatSeconds(options.minimumVisibleMs).c_str());
+    SetDlgItemTextW(dialog,IDC_AUTO_MAXIMUM,FormatSeconds(options.maximumAgeMs).c_str());
+    for (int id : {IDC_AUTO_MINIMUM,IDC_AUTO_MAXIMUM}) SendDlgItemMessageW(dialog,id,EM_SETLIMITTEXT,7,0);
     return TRUE;
   }
   if (!state) return FALSE;
@@ -400,8 +410,8 @@ INT_PTR CALLBACK AutomaticDialogProc(HWND dialog, UINT message, WPARAM w, LPARAM
   if (message == WM_CLOSE) { close(IDCANCEL); return TRUE; }
   if (message != WM_COMMAND) return FALSE;
   if (LOWORD(w) == IDC_AUTO_SHORT || LOWORD(w) == IDC_AUTO_LONG) {
-    SetNumber(dialog, IDC_AUTO_MINIMUM, LOWORD(w) == IDC_AUTO_LONG ? 5000 : 3000);
-    SetNumber(dialog, IDC_AUTO_MAXIMUM, 15000);
+    SetDlgItemTextW(dialog, IDC_AUTO_MINIMUM, LOWORD(w) == IDC_AUTO_LONG ? L"5" : L"3");
+    SetDlgItemTextW(dialog, IDC_AUTO_MAXIMUM, L"15");
     return TRUE;
   }
   if (LOWORD(w) == IDC_AUTO_PREVIEW || (state->preview.Window() &&
@@ -692,6 +702,15 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
           MAKEINTRESOURCEW(IDD_CORRECTION_APPS), dialog, AppsDialogProc, reinterpret_cast<LPARAM>(&apps));
       return TRUE;
     }
+    case IDC_CORRECTION_FILL_LOCAL: {
+      if (state->demo || state->testing) return TRUE;
+      SendMessageW(dialog,WM_COMMAND,IDC_CORRECTION_OFF+1,0);
+      CheckRadioButton(dialog,IDC_CORRECTION_OFF,IDC_CORRECTION_OFF+2,IDC_CORRECTION_OFF+1);
+      SetDlgItemTextW(dialog,IDC_CORRECTION_ENDPOINT,L"http://127.0.0.1:18963/v1/chat/completions");
+      SetDlgItemTextW(dialog,IDC_CORRECTION_MODEL,L"weasel-qwen3-4b");
+      SetDlgItemTextW(dialog,IDC_CORRECTION_STATE,state->Text(L"已填入本地连接参数，请点击保存。",L"Local connection filled. Choose Save to apply."));
+      return TRUE;
+    }
     case IDC_CORRECTION_MODEL_CONTROL: {
       if (state->demo || state->testing) return TRUE;
       wchar_t executable[32768]{};
@@ -904,11 +923,28 @@ bool CheckCorrectionDialogResources(HINSTANCE instance) {
           "automatic opt-in defaults and layout choices");
       check(GetDlgItem(autoDialog,IDC_AUTO_FLOW) && GetDlgItem(autoDialog,IDC_AUTO_MINIMUM) &&
           GetDlgItem(autoDialog,IDC_AUTO_MAXIMUM),"enhanced timing controls exist in each language");
+      check(!(GetWindowLongPtrW(GetDlgItem(autoDialog,IDC_AUTO_MINIMUM),GWL_STYLE)&ES_NUMBER) &&
+          !(GetWindowLongPtrW(GetDlgItem(autoDialog,IDC_AUTO_MAXIMUM),GWL_STYLE)&ES_NUMBER),
+          "seconds fields permit a decimal point from keyboard input");
       AutomaticOptions timingDraft;
+      unsigned milliseconds=777;
+      check(ParseSeconds(L"3.125",1000,10000,milliseconds) && milliseconds==3125 &&
+            FormatSeconds(milliseconds)==L"3.125" && FormatSeconds(3000)==L"3",
+            "seconds accept exact milliseconds and display without redundant decimals");
+      check(!ParseSeconds(L"3.1251",1000,10000,milliseconds) &&
+            !ParseSeconds(L"3,1",1000,10000,milliseconds) &&
+            !ParseSeconds(L"-3",1000,10000,milliseconds) &&
+            !ParseSeconds(L"11",1000,10000,milliseconds),
+            "seconds reject extra precision locale separators signs and out of range values");
+      SetDlgItemTextW(autoDialog,IDC_AUTO_MINIMUM,L"3.125");
+      SetDlgItemTextW(autoDialog,IDC_AUTO_MAXIMUM,L"15.999");
+      check(ReadAutomaticOptions(autoDialog,automatic,timingDraft,false) &&
+          timingDraft.minimumVisibleMs==3125 && timingDraft.maximumAgeMs==15999,
+          "seconds controls preserve all three decimal places in existing millisecond settings");
       SendMessageW(autoDialog,WM_COMMAND,IDC_AUTO_LONG,0);
       check(ReadAutomaticOptions(autoDialog,automatic,timingDraft,false) && timingDraft.minimumVisibleMs==5000 &&
           timingDraft.maximumAgeMs==15000,"long-passage reference populates valid timing");
-      SetDlgItemInt(autoDialog,IDC_AUTO_MINIMUM,9000,FALSE);SetDlgItemInt(autoDialog,IDC_AUTO_MAXIMUM,5000,FALSE);
+      SetDlgItemTextW(autoDialog,IDC_AUTO_MINIMUM,L"9");SetDlgItemTextW(autoDialog,IDC_AUTO_MAXIMUM,L"5");
       check(!ReadAutomaticOptions(autoDialog,automatic,timingDraft,false),"minimum greater than age cannot save");
       SendMessageW(autoDialog,WM_COMMAND,IDC_AUTO_SHORT,0);
       check(ReadAutomaticOptions(autoDialog,automatic,timingDraft,false) && timingDraft.minimumVisibleMs==3000 &&

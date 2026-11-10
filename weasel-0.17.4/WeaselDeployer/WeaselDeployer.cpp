@@ -10,6 +10,8 @@
 #include "CorrectionWorker.h"
 #include "LocalModelControl.h"
 #include <WeaselCommandLine.h>
+#include <LocalModelWindow.h>
+#include "CorrectionPreferences.h"
 
 CAppModule _Module;
 
@@ -24,6 +26,7 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
   std::wstring option;
   if (!weasel::ParseSingleOption(GetCommandLineW(), option) || !weasel::DeployerOption(option)) return 2;
   lpCmdLine = option.data();
+  if (option == L"/stop-local-model") return correction::SignalModelControl(true) ? 0 : 1;
   if (!wcscmp(L"/correction-broker", lpCmdLine)) return RunCorrectionBroker();
   if (!wcscmp(L"/correction-worker", lpCmdLine)) return RunCorrectionWorker();
   if (!wcscmp(L"/correction-worker-selftest", lpCmdLine)) return RunCorrectionWorker(true);
@@ -60,6 +63,17 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
   ATLASSERT(SUCCEEDED(hRes));
 
   CreateDirectory(WeaselUserDataPath().c_str(), NULL);
+  if (option == L"/toggle-correction") {
+    auto preferences = correction::LoadPreferences();
+    const bool enabled = preferences.mode == correction::Mode::Local && preferences.automatic.enabled;
+    preferences.mode = enabled ? correction::Mode::Off : correction::Mode::Local;
+    preferences.automatic.enabled = !enabled;
+    if (!enabled && !correction::ValidateConfig(preferences.local))
+      { const INT_PTR result = ShowCorrectionSettings(hInstance,false); _Module.Term(); ::CoUninitialize(); return result == IDOK ? 0 : 1; }
+    if (correction::SavePreferences(preferences)) { _Module.Term(); ::CoUninitialize(); return 0; }
+    MessageBoxW(nullptr,L"无法保存纠错开关，请从管理纠错中检查设置。 / Could not save correction settings.",L"WeaseLC",MB_OK|MB_ICONERROR); _Module.Term(); ::CoUninitialize(); return 1;
+  }
+
 
   int ret = 0;
   if (!wcscmp(L"/local-model", lpCmdLine)) {

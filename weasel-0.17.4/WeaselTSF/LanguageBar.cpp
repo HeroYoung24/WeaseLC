@@ -8,6 +8,7 @@
 #include <WeaselUtility.h>
 #include <CorrectionProbe.h>
 #include <CorrectionMenuState.h>
+#include <CorrectionBrokerClient.h>
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 #include <ProbeDiagnostics.h>
 
@@ -278,6 +279,11 @@ STDAPI CLangBarItemButton::OnClick(TfLBIClick click,
 }
 
 void CLangBarItemButton::UpdateCorrectionMenu(HMENU menu) {
+  correction::BrokerRequest request;request.operation=correction::BrokerOperation::Settings;
+  request.requestId=GetTickCount64();correction::BrokerReply reply;correction::BrokerCall call;
+  const bool enabled=call.Exchange(correction::CorrectionBrokerServerPath(),request,reply,20) &&
+      reply.status==correction::BrokerStatus::Ok && reply.settings.enabled;
+  CheckMenuItem(menu,ID_WEASELTRAY_CORRECTION_TOGGLE,MF_BYCOMMAND|(enabled?MF_CHECKED:MF_UNCHECKED));
 #if !defined(WEASELC_LOCAL_TEST_BUILD) && !defined(WEASEL_CORRECTION_PROBE_BUILD)
   DeleteMenu(menu, ID_WEASELTRAY_CORRECTION_PROBE, MF_BYCOMMAND);
 #endif
@@ -411,6 +417,11 @@ std::wstring WeaselTSF::_GetRootDir() {
 void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
   std::wstring dir{};
   switch (wID) {
+    case ID_WEASELTRAY_MODEL_CONTROL:
+    case ID_WEASELTRAY_CORRECTION_TOGGLE:
+      if (wID == ID_WEASELTRAY_CORRECTION_TOGGLE) { Automatic().Cancel(); Automatic().ResetKeys(); }
+      m_client.TrayCommand(wID);
+      break;
     case ID_WEASELTRAY_CORRECTION_PAUSE: {
       const auto& app = correction::CurrentAppName();
       if (app.empty() || correction::InputOnlyExecutable(app.c_str()) ||

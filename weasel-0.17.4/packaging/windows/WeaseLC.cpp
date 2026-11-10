@@ -4,6 +4,8 @@
 #include <string>
 #include <filesystem>
 #include <LocalTestIdentity.h>
+#include "UninstallGuard.h"
+#include "DesktopLaunch.h"
 #ifndef WEASELC_DISTRIBUTION_BUILD
 #error This launcher requires the distribution identity
 #endif
@@ -165,6 +167,39 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   const std::wstring option = count == 1 ? L"/configure" : count == 2 ? args[1] : L"invalid";
   LocalFree(args);
   if (option == L"/identity") return 0; // Read-only packaging smoke check.
+  if (option == L"/launch-setup") {
+    if (!distribution::InstalledRoot()) return 2;
+    if (FAILED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED))) return 3;
+    const bool launched=distribution::LaunchFromDesktop((distribution::ModuleRoot()/L"WeaseLC.exe").wstring());
+    CoUninitialize();return launched ? 0 : 1;
+  }
+  if (option == L"/guard-destination") {
+    wchar_t destination[32768]{};
+    const auto size=GetEnvironmentVariableW(L"WEASELC_INSTALL_ROOT",destination,_countof(destination));
+    if(!size || size>=_countof(destination) || !distribution::SafeProgramRoot(destination)) return 1;
+    if(distribution::PendingFileOperation(destination)) return 3;
+    std::error_code error;
+    if(std::filesystem::exists(destination,error)) {
+      const bool empty=std::filesystem::is_empty(destination,error);
+      return error ? 1 : empty ? 0 : 2;
+    }
+    return error ? 1 : 0;
+  }
+  if (option == L"/guard-selftest") {
+    const auto root=distribution::DefaultProgramRoot();
+    return distribution::SafeProgramRoot(root) && !distribution::SafeProgramRoot(root.root_path()) &&
+        distribution::SafeProgramRoot(root.root_path()/L"WeaseLC-safe-boundary-test") &&
+        !distribution::SafeProgramRoot(root.parent_path()) && !distribution::SafeProgramRoot(root/L"..") &&
+        !distribution::SafeProgramRoot(L"C:\\Windows") && !distribution::InstalledRoot() ? 0 : 1;
+  }
+  if (option == L"/validate-install" || option == L"/prepare-uninstall") {
+    if (!distribution::InstalledRoot()) return 2;
+    if (option == L"/validate-install") return 0;
+    const auto root=distribution::ModuleRoot();
+    if(!Run((root/L"WeaselDeployer.exe").wstring(),L"/stop-local-model",true) ||
+        !Run((root/L"WeaselServer.exe").wstring(),L"/q",true)) return 3;
+    return distribution::ConfirmBlockers() ? 0 : 1;
+  }
   if (option != L"/configure" && option != L"/start" && option != L"/enable" && option != L"/remove" && option != L"/unregistered") return 2;
   const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   if (FAILED(initialized)) return 3;

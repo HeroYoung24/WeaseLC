@@ -21,7 +21,7 @@ inline bool OptionIn(const std::wstring& option, std::initializer_list<const wch
 }
 inline bool DeployerOption(const std::wstring& option) {
   return OptionIn(option, {L"",L"/?",L"/help",L"/deploy",L"/dict",L"/sync",L"/install",
-      L"/correction",L"/correction-demo",L"/correction-worker",L"/correction-worker-selftest",L"/correction-broker",
+      L"/correction",L"/toggle-correction",L"/stop-local-model",L"/correction-demo",L"/correction-worker",L"/correction-worker-selftest",L"/correction-broker",
       L"/correction-selftest",L"/correction-local-selftest",L"/rime-learning-selftest",L"/local-model",L"/local-model-selftest"});
 }
 inline bool ServerOption(const std::wstring& option) {

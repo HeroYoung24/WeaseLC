@@ -99,12 +99,12 @@ $include.Add('!macroend')
 $include.Add('!macro RemovePayload')
 foreach ($file in $paths) { $include.Add('  Delete /REBOOTOK "$INSTDIR\' + $file + '"') }
 $directories = @(Get-ChildItem $payload -Recurse -Directory | Sort-Object {$_.FullName.Length} -Descending)
-foreach ($dir in $directories) { $include.Add('  RMDir "$INSTDIR\' + $dir.FullName.Substring($payload.FullName.Length+1) + '"') }
+foreach ($dir in $directories) { $include.Add('  RMDir /REBOOTOK "$INSTDIR\' + $dir.FullName.Substring($payload.FullName.Length+1) + '"') }
 $include.Add('!macroend')
 $includePath = Join-Path $stage payload.nsh
 $include | Set-Content -LiteralPath $includePath -Encoding utf8
 $installer = Join-Path $stage 'WeaseLC-0.1.0-beta.1-x64-setup.exe'
-& $compiler /V3 /INPUTCHARSET UTF8 "/DPAYLOAD_INCLUDE=$includePath" /DDISPLAY_VERSION=0.1.0-beta.1 "/DINSTALLER_OUTPUT=$installer" (Join-Path $PSScriptRoot installer.nsi) > (Join-Path $stage nsis.log)
+& $compiler /V3 /INPUTCHARSET UTF8 "/DPAYLOAD_INCLUDE=$includePath" ("/DGUARD_HELPER=" + (Join-Path $payload "WeaseLC.exe")) /DDISPLAY_VERSION=0.1.0-beta.1 "/DINSTALLER_OUTPUT=$installer" (Join-Path $PSScriptRoot installer.nsi) > (Join-Path $stage nsis.log)
 if ($LASTEXITCODE) { Get-Content (Join-Path $stage nsis.log) -Tail 20; throw 'NSIS build failed.' }
 ((Get-FileHash -LiteralPath $installer).Hash.ToLowerInvariant() + '  ' + [IO.Path]::GetFileName($installer)) |
   Set-Content -LiteralPath (Join-Path $stage SHA256SUMS.txt) -Encoding ascii

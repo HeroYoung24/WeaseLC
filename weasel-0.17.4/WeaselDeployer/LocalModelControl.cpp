@@ -11,6 +11,7 @@
 #include <boost/json.hpp>
 #include <CorrectionBrokerProcess.h>
 #include <CorrectionProbe.h>
+#include <LocalModelWindow.h>
 #include "LocalModelControl.h"
 #include "LocalModelIdentity.h"
 #include "Resource.h"
@@ -27,6 +28,9 @@ bool ValidModelFolder(const fs::path& path) {
       fs::is_regular_file(path / L"Qwen3-4B-Q4_K_M.gguf");
 }
 fs::path FindModelFolder() {
+  wchar_t saved[32768]{}; DWORD bytes = sizeof(saved);
+  if (RegGetValueW(HKEY_CURRENT_USER,correction::kRegistryKey,L"LocalModelFolderV1",
+      RRF_RT_REG_SZ,nullptr,saved,&bytes) == ERROR_SUCCESS && ValidModelFolder(saved)) return saved;
   wchar_t exe[32768]{};
   const auto length = GetModuleFileNameW(nullptr, exe, _countof(exe));
   if (!length || length == _countof(exe)) return {};
@@ -69,6 +73,14 @@ bool SavePowerShell(const std::wstring& path) {
   const auto result = RegSetValueExW(key, L"LocalModelPowerShellV1", 0, REG_SZ,
       reinterpret_cast<const BYTE*>(path.c_str()), static_cast<DWORD>((path.size() + 1) * sizeof(wchar_t)));
   RegCloseKey(key); return result == ERROR_SUCCESS;
+}
+bool SaveModelFolder(const fs::path& folder) {
+  if (!ValidModelFolder(folder)) return false;
+  const auto value = folder.wstring(); HKEY key = nullptr;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER,correction::kRegistryKey,0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr) != ERROR_SUCCESS) return false;
+  const auto status = RegSetValueExW(key,L"LocalModelFolderV1",0,REG_SZ,
+      reinterpret_cast<const BYTE*>(value.c_str()),static_cast<DWORD>((value.size()+1)*sizeof(wchar_t)));
+  RegCloseKey(key); return status == ERROR_SUCCESS;
 }
 std::wstring SelectModelFolder(HWND owner, bool folderMode = true) {
   IFileDialog* dialog = nullptr; std::wstring result;
@@ -113,6 +125,7 @@ struct Control {
   bool chinese = PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE;
   bool ready = false;
   bool testing = false;
+  bool externalReady = false;
   const wchar_t* Text(const wchar_t* zh, const wchar_t* en) const { return chinese ? zh : en; }
   bool Running() const { return launcher.Process() && WaitForSingleObject(launcher.Process(), 0) == WAIT_TIMEOUT; }
   bool OwnedReady(HANDLE file) const {
@@ -137,7 +150,7 @@ struct Control {
         nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     bool owned = false;
     if (file != INVALID_HANDLE_VALUE) try { owned = OwnedReady(file); } catch (...) {}
-    launcher.Stop(); ready = false;
+    launcher.Stop(); ready = false; externalReady = false;
     if (file != INVALID_HANDLE_VALUE) {
       if (owned) { FILE_DISPOSITION_INFO remove{TRUE}; SetFileInformationByHandle(file, FileDispositionInfo, &remove, sizeof(remove)); }
       CloseHandle(file);
@@ -146,6 +159,11 @@ struct Control {
   }
   ~Control() { Stop(); }
 };
+void BeginHealth(Control& state) {
+  if (state.health) return;
+  auto health=std::make_shared<Health>();state.health=health;
+  state.healthThread=std::thread([health]{try{health->ready=LocalHealth();}catch(...){}health->done.store(true);});
+}
 bool StartFrozenModel(Control& state) {
   return ValidPowerShell(state.powershell) && ValidModelFolder(state.folder) && state.launcher.Start(state.powershell.wstring(),
       L"-NoProfile -NonInteractive -File \"" + (state.folder / L"Start-LocalModel.ps1").wstring() +
@@ -153,7 +171,7 @@ bool StartFrozenModel(Control& state) {
 }
 void ShowState(HWND dialog, Control& state, const wchar_t* text) {
   SetDlgItemTextW(dialog, IDC_MODEL_STATE, text);
-  EnableWindow(GetDlgItem(dialog, IDC_MODEL_START), !state.Running());
+  EnableWindow(GetDlgItem(dialog, IDC_MODEL_START), !state.Running() && !state.externalReady);
   EnableWindow(GetDlgItem(dialog, IDC_MODEL_BROWSE), !state.Running());
   EnableWindow(GetDlgItem(dialog, IDC_MODEL_BROWSE_SHELL), !state.Running());
   EnableWindow(GetDlgItem(dialog, IDC_MODEL_STOP), state.launcher.Process() != nullptr);
@@ -162,25 +180,40 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
   auto* state = reinterpret_cast<Control*>(GetWindowLongPtrW(dialog, DWLP_USER));
   if (message == WM_INITDIALOG) {
     state = reinterpret_cast<Control*>(l); SetWindowLongPtrW(dialog, DWLP_USER, l);
+    if (!state->testing) SetPropW(dialog,correction::kModelWindowProperty,reinterpret_cast<HANDLE>(1));
     if (!state->testing) { state->folder = FindModelFolder(); state->powershell = PreferredPowerShell(); }
     SetDlgItemTextW(dialog, IDC_MODEL_FOLDER, state->folder.c_str());
     SetDlgItemTextW(dialog, IDC_MODEL_SHELL, state->powershell.c_str());
     SetDlgItemTextW(dialog, IDC_MODEL_ENDPOINT, L"http://127.0.0.1:18963/v1/chat/completions");
     SetDlgItemTextW(dialog, IDC_MODEL_ALIAS, L"weasel-qwen3-4b");
-    ShowState(dialog, *state, state->Text(L"尚未启动。本窗口可最小化；关闭会停止由此启动的模型。",
-        L"Stopped. Minimize to keep running; closing stops only this window's model."));
-    if (!state->testing) SetTimer(dialog, 1, 500, nullptr); return TRUE;
+    ShowState(dialog, *state, state->Text(L"尚未启动。启动后关闭窗口可保持后台运行；从模型管理重新打开。",
+        L"Stopped. Close to keep a started model in the background; reopen from Model management."));
+    if (!state->testing) SetTimer(dialog, 1, 1000, nullptr); return TRUE;
   }
   if (!state) return FALSE;
+  if (message == WM_DESTROY) { RemovePropW(dialog,correction::kModelWindowProperty); return TRUE; }
+  if (message == correction::kModelShow) { ShowWindow(dialog,SW_RESTORE); SetForegroundWindow(dialog); return TRUE; }
+  if (message == correction::kModelStop || (message == WM_COMMAND && LOWORD(w) == IDC_MODEL_EXIT)) {
+    KillTimer(dialog,1); state->Stop(); EndDialog(dialog,IDCANCEL); return TRUE;
+  }
   if (message == WM_CLOSE || (message == WM_COMMAND && LOWORD(w) == IDCANCEL)) {
+    if (!state->testing && state->Running()) { ShowWindow(dialog,SW_HIDE); return TRUE; }
     KillTimer(dialog, 1); state->Stop(); EndDialog(dialog, IDCANCEL); return TRUE;
   }
   if (message == WM_TIMER) {
     if (state->testing) return TRUE;
     if (!state->Running()) {
       if (state->launcher.Process()) state->Stop();
-      ShowState(dialog, *state, state->Text(L"未运行；启动失败时请检查所选目录的 runtime.stderr.log。",
-          L"Not running. If startup failed, check runtime.stderr.log in the selected folder.")); return TRUE;
+      if (state->health && state->health->done.load()) {
+        if(state->healthThread.joinable()) state->healthThread.join();
+        state->externalReady=state->health->ready;state->health.reset();
+      }
+      ShowState(dialog, *state, state->externalReady ? state->Text(
+          L"检测到其他本地服务；当前窗口未接管。请在原启动程序中停止该服务。",
+          L"An external local service is running; this window does not own or stop it.") : state->Text(
+          L"未运行；启动失败时请检查所选目录的 runtime.stderr.log。",
+          L"Not running. If startup failed, check runtime.stderr.log in the selected folder."));
+      BeginHealth(*state);return TRUE;
     }
     if (state->health && state->health->done.load()) {
       if (state->healthThread.joinable()) state->healthThread.join();
@@ -189,17 +222,15 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
           L"Ready. Use the endpoint below in correction settings; enable hints separately.") :
           state->Text(L"正在校验、载入或预热；等待就绪再开启纠错。", L"Verifying, loading or warming up. Wait before enabling correction."));
     }
-    if (!state->health) {
-      auto health = std::make_shared<Health>(); state->health = health;
-      state->healthThread = std::thread([health] { try { health->ready = LocalHealth(); } catch (...) {} health->done.store(true); });
-    }
+    BeginHealth(*state);
     return TRUE;
   }
   if (message != WM_COMMAND) return FALSE;
   if (state->testing && LOWORD(w) != IDCANCEL) return TRUE;
   if (LOWORD(w) == IDC_MODEL_BROWSE && !state->Running()) {
     const auto folder = SelectModelFolder(dialog);
-    if (!folder.empty()) { state->folder = folder; SetDlgItemTextW(dialog, IDC_MODEL_FOLDER, folder.c_str()); }
+    if (!folder.empty()) { state->folder = folder; SetDlgItemTextW(dialog, IDC_MODEL_FOLDER, folder.c_str());
+      if (ValidModelFolder(folder)) SaveModelFolder(folder); }
     return TRUE;
   }
   if (LOWORD(w) == IDC_MODEL_BROWSE_SHELL && !state->Running()) {
@@ -217,6 +248,9 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
       ShowState(dialog, *state, state->Text(L"请选择已有4B模型目录和 PowerShell 7（pwsh.exe）；本功能不会下载模型。",
           L"Select an existing 4B folder and PowerShell 7 (pwsh.exe); no downloads are performed.")); return TRUE;
     }
+    if (!SaveModelFolder(state->folder) || !SavePowerShell(state->powershell.wstring())) {
+      ShowState(dialog,*state,state->Text(L"无法保存模型位置，请检查账户权限。",L"Could not save model paths. Check account permissions.")); return TRUE;
+    }
     if (!StartFrozenModel(*state)) {
       ShowState(dialog, *state, state->Text(L"无法启动；没有接管其他模型进程。", L"Could not start; no external model was taken over.")); return TRUE;
     }
@@ -231,8 +265,8 @@ int ShowLocalModelControl(HINSTANCE instance) {
   if (!mutex) return -1;
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
     CloseHandle(mutex);
-    MessageBoxW(nullptr, L"模型运行窗口已打开，请查看任务栏。 / Model control is already open; check the taskbar.",
-        L"WeaseLC", MB_OK | MB_ICONINFORMATION); return 0;
+    if (!correction::SignalModelControl(false)) return -1;
+    return 0;
   }
   Control state;
   const int result = static_cast<int>(DialogBoxParamW(instance, MAKEINTRESOURCEW(IDD_LOCAL_MODEL), nullptr, Proc, reinterpret_cast<LPARAM>(&state)));
@@ -244,7 +278,7 @@ bool CheckLocalModelControl(HINSTANCE instance, const std::function<void(HWND)>&
   HWND dialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_LOCAL_MODEL), nullptr, Proc, reinterpret_cast<LPARAM>(&state));
   if (!dialog) return false;
   bool valid = !IsWindowVisible(dialog) && state.folder.empty() && state.powershell.empty() && !state.launcher.Process() && !state.health;
-  for (const auto id : {IDC_MODEL_FOLDER, IDC_MODEL_BROWSE, IDC_MODEL_START, IDC_MODEL_STOP, IDC_MODEL_STATE, IDC_MODEL_SHELL, IDC_MODEL_BROWSE_SHELL, IDCANCEL})
+  for (const auto id : {IDC_MODEL_FOLDER, IDC_MODEL_BROWSE, IDC_MODEL_START, IDC_MODEL_STOP, IDC_MODEL_STATE, IDC_MODEL_SHELL, IDC_MODEL_BROWSE_SHELL, IDC_MODEL_EXIT, IDCANCEL})
     valid = GetDlgItem(dialog, id) && valid;
   SendMessageW(dialog, WM_COMMAND, IDC_MODEL_START, 0); SendMessageW(dialog, WM_TIMER, 1, 0);
   valid = valid && !state.launcher.Process() && !state.health && !IsWindowEnabled(GetDlgItem(dialog, IDC_MODEL_STOP));
