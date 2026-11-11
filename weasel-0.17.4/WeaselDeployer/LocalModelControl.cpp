@@ -12,6 +12,7 @@
 #include <CorrectionBrokerProcess.h>
 #include <CorrectionProbe.h>
 #include <LocalModelWindow.h>
+#include <LocalModelDefaults.h>
 #include "LocalModelControl.h"
 #include "LocalModelIdentity.h"
 #include "Resource.h"
@@ -56,14 +57,22 @@ fs::path PowerShell7() {
 }
 bool ValidPowerShell(const fs::path& executable) {
   const auto text = executable.wstring();
+  std::error_code error;
   return executable.is_absolute() && text.size() > 2 && text[1] == L':' && text.size() < 32000 &&
       text.find_first_of(L"\"\r\n") == std::wstring::npos &&
-      !_wcsicmp(executable.filename().c_str(), L"pwsh.exe") && fs::is_regular_file(executable);
+      !_wcsicmp(executable.filename().c_str(), L"pwsh.exe") && fs::is_regular_file(executable, error);
 }
 fs::path PreferredPowerShell() {
   wchar_t path[32768]{}; DWORD size = sizeof(path);
   if (RegGetValueW(HKEY_CURRENT_USER, correction::kRegistryKey, L"LocalModelPowerShellV1",
       RRF_RT_REG_SZ | RRF_NOEXPAND, nullptr, path, &size) == ERROR_SUCCESS && ValidPowerShell(path)) return path;
+  constexpr auto registration = L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\pwsh.exe";
+  for (const DWORD view : {RRF_SUBKEY_WOW6464KEY, RRF_SUBKEY_WOW6432KEY}) {
+    size = sizeof(path);
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, registration, nullptr,
+        RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | view, nullptr, path, &size) == ERROR_SUCCESS &&
+        ValidPowerShell(path)) return path;
+  }
   return PowerShell7();
 }
 bool SavePowerShell(const std::wstring& path) {
@@ -107,7 +116,7 @@ bool LocalHealth() {
   auto session = WinHttpOpen(L"WeaseLC local health", WINHTTP_ACCESS_TYPE_NO_PROXY, nullptr, nullptr, 0);
   if (!session) return false;
   WinHttpSetTimeouts(session, 400, 400, 400, 400);
-  auto connection = WinHttpConnect(session, L"127.0.0.1", 18963, 0);
+  auto connection = WinHttpConnect(session, L"127.0.0.1", correction::kManagedModelPort, 0);
   auto request = connection ? WinHttpOpenRequest(connection, L"GET", L"/health", nullptr, nullptr, nullptr, 0) : nullptr;
   DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER, status = 0, bytes = sizeof(status);
   const bool valid = request && WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy)) &&
@@ -167,14 +176,27 @@ void BeginHealth(Control& state) {
 bool StartFrozenModel(Control& state) {
   return ValidPowerShell(state.powershell) && ValidModelFolder(state.folder) && state.launcher.Start(state.powershell.wstring(),
       L"-NoProfile -NonInteractive -File \"" + (state.folder / L"Start-LocalModel.ps1").wstring() +
-      L"\" -Variant 4b -ThinkingBudget 0 -Port 18963 -StopOnInputClose", 2);
+      L"\" -Variant 4b -ThinkingBudget 0 -Port " + std::to_wstring(correction::kManagedModelPort) + L" -StopOnInputClose", 2);
 }
 void ShowState(HWND dialog, Control& state, const wchar_t* text) {
   SetDlgItemTextW(dialog, IDC_MODEL_STATE, text);
-  EnableWindow(GetDlgItem(dialog, IDC_MODEL_START), !state.Running() && !state.externalReady);
+  EnableWindow(GetDlgItem(dialog, IDC_MODEL_START),
+      !state.Running() && !state.externalReady && !state.folder.empty() && !state.powershell.empty());
   EnableWindow(GetDlgItem(dialog, IDC_MODEL_BROWSE), !state.Running());
   EnableWindow(GetDlgItem(dialog, IDC_MODEL_BROWSE_SHELL), !state.Running());
   EnableWindow(GetDlgItem(dialog, IDC_MODEL_STOP), state.launcher.Process() != nullptr);
+}
+const wchar_t* IdleModelState(const Control& state) {
+  if (state.externalReady) return state.Text(
+      L"端口已有其他本地服务。请在原启动程序中管理该服务。",
+      L"Another local service is using the port. Manage it from its launcher.");
+  if (state.powershell.empty()) return state.Text(
+      L"未找到 PowerShell 7。请选择 PowerShell 7 的 pwsh.exe 文件。",
+      L"PowerShell 7 was not found. Select its pwsh.exe file.");
+  if (state.folder.empty()) return state.Text(
+      L"请选择已有的本地模型目录。",
+      L"Select the folder containing the local model.");
+  return state.Text(L"未运行。", L"Stopped.");
 }
 INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
   auto* state = reinterpret_cast<Control*>(GetWindowLongPtrW(dialog, DWLP_USER));
@@ -184,15 +206,18 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
     if (!state->testing) { state->folder = FindModelFolder(); state->powershell = PreferredPowerShell(); }
     SetDlgItemTextW(dialog, IDC_MODEL_FOLDER, state->folder.c_str());
     SetDlgItemTextW(dialog, IDC_MODEL_SHELL, state->powershell.c_str());
-    SetDlgItemTextW(dialog, IDC_MODEL_ENDPOINT, L"http://127.0.0.1:18963/v1/chat/completions");
-    SetDlgItemTextW(dialog, IDC_MODEL_ALIAS, L"weasel-qwen3-4b");
-    ShowState(dialog, *state, state->Text(L"尚未启动。启动后关闭窗口可保持后台运行；从模型管理重新打开。",
-        L"Stopped. Close to keep a started model in the background; reopen from Model management."));
+    SetDlgItemTextW(dialog, IDC_MODEL_ENDPOINT, correction::kManagedModelEndpoint);
+    SetDlgItemTextW(dialog, IDC_MODEL_ALIAS, correction::kManagedModelName);
+    ShowState(dialog, *state, IdleModelState(*state));
     if (!state->testing) SetTimer(dialog, 1, 1000, nullptr); return TRUE;
   }
   if (!state) return FALSE;
   if (message == WM_DESTROY) { RemovePropW(dialog,correction::kModelWindowProperty); return TRUE; }
   if (message == correction::kModelShow) { ShowWindow(dialog,SW_RESTORE); SetForegroundWindow(dialog); return TRUE; }
+  if (message == correction::kModelReady) {
+    SetWindowLongPtrW(dialog, DWLP_MSGRESULT, state->Running() && state->ready);
+    return TRUE;
+  }
   if (message == correction::kModelStop || (message == WM_COMMAND && LOWORD(w) == IDC_MODEL_EXIT)) {
     KillTimer(dialog,1); state->Stop(); EndDialog(dialog,IDCANCEL); return TRUE;
   }
@@ -208,11 +233,7 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
         if(state->healthThread.joinable()) state->healthThread.join();
         state->externalReady=state->health->ready;state->health.reset();
       }
-      ShowState(dialog, *state, state->externalReady ? state->Text(
-          L"检测到其他本地服务；当前窗口未接管。请在原启动程序中停止该服务。",
-          L"An external local service is running; this window does not own or stop it.") : state->Text(
-          L"未运行；启动失败时请检查所选目录的 runtime.stderr.log。",
-          L"Not running. If startup failed, check runtime.stderr.log in the selected folder."));
+      ShowState(dialog, *state, IdleModelState(*state));
       BeginHealth(*state);return TRUE;
     }
     if (state->health && state->health->done.load()) {
@@ -229,14 +250,19 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
   if (state->testing && LOWORD(w) != IDCANCEL) return TRUE;
   if (LOWORD(w) == IDC_MODEL_BROWSE && !state->Running()) {
     const auto folder = SelectModelFolder(dialog);
-    if (!folder.empty()) { state->folder = folder; SetDlgItemTextW(dialog, IDC_MODEL_FOLDER, folder.c_str());
-      if (ValidModelFolder(folder)) SaveModelFolder(folder); }
+    if (!folder.empty()) {
+      state->folder = folder;
+      SetDlgItemTextW(dialog, IDC_MODEL_FOLDER, folder.c_str());
+      if (ValidModelFolder(folder)) SaveModelFolder(folder);
+      ShowState(dialog, *state, IdleModelState(*state));
+    }
     return TRUE;
   }
   if (LOWORD(w) == IDC_MODEL_BROWSE_SHELL && !state->Running()) {
     const auto file = SelectModelFolder(dialog, false);
     if (!file.empty() && ValidPowerShell(file)) {
       state->powershell = file; SetDlgItemTextW(dialog, IDC_MODEL_SHELL, file.c_str());
+      ShowState(dialog, *state, IdleModelState(*state));
       if (!SavePowerShell(file)) ShowState(dialog, *state, state->Text(
           L"当前选择可用，但未能保存供下次使用。", L"This selection is usable but could not be saved for next time."));
     }
@@ -297,6 +323,12 @@ bool CheckOwnedLocalModel() try {
       "controlled model test refuses an existing runtime or ready file")) return false;
   if (!check(ValidModelFolder(state.folder), "controlled model folder has the existing launcher runtime and 4B weights")) return false;
   if (!check(ValidPowerShell(state.powershell), "model controller accepts a verified selected PowerShell from either caller architecture")) return false;
+  state.testing = true;
+  const auto dialog = CreateDialogParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_LOCAL_MODEL),
+      nullptr, Proc, reinterpret_cast<LPARAM>(&state));
+  if (!check(dialog != nullptr, "readiness test uses the hidden model control")) return false;
+  struct CloseDialog { HWND dialog; ~CloseDialog() { DestroyWindow(dialog); } } close{dialog};
+  check(SendMessageW(dialog, correction::kModelReady, 0, 0) == FALSE, "quick toggle sees a stopped model");
   if (!check(StartFrozenModel(state), "same GUI launch path starts only frozen local 4B")) return false;
   const auto deadline = GetTickCount64() + 120000;
   bool ready = false;
@@ -305,6 +337,8 @@ bool CheckOwnedLocalModel() try {
     Sleep(100);
   }
   check(ready, "owned model identity and loopback health both confirm readiness");
+  state.ready = ready;
+  check(SendMessageW(dialog, correction::kModelReady, 0, 0) == TRUE, "quick toggle sees the ready managed model");
   HANDLE process = nullptr;
   if (ready) {
     std::ifstream file(state.folder / L"ready.json", std::ios::binary);
@@ -314,6 +348,7 @@ bool CheckOwnedLocalModel() try {
     if (state.launcher.ContainsProcess(pid)) process = OpenProcess(SYNCHRONIZE, FALSE, pid);
   }
   state.Stop();
+  check(SendMessageW(dialog, correction::kModelReady, 0, 0) == FALSE, "quick toggle sees the model stop");
   check(process && WaitForSingleObject(process, 5000) == WAIT_OBJECT_0, "GUI stop retires its own actual model process");
   if (process) CloseHandle(process);
   check(!fs::exists(state.folder / L"ready.json") && !LocalHealth(), "model stop leaves no ready file or healthy endpoint");

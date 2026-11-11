@@ -75,6 +75,11 @@ bool DecodePreferences(const std::string& encoded, Preferences& preferences) {
     decoded.mode = static_cast<Mode>(mode);
     ReadProfile(object.at("local"), decoded.local);
     ReadProfile(object.at("online"), decoded.online);
+    if (decoded.local.model.empty() &&
+        (decoded.local.endpoint.empty() || decoded.local.endpoint == ModelConfig{}.endpoint)) {
+      decoded.local.endpoint = kManagedModelEndpoint;
+      decoded.local.model = kManagedModelName;
+    }
     if (version >= 3) {
       const auto& saved = object.at("automatic").as_object();
       auto& a = decoded.automatic;

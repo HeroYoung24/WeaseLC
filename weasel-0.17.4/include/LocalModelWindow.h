@@ -4,7 +4,7 @@
 #include "LocalTestIdentity.h"
 namespace correction {
 inline constexpr wchar_t kModelWindowProperty[] = WEASEL_PIPE_NAME L".model.control";
-inline constexpr UINT kModelShow = WM_APP + 181, kModelStop = WM_APP + 182;
+inline constexpr UINT kModelShow = WM_APP + 181, kModelStop = WM_APP + 182, kModelReady = WM_APP + 183;
 inline HWND FindModelControlWindow() {
   struct Search { std::wstring executable; HWND window = nullptr; } search;
   wchar_t file[32768]{};
@@ -31,5 +31,11 @@ inline bool SignalModelControl(bool stop) {
   DWORD_PTR result = 0;
   return SendMessageTimeoutW(window,stop ? kModelStop : kModelShow,0,0,
       SMTO_ABORTIFHUNG,5000,&result) != 0;
+}
+inline bool ManagedModelReady() {
+  const auto window = FindModelControlWindow();
+  DWORD_PTR ready = 0;
+  return window && SendMessageTimeoutW(window, kModelReady, 0, 0,
+      SMTO_ABORTIFHUNG | SMTO_BLOCK, 500, &ready) && ready == TRUE;
 }
 }

@@ -5,10 +5,12 @@
 #include "WeaselTSF.h"
 #include "LanguageBar.h"
 #include "CandidateList.h"
+#include "EditSession.h"
 #include <WeaselUtility.h>
 #include <CorrectionProbe.h>
 #include <CorrectionMenuState.h>
 #include <CorrectionBrokerClient.h>
+#include <CorrectionScope.h>
 #ifdef WEASEL_CORRECTION_PROBE_BUILD
 #include <ProbeDiagnostics.h>
 
@@ -297,6 +299,8 @@ void CLangBarItemButton::UpdateCorrectionMenu(HMENU menu) {
     ModifyMenuW(menu, ID_WEASELTRAY_CORRECTION_PAUSE, MF_BYCOMMAND | MF_STRING, ID_WEASELTRAY_CORRECTION_PAUSE, label.c_str());
   }
   correction::UpdateCorrectionMenuState(menu, inputOnly, paused, foreground);
+  EnableMenuItem(menu, ID_WEASELTRAY_CORRECTION_COMPATIBILITY,
+      MF_BYCOMMAND | (foreground ? MF_ENABLED : MF_GRAYED));
 }
 
 STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu) {
@@ -417,6 +421,9 @@ std::wstring WeaselTSF::_GetRootDir() {
 void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
   std::wstring dir{};
   switch (wID) {
+    case ID_WEASELTRAY_CORRECTION_COMPATIBILITY:
+      _CheckCorrectionCompatibility();
+      break;
     case ID_WEASELTRAY_MODEL_CONTROL:
     case ID_WEASELTRAY_CORRECTION_TOGGLE:
       if (wID == ID_WEASELTRAY_CORRECTION_TOGGLE) { Automatic().Cancel(); Automatic().ResetKeys(); }
@@ -505,6 +512,73 @@ void WeaselTSF::_HandleLangBarMenuSelect(UINT wID) {
       m_client.TrayCommand(wID);
       break;
   }
+}
+
+namespace {
+class FieldCompatibilitySession : public CEditSession {
+ public:
+  FieldCompatibilitySession(WeaselTSF* service, ITfThreadMgr* manager, ITfContext* context)
+      : CEditSession(service, context), manager_(manager) {}
+
+  STDMETHODIMP DoEditSession(TfEditCookie cookie) override {
+    if (retired || !_IsCurrent() || _pTextService->_IsComposing() ||
+        !correction::CheckContextFocus(manager_, _pContext, true, GetForegroundWindow())) return E_FAIL;
+    scope = correction::CommittedInputState(_pContext);
+    if (!scope) return S_OK;
+    TF_SELECTION selected{};
+    ULONG count = 0;
+    const auto result = _pContext->GetSelection(cookie, TF_DEFAULT_SELECTION, 1, &selected, &count);
+    com_ptr<ITfRange> range;
+    range.Attach(selected.range);
+    if (result != S_OK || count != 1 || !range) return E_FAIL;
+    BOOL empty = FALSE;
+    if (range->IsEmpty(cookie, &empty) != S_OK || !empty) return E_FAIL;
+    scope = correction::InspectInputScope(_pContext, cookie, range, correction::ScopeUse::LocalCommit,
+                                          correction::NativeTextRangeVerified, nullptr);
+    return S_OK;
+  }
+
+  bool retired = false;
+  correction::ScopeDiagnostic scope;
+
+ private:
+  com_ptr<ITfThreadMgr> manager_;
+};
+}
+
+void WeaselTSF::_CheckCorrectionCompatibility() {
+  const HWND host = _GetFocusedContextWindow();
+  if (!correction::CorrectionMenuTargetsForeground(host, GetForegroundWindow())) return;
+  const bool chinese = PRIMARYLANGID(get_language_id()) == LANG_CHINESE;
+  const wchar_t* result = chinese ? L"无法确认输入框能力。请在可编辑的正文中放置光标后重试。"
+                                  : L"Could not verify this field. Place the caret in editable text and retry.";
+  com_ptr<ITfDocumentMgr> document;
+  com_ptr<ITfContext> context;
+  if (correction::InputOnlyHost(true)) {
+    result = chinese ? L"当前应用按普通输入模式处理，或已暂停纠错。"
+                     : L"This app uses normal input only or correction is paused.";
+  } else if (_IsComposing()) {
+    result = chinese ? L"请先结束当前拼音输入，再检查此输入框。"
+                     : L"Finish the current composition before checking this field.";
+  } else if (_pThreadMgr && _pThreadMgr->GetFocus(&document) == S_OK && document &&
+             document->GetTop(&context) == S_OK && context &&
+             correction::CheckContextFocus(_pThreadMgr, context, true, GetForegroundWindow())) {
+    com_ptr<FieldCompatibilitySession> session;
+    session.Attach(new (std::nothrow) FieldCompatibilitySession(this, _pThreadMgr, context));
+    if (session) {
+      HRESULT edit = E_FAIL;
+      const auto requested = context->RequestEditSession(_tfClientId, session, TF_ES_SYNC | TF_ES_READ, &edit);
+      session->retired = true;
+      if (!correction::CheckContextFocus(_pThreadMgr, context, true, GetForegroundWindow())) return;
+      if (requested == S_OK && edit == S_OK) {
+        result = session->scope
+            ? (chinese ? L"输入框通过只读兼容性检查。实际提示和 Tab 替换仍取决于宿主及输入状态。"
+                       : L"This field passed the read-only check. Hints and Tab replacement still depend on the host and input state.")
+            : correction::ScopeStageText(session->scope.stage, chinese);
+      }
+    }
+  }
+  MessageBoxW(host, result, chinese ? L"输入框兼容性" : L"Field compatibility", MB_OK | MB_ICONINFORMATION);
 }
 
 HWND WeaselTSF::_GetFocusedContextWindow() {

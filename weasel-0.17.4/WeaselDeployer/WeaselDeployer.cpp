@@ -63,34 +63,33 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
   ATLASSERT(SUCCEEDED(hRes));
 
   CreateDirectory(WeaselUserDataPath().c_str(), NULL);
-  if (option == L"/toggle-correction") {
-    auto preferences = correction::LoadPreferences();
-    const bool enabled = preferences.mode == correction::Mode::Local && preferences.automatic.enabled;
-    preferences.mode = enabled ? correction::Mode::Off : correction::Mode::Local;
-    preferences.automatic.enabled = !enabled;
-    if (!enabled && !correction::ValidateConfig(preferences.local))
-      { const INT_PTR result = ShowCorrectionSettings(hInstance,false); _Module.Term(); ::CoUninitialize(); return result == IDOK ? 0 : 1; }
-    if (correction::SavePreferences(preferences)) { _Module.Term(); ::CoUninitialize(); return 0; }
-    MessageBoxW(nullptr,L"无法保存纠错开关，请从管理纠错中检查设置。 / Could not save correction settings.",L"WeaseLC",MB_OK|MB_ICONERROR); _Module.Term(); ::CoUninitialize(); return 1;
-  }
-
-
   int ret = 0;
-  if (!wcscmp(L"/local-model", lpCmdLine)) {
-    ret = ShowLocalModelControl(hInstance);
-    _Module.Term(); ::CoUninitialize(); return ret == -1 ? 1 : 0;
-  }
-  HANDLE hMutex = CreateMutex(NULL, TRUE, WEASEL_DEPLOYER_EXCLUSIVE_MUTEX);
-  if (!hMutex) {
-    ret = 1;
-  } else if (GetLastError() == ERROR_ALREADY_EXISTS) {
-    ret = 1;
+  if (option == L"/toggle-correction") {
+    correction::PreferencesRead read;
+    auto preferences = correction::LoadPreferences(&read);
+    const bool enabling = !correction::LocalAutomaticEnabled(preferences);
+    const bool usable = read.stage == correction::PreferencesStage::Missing ||
+        read.stage == correction::PreferencesStage::Ready;
+    if (!usable || (enabling && !correction::ValidateConfig(preferences.local))) {
+      ret = ShowCorrectionSettings(hInstance, false) == IDOK ? 0 : 1;
+    } else if (enabling && correction::UsesManagedModel(preferences.local) && !correction::ManagedModelReady()) {
+      ret = ShowLocalModelControl(hInstance) == -1 ? 1 : 0;
+    } else {
+      if (enabling) preferences.mode = correction::Mode::Local;
+      preferences.automatic.enabled = enabling;
+      if (!correction::SavePreferences(preferences)) {
+        MessageBoxW(nullptr, L"无法保存纠错开关。 / Could not save the correction switch.",
+            L"WeaseLC", MB_OK | MB_ICONERROR);
+        ret = 1;
+      }
+    }
+  } else if (option == L"/local-model") {
+    ret = ShowLocalModelControl(hInstance) == -1 ? 1 : 0;
   } else {
-    ret = Run(lpCmdLine);
-  }
-
-  if (hMutex) {
-    CloseHandle(hMutex);
+    HANDLE hMutex = CreateMutex(NULL, TRUE, WEASEL_DEPLOYER_EXCLUSIVE_MUTEX);
+    if (!hMutex || GetLastError() == ERROR_ALREADY_EXISTS) ret = 1;
+    else ret = Run(lpCmdLine);
+    if (hMutex) CloseHandle(hMutex);
   }
   _Module.Term();
   ::CoUninitialize();

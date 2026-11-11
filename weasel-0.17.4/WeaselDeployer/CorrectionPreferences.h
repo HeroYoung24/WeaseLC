@@ -1,6 +1,7 @@
 #pragma once
 #include <CorrectionModel.h>
 #include <CorrectionAutomatic.h>
+#include <LocalModelDefaults.h>
 
 namespace correction {
 struct Preferences {
@@ -11,10 +12,19 @@ struct Preferences {
   ModelConfig online;
   Preferences() {
     local.mode = Mode::Local;
+    local.endpoint = kManagedModelEndpoint;
+    local.model = kManagedModelName;
+    local.timeoutSeconds = kManagedModelTimeoutSeconds;
     online.mode = Mode::Online;
     online.endpoint.clear();
   }
 };
+inline bool LocalAutomaticEnabled(const Preferences& preferences) {
+  return preferences.mode == Mode::Local && preferences.automatic.enabled;
+}
+inline bool UsesManagedModel(const ModelConfig& config) {
+  return config.endpoint == kManagedModelEndpoint && config.model == kManagedModelName;
+}
 enum class PreferencesStage : unsigned {
   NotRead, Missing, QueryFailed, InvalidSize, ReadFailed, DecodeFailed, Ready
 };

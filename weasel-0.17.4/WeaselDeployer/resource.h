@@ -116,6 +116,7 @@
 #define IDC_APP_BEHAVIOR_ENABLED         1092
 #define IDC_MODEL_EXIT                   1094
 #define IDC_CORRECTION_FILL_LOCAL        1095
+#define IDC_CORRECTION_COMPATIBILITY     1096
 #define IDC_SCHEMA_LIST                 1000
 #define IDC_SCHEMA_DESCRIPTION          1001
 #define IDC_GET_SCHEMATA                1002

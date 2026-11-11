@@ -122,9 +122,11 @@ struct CorrectionBroker::Impl {
     const auto before = RegistryRevision(path);
     PreferencesRead detail; auto value = ReadPreferences(path.c_str(), &detail);
     const auto after = RegistryRevision(path);
-    if (!before || before != after || detail.stage != PreferencesStage::Ready) return BrokerStatus::Unavailable;
+    if (before != after) return BrokerStatus::Unavailable;
+    if (detail.stage == PreferencesStage::Missing) return BrokerStatus::Ok;
+    if (!before || detail.stage != PreferencesStage::Ready) return BrokerStatus::Unavailable;
     saved.revision = before;
-    saved.enabled = value.mode == Mode::Local && value.automatic.enabled &&
+    saved.enabled = LocalAutomaticEnabled(value) &&
         value.local.provider == Provider::ChatCompletions && value.local.bearerToken.empty() && ValidateConfig(value.local);
     const auto& a = value.automatic;
     saved.timing = value.timing; saved.tab = a.tab; saved.side = a.side; saved.gap = a.gap;

@@ -166,6 +166,7 @@ class WeaselTSF : public ITfTextInputProcessorEx,
 
   /* Language bar */
   HWND _GetFocusedContextWindow();
+  void _CheckCorrectionCompatibility();
   void _HandleLangBarMenuSelect(UINT wID);
 
   /* IPC */
