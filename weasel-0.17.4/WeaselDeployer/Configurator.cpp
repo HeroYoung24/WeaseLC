@@ -95,10 +95,17 @@ int Configurator::Run(bool installing) {
   RimeSwitcherSettings* switcher_settings = api->switcher_settings_init();
   UIStyleSettings ui_style_settings;
 
-  bool skip_switcher_settings =
-      installing && !api->is_first_run((RimeCustomSettings*)switcher_settings);
-  bool skip_ui_style_settings =
-      installing && !api->is_first_run(ui_style_settings.settings());
+  // In the distribution, /install is reached through an explicit setup
+  // choice. A retained user profile must not suppress the requested panels.
+#ifdef WEASELC_DISTRIBUTION_BUILD
+  const bool skip_configured = false;
+#else
+  const bool skip_configured = installing;
+#endif
+  const bool skip_switcher_settings =
+      skip_configured && !api->is_first_run((RimeCustomSettings*)switcher_settings);
+  const bool skip_ui_style_settings =
+      skip_configured && !api->is_first_run(ui_style_settings.settings());
 
   (skip_switcher_settings ||
    configure_switcher(api, switcher_settings, &reconfigured)) &&
