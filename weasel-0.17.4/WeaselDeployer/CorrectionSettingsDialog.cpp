@@ -730,7 +730,7 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lPa
         SHELLEXECUTEINFOW launch{sizeof(launch)};
         launch.hwnd = dialog; launch.lpFile = executable; launch.lpParameters = L"/local-model"; launch.nShow = SW_SHOWNORMAL;
         if (!ShellExecuteExW(&launch)) SetDlgItemTextW(dialog, IDC_CORRECTION_STATE,
-            state->Text(L"无法打开本地模型运行窗口。", L"Could not open local model control."));
+            state->Text(L"无法打开「管理本地模型」。", L"Could not open Manage local models."));
       }
       return TRUE;
     }

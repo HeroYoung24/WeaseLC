@@ -1,41 +1,34 @@
-# 小狼毫本地模型测试环境
+# WeaseLC 本地模型
 
-已下载并校验：官方 Qwen3 4B Q4_K_M（默认测试基线，约 2.50GB）、Qwen3 1.7B Q8_0（对照，约 1.83GB），以及 llama.cpp b11640 的 Windows x64 Vulkan 便携运行时。没有安装服务或输入法。源地址、固定提交、字节大小、SHA256 在 `deployment.json`，许可证文本在本目录。
+## 从应用准备模型
 
-## 手动启动
+1. 安装 [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows)，或准备已有的可信 `pwsh.exe`。WeaseLC 会依次查找保存路径、系统注册和标准安装位置、当前 `PATH`。
+2. 打开 WeaseLC 的「管理本地模型」，点「下载推荐模型」并确认。下载约 2.53 GB，建议预留至少 3 GB。校验完成后模型目录会预填为 `%LOCALAPPDATA%\WeaseLC\Models\Qwen3-4B`。
+3. 点「启动本地模型」。推荐运行时需要可用的 Vulkan 设备。看到「已就绪」后，可关闭窗口让模型继续在后台运行，或用「停止并退出」停止模型。
+4. 从语言栏开启本地自动纠错，或在「管理纠错」手动检查一段文字。
 
-在 PowerShell 中运行，保持终端开启，按 Ctrl+C 停止：
+已有完整目录时，可以选择含 `Start-LocalModel.ps1`、`runtime\llama-server.exe` 和 `Qwen3-4B-Q4_K_M.gguf` 的目录。也可在「管理纠错」填写自行管理的本地接口和模型名。
+
+## PowerShell 与数据
+
+`pwsh.exe` 是 PowerShell 7 程序，`Start-LocalModel.ps1` 和 `Download-Model.ps1` 是项目脚本。WeaseLC 启动独立 PowerShell 进程，跳过个人启动配置，遵循当前脚本执行策略。已选择的 PowerShell 与模型目录会记忆。卸载保留这两个位置的文件，取消保留偏好只会清除记录。
+
+推荐模型只监听 `127.0.0.1:18963`，模型名为 `weasel-qwen3-4b`。模型下载和预热不读取输入框正文，自动纠错可单独开启或关闭。
+
+## 从仓库手动准备
+
+在已克隆的仓库根目录运行：
 
 ```powershell
-& E:\WeaseLC\local-model\Start-LocalModel.ps1 -Variant 4b
+pwsh -NoProfile -File .\local-model\Download-Model.ps1 -Variant 4b
+pwsh -NoProfile -File .\local-model\Start-LocalModel.ps1 -Variant 4b
 ```
 
-等待显示 `Ready`，脚本先完成合成请求预热。默认只监听 `127.0.0.1:18963`，占用时退出。停止脚本会结束其子进程。也可使用 `-Variant 1.7b` 做对照；两者默认不能同时启动。
+第一条下载和校验资产，第二条启动模型。保持终端打开，按 Ctrl+C 停止。使用应用管理模型时，请从「管理本地模型」启动。
 
-正式手动检查界面：
+## 来源与许可
 
-```powershell
-& E:\WeaseLC\weasel-0.17.4\output\WeaselDeployer.exe /correction
-```
+- Qwen3-4B-GGUF Q4_K_M，许可为 [Apache-2.0](Qwen-4B-LICENSE.txt)。 [固定上游版本](https://huggingface.co/Qwen/Qwen3-4B-GGUF/tree/bc640142c66e1fdd12af0bd68f40445458f3869b)
+- llama.cpp b11640，许可为 [MIT](llama-LICENSE.txt)。Windows Vulkan 压缩包内的 LLVM OpenMP 许可随运行时保留。 [固定上游版本](https://github.com/ggml-org/llama.cpp/releases/tag/b11640)
 
-选择“本地”，填写：
-
-- 接口：`http://127.0.0.1:18963/v1/chat/completions`
-- 模型：`weasel-qwen3-4b`
-- 建议保留默认提示阈值；只有主动点击“检查文本”才发送本页文字。
-
-这里的兼容接口由本机 llama.cpp 提供；使用本地模型不需要 OpenAI API 密钥或 Codex CLI。
-
-## 当前结论
-
-2026-10-21调参搜索收尾但**未达标**，见[完整报告](../weasel-0.17.4/docs/MODEL_TUNING_REPORT_2026-10-21.md)。14组配置、980次有效开发请求：原4B修对9/20；7B虽修对18/20、中位406ms/P95 938ms，却有5/50对照误报、2错改。短思考、Schema和新提示均未形成可采用组合，默认4B/原生产提示/0.90门槛不变，系统纠错关闭。
-
-新增对照资产：Unsloth量化的Qwen3-4B-Instruct-2507 Q4_K_M，以及Qwen官方Qwen2.5-7B-Instruct Q4_K_M两片，均已校验SHA并保存Apache-2.0许可证。可显式使用`Download-Model.ps1 -Variant 4b-instruct`或`-Variant 7b`下载，`Start-LocalModel.ps1`同名参数启动；对应别名是`weasel-qwen3-4b-instruct`、`weasel-qwen25-7b`。`-ThinkingBudget 32|64`仅用于原Qwen3思考对照，默认0，不适用于这两个纯非思考模型。这些都是被拒绝的实验候选，不是推荐启用的配置。新权重约7.18GB保留，模型与下载进程已退出。
-
-2026-10-20新增速度对照：42条同语料中，4B确定性与低温采样的请求中位均312ms、P95均672ms、修对7/14错句；1.7B中位188ms但仅修对1/14。保留4B、temperature=0及既有门槛；另16条验证修对2/6、10对照无误报，仍有明显漏报。见[提示框审查和速度报告](../weasel-0.17.4/docs/TAB_DISPLAY_REVIEW_2026-10-20.md)。这是合成请求计时，不含默认250ms去抖或下次输入等待；没有修改系统设置或默认启动模型。
-
-4B 模型在 18 条合成语料中，默认阈值下 4/6 错句显示预期修正、12 条对照未显示错误建议。热身后的请求中位约 266ms，不含 250ms 去抖；不代表真实准确率。另两条候选分别包含一个正确和一个错误的 0.85 分建议，不能靠降低阈值解决。日常自动纠错仍未开放。
-
-详细结果、失败原因、复现及后续任务见 [本地测试记录](../weasel-0.17.4/docs/LOCAL_MODEL_TESTS.md)。`final-*.log`、`threshold-analysis-4b.log` 与早期对照日志均为内置合成语料。
-
-本目录是用户授权保留的模型部署资料；本轮模型与测试进程已退出，权重及工作区构建保留，系统纠错关闭。如缺少下载文件，可执行 `Download-Model.ps1 -Variant 4b`，下载脚本使用已有系统代理并校验 SHA256。
+[资产版本及 SHA-256](deployment.json) · [历史开发与调参](../weasel-0.17.4/docs/archive/LOCAL_MODEL_DEVELOPMENT.md)

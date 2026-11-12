@@ -3,7 +3,7 @@
 WeaseLC 基于 Weasel 0.17.4，原版作者为 RIME Developers，来源为 https://github.com/rime/weasel。
 保留原作者版权声明，主程序许可证见 LICENSE.txt。
 本版本增加本地模型纠错、提示与队列、设置界面，以及独立安装身份和启动程序。
-本分发改造日期为 2026-11-09，修改者为 WeaseLC contributors。
+分发改造始于 2026-11-09，修改者为 WeaseLC contributors。
 
 | 组件 | 用途 | 许可文本 |
 | --- | --- | --- |
@@ -12,6 +12,7 @@ WeaseLC 基于 Weasel 0.17.4，原版作者为 RIME Developers，来源为 https
 | glog、LevelDB | 日志及词典存储 | licenses/glog.txt、licenses/leveldb.txt |
 | yaml-cpp、marisa-trie | 配置及词典 | licenses/yaml-cpp.txt、licenses/marisa-trie.txt |
 | OpenCC | 字形转换 | licenses/opencc.txt |
+| OpenCC 随附的 marisa、RapidJSON、Darts-clone | 依赖声明 | licenses/opencc-marisa.txt、licenses/opencc-rapidjson.txt、licenses/opencc-darts-clone.txt |
 | WTL | 原生窗口界面 | licenses/WTL-MS-PL.txt |
 | NSIS | 安装程序及插件 | licenses/NSIS-COPYING.txt |
 | Rime 方案、字典和语言数据 | 基础输入方案 | licenses/data-*.txt，原 YAML 中的来源说明同时保留 |
@@ -23,7 +24,13 @@ distribution-manifest.json 列出本包文件和哈希，并标识源码提交�
 并附上 packaging/windows/Build-Distribution.ps1 及安装脚本。
 公开发布前须将准确的对应源码下载地址写入发布页。
 
-本包不包含模型权重。用户另行取得的模型、推理运行时和依赖以各自许可为准。
+安装包内的 `model-tools` 保存下载脚本、`MODEL-ASSETS.md` 及 Qwen3-4B 和 llama.cpp 许可原文。权重和推理运行时从上游按需下载，PowerShell 7 由用户单独提供。
 
 WTL 版权所有 Microsoft Corporation、WTL Team。随附 MS-PL 原文取自
 https://raw.githubusercontent.com/spdx/license-list-data/main/text/MS-PL.txt。
+
+## 源码仓库中的历史构建工具
+
+- 7-Zip 24.05。源代码见 [上游版本](https://github.com/ip7z/7zip/tree/24.05)，许可见仓库的 `output/7-zip-license.txt`。
+- curl 8.7.1。源代码见 [上游版本](https://github.com/curl/curl/tree/curl-8_7_1)，许可见 `output/COPYING-curl.txt`。
+- WinSparkle x64 0.8.1、Win32 0.6.0。版本许可随源码存放在 `packaging/windows/licenses/WinSparkle-0.8.1.txt` 和 `WinSparkle-0.6.0.txt)。 [0.8.1 上游源码](https://github.com/vslavik/winsparkle/tree/v0.8.1) · [0.6.0 上游源码](https://github.com/vslavik/winsparkle/tree/v0.6.0)

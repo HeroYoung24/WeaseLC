@@ -20,18 +20,42 @@
 
 namespace {
 namespace fs = std::filesystem;
-bool ValidModelFolder(const fs::path& path) {
+bool LocalAbsolutePath(const fs::path& path) {
   const auto value = path.wstring();
-  return path.is_absolute() && value.size() < 32000 && value.size() > 2 && value[1] == L':' &&
-      value.find_first_of(L"\"\r\n") == std::wstring::npos &&
-      fs::is_regular_file(path / L"Start-LocalModel.ps1") &&
-      fs::is_regular_file(path / L"runtime" / L"llama-server.exe") &&
-      fs::is_regular_file(path / L"Qwen3-4B-Q4_K_M.gguf");
+  return path.is_absolute() && value.size() > 2 && value.size() < 32000 &&
+      value[1] == L':' && value.find_first_of(L"\"\r\n") == std::wstring::npos;
+}
+fs::path ManagedModelFolder() {
+  PWSTR path = nullptr;
+  fs::path folder;
+  if (SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &path) == S_OK)
+    folder = fs::path(path) / L"WeaseLC" / L"Models" / L"Qwen3-4B";
+  CoTaskMemFree(path);
+  return LocalAbsolutePath(folder) ? folder : fs::path{};
+}
+fs::path DownloadScript() {
+  wchar_t exe[32768]{};
+  const auto length = GetModuleFileNameW(nullptr, exe, _countof(exe));
+  if (!length || length >= _countof(exe)) return {};
+  auto folder = fs::path(exe).parent_path();
+  if (!_wcsicmp(folder.filename().c_str(), L"Win32")) folder = folder.parent_path();
+  const auto script = folder / L"model-tools" / L"Download-Model.ps1";
+  std::error_code error;
+  return LocalAbsolutePath(script) && fs::is_regular_file(script, error) ? script : fs::path{};
+}
+bool ValidModelFolder(const fs::path& path) {
+  std::error_code error;
+  return LocalAbsolutePath(path) &&
+      fs::is_regular_file(path / L"Start-LocalModel.ps1", error) &&
+      fs::is_regular_file(path / L"runtime" / L"llama-server.exe", error) &&
+      fs::is_regular_file(path / L"Qwen3-4B-Q4_K_M.gguf", error);
 }
 fs::path FindModelFolder() {
   wchar_t saved[32768]{}; DWORD bytes = sizeof(saved);
   if (RegGetValueW(HKEY_CURRENT_USER,correction::kRegistryKey,L"LocalModelFolderV1",
       RRF_RT_REG_SZ,nullptr,saved,&bytes) == ERROR_SUCCESS && ValidModelFolder(saved)) return saved;
+  const auto managed = ManagedModelFolder();
+  if (ValidModelFolder(managed)) return managed;
   wchar_t exe[32768]{};
   const auto length = GetModuleFileNameW(nullptr, exe, _countof(exe));
   if (!length || length == _countof(exe)) return {};
@@ -47,33 +71,54 @@ fs::path PowerShell7() {
   if (folder) CoTaskMemFree(folder);
   // The x64 known-folder ID can be unavailable to a 32-bit caller. Windows
   // provides the native Program Files location through ProgramW6432 instead.
-  if (root.empty() || !fs::is_regular_file(root / L"PowerShell" / L"7" / L"pwsh.exe")) {
+  std::error_code error;
+  if (root.empty() || !fs::is_regular_file(root / L"PowerShell" / L"7" / L"pwsh.exe", error)) {
     wchar_t native[32768]{}; const auto size = GetEnvironmentVariableW(L"ProgramW6432", native, _countof(native));
     if (size && size < _countof(native) && size > 2 && native[1] == L':') root = native;
   }
   if (root.empty()) return {};
   const fs::path result = root / L"PowerShell" / L"7" / L"pwsh.exe";
-  return fs::is_regular_file(result) ? result : fs::path{};
+  return fs::is_regular_file(result, error) ? result : fs::path{};
 }
 bool ValidPowerShell(const fs::path& executable) {
-  const auto text = executable.wstring();
   std::error_code error;
-  return executable.is_absolute() && text.size() > 2 && text[1] == L':' && text.size() < 32000 &&
-      text.find_first_of(L"\"\r\n") == std::wstring::npos &&
+  return LocalAbsolutePath(executable) &&
       !_wcsicmp(executable.filename().c_str(), L"pwsh.exe") && fs::is_regular_file(executable, error);
+}
+fs::path PowerShellFromPath() {
+  const auto length = GetEnvironmentVariableW(L"PATH", nullptr, 0);
+  if (!length || length > 32768) return {};
+  std::wstring path(length, L'\0');
+  const auto copied = GetEnvironmentVariableW(L"PATH", path.data(), length);
+  if (!copied || copied >= length) return {};
+  path.resize(copied);
+  for (size_t begin = 0; begin < path.size();) {
+    const auto end = path.find(L';', begin);
+    auto directory = path.substr(begin, end == std::wstring::npos ? end : end - begin);
+    if (directory.size() > 1 && directory.front() == L'"' && directory.back() == L'"')
+      directory = directory.substr(1, directory.size() - 2);
+    const fs::path candidate = fs::path(directory) / L"pwsh.exe";
+    if (ValidPowerShell(candidate)) return candidate;
+    if (end == std::wstring::npos) break;
+    begin = end + 1;
+  }
+  return {};
 }
 fs::path PreferredPowerShell() {
   wchar_t path[32768]{}; DWORD size = sizeof(path);
   if (RegGetValueW(HKEY_CURRENT_USER, correction::kRegistryKey, L"LocalModelPowerShellV1",
       RRF_RT_REG_SZ | RRF_NOEXPAND, nullptr, path, &size) == ERROR_SUCCESS && ValidPowerShell(path)) return path;
   constexpr auto registration = L"Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\pwsh.exe";
-  for (const DWORD view : {RRF_SUBKEY_WOW6464KEY, RRF_SUBKEY_WOW6432KEY}) {
-    size = sizeof(path);
-    if (RegGetValueW(HKEY_LOCAL_MACHINE, registration, nullptr,
-        RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | view, nullptr, path, &size) == ERROR_SUCCESS &&
-        ValidPowerShell(path)) return path;
+  for (const HKEY hive : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
+    for (const DWORD view : {RRF_SUBKEY_WOW6464KEY, RRF_SUBKEY_WOW6432KEY}) {
+      size = sizeof(path);
+      if (RegGetValueW(hive, registration, nullptr,
+          RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | view, nullptr, path, &size) == ERROR_SUCCESS &&
+          ValidPowerShell(path)) return path;
+    }
   }
-  return PowerShell7();
+  const auto standard = PowerShell7();
+  return standard.empty() ? PowerShellFromPath() : standard;
 }
 bool SavePowerShell(const std::wstring& path) {
   if (!ValidPowerShell(path)) return false;
@@ -127,8 +172,12 @@ bool LocalHealth() {
 }
 struct Control {
   correction::BrokerProcess launcher;
+  correction::BrokerProcess download;
   fs::path folder;
   fs::path powershell;
+  fs::path downloadScript;
+  fs::path downloadFolder;
+  const wchar_t* downloadStatus = nullptr;
   std::shared_ptr<Health> health;
   std::thread healthThread;
   bool chinese = PRIMARYLANGID(GetThreadUILanguage()) == LANG_CHINESE;
@@ -152,6 +201,7 @@ struct Control {
     CloseHandle(file); return owned;
   }
   void Stop() {
+    download.Stop();
     // Hold this exact file object, allowing the launcher to delete it during
     // cooperative shutdown. A replacement at the same path is never deleted.
     HANDLE file = folder.empty() ? INVALID_HANDLE_VALUE : CreateFileW((folder / L"ready.json").c_str(),
@@ -180,10 +230,17 @@ bool StartFrozenModel(Control& state) {
 }
 void ShowState(HWND dialog, Control& state, const wchar_t* text) {
   SetDlgItemTextW(dialog, IDC_MODEL_STATE, text);
+  const bool running = state.Running();
+  const bool downloading = state.download.Process() != nullptr;
+  const bool idle = !running && !downloading;
+  SetDlgItemTextW(dialog, IDCANCEL, running ? state.Text(L"后台运行", L"Background") :
+      downloading ? state.Text(L"取消下载", L"Cancel download") : state.Text(L"关闭", L"Close"));
   EnableWindow(GetDlgItem(dialog, IDC_MODEL_START),
-      !state.Running() && !state.externalReady && !state.folder.empty() && !state.powershell.empty());
-  EnableWindow(GetDlgItem(dialog, IDC_MODEL_BROWSE), !state.Running());
-  EnableWindow(GetDlgItem(dialog, IDC_MODEL_BROWSE_SHELL), !state.Running());
+      idle && !state.externalReady && !state.folder.empty() && !state.powershell.empty());
+  EnableWindow(GetDlgItem(dialog, IDC_MODEL_BROWSE), idle);
+  EnableWindow(GetDlgItem(dialog, IDC_MODEL_BROWSE_SHELL), idle);
+  EnableWindow(GetDlgItem(dialog, IDC_MODEL_DOWNLOAD), idle &&
+      !state.powershell.empty() && !state.downloadScript.empty() && !state.downloadFolder.empty());
   EnableWindow(GetDlgItem(dialog, IDC_MODEL_STOP), state.launcher.Process() != nullptr);
 }
 const wchar_t* IdleModelState(const Control& state) {
@@ -193,9 +250,10 @@ const wchar_t* IdleModelState(const Control& state) {
   if (state.powershell.empty()) return state.Text(
       L"未找到 PowerShell 7。请选择 PowerShell 7 的 pwsh.exe 文件。",
       L"PowerShell 7 was not found. Select its pwsh.exe file.");
+  if (state.downloadStatus) return state.downloadStatus;
   if (state.folder.empty()) return state.Text(
-      L"请选择已有的本地模型目录。",
-      L"Select the folder containing the local model.");
+      L"请选择已有模型目录，或下载推荐模型。",
+      L"Choose an existing model folder or download the recommended model.");
   return state.Text(L"未运行。", L"Stopped.");
 }
 INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
@@ -203,7 +261,12 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
   if (message == WM_INITDIALOG) {
     state = reinterpret_cast<Control*>(l); SetWindowLongPtrW(dialog, DWLP_USER, l);
     if (!state->testing) SetPropW(dialog,correction::kModelWindowProperty,reinterpret_cast<HANDLE>(1));
-    if (!state->testing) { state->folder = FindModelFolder(); state->powershell = PreferredPowerShell(); }
+    if (!state->testing) {
+      state->folder = FindModelFolder();
+      state->powershell = PreferredPowerShell();
+      state->downloadScript = DownloadScript();
+      state->downloadFolder = ManagedModelFolder();
+    }
     SetDlgItemTextW(dialog, IDC_MODEL_FOLDER, state->folder.c_str());
     SetDlgItemTextW(dialog, IDC_MODEL_SHELL, state->powershell.c_str());
     SetDlgItemTextW(dialog, IDC_MODEL_ENDPOINT, correction::kManagedModelEndpoint);
@@ -227,6 +290,26 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
   }
   if (message == WM_TIMER) {
     if (state->testing) return TRUE;
+    if (const auto download = state->download.Process()) {
+      if (WaitForSingleObject(download, 0) == WAIT_TIMEOUT) return TRUE;
+      DWORD result = 1;
+      const bool prepared = GetExitCodeProcess(download, &result) && result == 0 &&
+          ValidModelFolder(state->downloadFolder);
+      state->download.Stop();
+      if (prepared) {
+        state->folder = state->downloadFolder;
+        SetDlgItemTextW(dialog, IDC_MODEL_FOLDER, state->folder.c_str());
+      }
+      state->downloadStatus = prepared && SaveModelFolder(state->folder) ? state->Text(
+          L"已下载并配置。点击「启动本地模型」即可使用。",
+          L"Download complete. Choose Start local model when ready.") : prepared ? state->Text(
+          L"下载完成，但未能保存目录。当前窗口仍可使用。",
+          L"Download complete. The folder could not be saved for next time.") : state->Text(
+          L"下载或校验未完成。请检查网络和可用空间后重试。",
+          L"Download or verification failed. Check the connection and free space, then retry.");
+      ShowState(dialog, *state, IdleModelState(*state));
+      return TRUE;
+    }
     if (!state->Running()) {
       if (state->launcher.Process()) state->Stop();
       if (state->health && state->health->done.load()) {
@@ -248,9 +331,30 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
   }
   if (message != WM_COMMAND) return FALSE;
   if (state->testing && LOWORD(w) != IDCANCEL) return TRUE;
-  if (LOWORD(w) == IDC_MODEL_BROWSE && !state->Running()) {
+  if (LOWORD(w) == IDC_MODEL_DOWNLOAD && !state->Running() && !state->download.Process() &&
+      ValidPowerShell(state->powershell) && !state->downloadScript.empty() && !state->downloadFolder.empty()) {
+    const auto prompt = std::wstring(state->Text(
+        L"从 Qwen 和 llama.cpp 下载约 2.53 GB。建议预留至少 3 GB。启动模型需要可用的 Vulkan 设备。\n\n保存到：\n",
+        L"Download about 2.53 GB from Qwen and llama.cpp. Allow at least 3 GB. Running the model requires a Vulkan device.\n\nSave to:\n")) +
+        state->downloadFolder.wstring();
+    if (MessageBoxW(dialog, prompt.c_str(), L"WeaseLC", MB_OKCANCEL | MB_ICONINFORMATION | MB_DEFBUTTON2) != IDOK)
+      return TRUE;
+    SavePowerShell(state->powershell.wstring());
+    const auto args = L"-NoProfile -NonInteractive -File \"" + state->downloadScript.wstring() +
+        L"\" -Variant 4b -Destination \"" + state->downloadFolder.wstring() + L"\"";
+    const bool started = state->download.Start(state->powershell.wstring(), args, 2);
+    state->downloadStatus = started ? state->Text(
+        L"正在下载和校验。关闭窗口可停止下载，稍后可重试。",
+        L"Downloading and verifying. Close this window to stop and retry later.") : state->Text(
+        L"无法启动下载。请检查 PowerShell 7 路径。",
+        L"Could not start the download. Check the PowerShell 7 path.");
+    ShowState(dialog, *state, state->downloadStatus);
+    return TRUE;
+  }
+  if (LOWORD(w) == IDC_MODEL_BROWSE && !state->Running() && !state->download.Process()) {
     const auto folder = SelectModelFolder(dialog);
     if (!folder.empty()) {
+      state->downloadStatus = nullptr;
       state->folder = folder;
       SetDlgItemTextW(dialog, IDC_MODEL_FOLDER, folder.c_str());
       if (ValidModelFolder(folder)) SaveModelFolder(folder);
@@ -258,7 +362,7 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
     }
     return TRUE;
   }
-  if (LOWORD(w) == IDC_MODEL_BROWSE_SHELL && !state->Running()) {
+  if (LOWORD(w) == IDC_MODEL_BROWSE_SHELL && !state->Running() && !state->download.Process()) {
     const auto file = SelectModelFolder(dialog, false);
     if (!file.empty() && ValidPowerShell(file)) {
       state->powershell = file; SetDlgItemTextW(dialog, IDC_MODEL_SHELL, file.c_str());
@@ -269,10 +373,10 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
     return TRUE;
   }
   if (LOWORD(w) == IDC_MODEL_STOP) { state->Stop(); ShowState(dialog, *state, state->Text(L"已停止本窗口启动的模型。", L"Stopped this window's model.")); return TRUE; }
-  if (LOWORD(w) == IDC_MODEL_START && !state->Running()) {
+  if (LOWORD(w) == IDC_MODEL_START && !state->Running() && !state->download.Process()) {
     if (!ValidModelFolder(state->folder) || !ValidPowerShell(state->powershell)) {
-      ShowState(dialog, *state, state->Text(L"请选择已有4B模型目录和 PowerShell 7（pwsh.exe）；本功能不会下载模型。",
-          L"Select an existing 4B folder and PowerShell 7 (pwsh.exe); no downloads are performed.")); return TRUE;
+      ShowState(dialog, *state, state->Text(L"请选择已准备好的 4B 模型目录和 PowerShell 7（pwsh.exe）。",
+          L"Select a prepared 4B model folder and PowerShell 7 (pwsh.exe).")); return TRUE;
     }
     if (!SaveModelFolder(state->folder) || !SavePowerShell(state->powershell.wstring())) {
       ShowState(dialog,*state,state->Text(L"无法保存模型位置，请检查账户权限。",L"Could not save model paths. Check account permissions.")); return TRUE;
@@ -304,10 +408,12 @@ bool CheckLocalModelControl(HINSTANCE instance, const std::function<void(HWND)>&
   HWND dialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_LOCAL_MODEL), nullptr, Proc, reinterpret_cast<LPARAM>(&state));
   if (!dialog) return false;
   bool valid = !IsWindowVisible(dialog) && state.folder.empty() && state.powershell.empty() && !state.launcher.Process() && !state.health;
-  for (const auto id : {IDC_MODEL_FOLDER, IDC_MODEL_BROWSE, IDC_MODEL_START, IDC_MODEL_STOP, IDC_MODEL_STATE, IDC_MODEL_SHELL, IDC_MODEL_BROWSE_SHELL, IDC_MODEL_EXIT, IDCANCEL})
+  for (const auto id : {IDC_MODEL_FOLDER, IDC_MODEL_BROWSE, IDC_MODEL_START, IDC_MODEL_STOP, IDC_MODEL_STATE, IDC_MODEL_SHELL, IDC_MODEL_BROWSE_SHELL, IDC_MODEL_DOWNLOAD, IDC_MODEL_EXIT, IDCANCEL})
     valid = GetDlgItem(dialog, id) && valid;
   SendMessageW(dialog, WM_COMMAND, IDC_MODEL_START, 0); SendMessageW(dialog, WM_TIMER, 1, 0);
-  valid = valid && !state.launcher.Process() && !state.health && !IsWindowEnabled(GetDlgItem(dialog, IDC_MODEL_STOP));
+  SendMessageW(dialog, WM_COMMAND, IDC_MODEL_DOWNLOAD, 0);
+  valid = valid && !state.launcher.Process() && !state.download.Process() && !state.health &&
+      !IsWindowEnabled(GetDlgItem(dialog, IDC_MODEL_STOP)) && !IsWindowEnabled(GetDlgItem(dialog, IDC_MODEL_DOWNLOAD));
   if (preview) preview(dialog);
   DestroyWindow(dialog); return valid;
 }

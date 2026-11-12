@@ -72,4 +72,4 @@
 
 本次人工测试未获得窗口焦点；日志 visible=1、focused=0，用户反馈“没有窗口”，没有执行中文按键测试。此现象不能视作中文输入回归失败，也不能视作通过；窗口呈现原因未定位。原始系统安装/真实应用故障仍未完成验收。
 
-按用户要求保存进度并暂停，后续应从 `PAUSED_PROGRESS.md` 和 `docs/LOCAL_TSF_TEST_RESULTS.md` 的最新节继续。实验目录、程序和注册已核对清理，原版输入服务进程及 COM 路径未改变。
+按用户要求保存进度并暂停，后续应从 `docs/archive/PAUSED_PROGRESS.md` 和 `docs/LOCAL_TSF_TEST_RESULTS.md` 的最新节继续。实验目录、程序和注册已核对清理，原版输入服务进程及 COM 路径未改变。

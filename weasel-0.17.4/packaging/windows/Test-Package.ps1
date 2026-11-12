@@ -11,6 +11,10 @@ if (Test-Path -LiteralPath $extract) { throw 'Preserve the earlier extraction.' 
 & (Join-Path $source 'output\7z.exe') x $installer "-o$extract" -y > (Join-Path $packageRoot 'extract.log')
 if ($LASTEXITCODE) { throw 'Installer extraction failed.' }
 $manifest=Get-Content (Join-Path $packageRoot 'App\distribution-manifest.json') -Raw | ConvertFrom-Json
+$modelTools = @('Start-LocalModel.ps1','Download-Model.ps1','Qwen-4B-LICENSE.txt','llama-LICENSE.txt','MODEL-ASSETS.md') |
+  ForEach-Object { 'model-tools\' + $_ }
+if (Compare-Object $modelTools @($manifest.files.path -like 'model-tools\*')) { throw 'Unexpected model tools payload.' }
+if ($manifest.files.path -match '(^|\\)(pwsh\.exe|llama-server\.exe)$|\.gguf$') { throw 'An external model or PowerShell asset entered the payload.' }
 foreach ($entry in $manifest.files) {
   if ($entry.path -match '["$\r\n]' -or $entry.path -match '(^|\\)\.\.(\\|$)' -or [IO.Path]::IsPathRooted($entry.path)) { throw 'Unsafe manifest path.' }
   $file=Join-Path $extract $entry.path
@@ -49,7 +53,7 @@ foreach ($arch in 'x64','Win32') {
   $report = Get-Content (Join-Path $directory.FullName CorrectionDialogChecks.log)
   if ($report -match ' = 0$') { throw "Packaged UI assertion failed for $arch." }
 }
-$result=[ordered]@{payloadFiles=$manifest.files.Count;allExtractedHashesMatch=$true;readOnlyLauncherPassed=$true;
+$result=[ordered]@{payloadFiles=$manifest.files.Count;allExtractedHashesMatch=$true;readOnlyLauncherPassed=$true;externalModelAndShellExcluded=$true;
   packagedUiPassed=$true;uninstallBoundaryPassed=$true;sourceCommit=$manifest.sourceCommit;dirtySource=$manifest.dirtySource;installed=$false}
 $result | ConvertTo-Json | Set-Content (Join-Path $packageRoot 'package-check.json') -Encoding utf8
 $result | ConvertTo-Json

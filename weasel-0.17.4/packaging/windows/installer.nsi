@@ -25,7 +25,7 @@ VIAddVersionKey /LANG=2052 "LegalCopyright" "WeaseLC contributors; RIME Develope
 !define MUI_CUSTOMFUNCTION_ABORT GuardInstallAbort
 !define MUI_CUSTOMFUNCTION_UNABORT un.GuardInstallAbort
 !define MUI_FINISHPAGE_TITLE "WeaseLC 已安装"
-!define MUI_FINISHPAGE_TEXT "完成后将打开输入方案和配色设置。也可稍后从开始菜单打开 WeaseLC。按 Win+空格切换输入法。$\r$\n$\r$\n自动纠错默认关闭，可从图标的模型管理及管理纠错中配置。"
+!define MUI_FINISHPAGE_TEXT "完成后将打开输入方案和配色设置。也可稍后从开始菜单打开 WeaseLC。按 Win+空格切换输入法。$\r$\n$\r$\n自动纠错默认关闭，可从图标的管理本地模型及管理纠错中配置。"
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "选择输入方案和配色"
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchFirstRun
@@ -208,7 +208,7 @@ Function un.OptionsLeave
   ExecWait '"$INSTDIR\WeaseLC.exe" /prepare-uninstall' $0
   ${If} ${Errors}
   ${OrIf} $0 != 0
-    MessageBox MB_ICONINFORMATION "卸载尚未开始。请先保存并关闭占用应用，或从模型管理停止模型后重试。"
+    MessageBox MB_ICONINFORMATION "卸载尚未开始。请先保存并关闭占用应用，或从管理本地模型停止模型后重试。"
     Abort
   ${EndIf}
 FunctionEnd
@@ -372,7 +372,7 @@ Section "WeaseLC"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\WeaseLC" "NoRepair" 1
   CreateDirectory "$SMPROGRAMS\WeaseLC"
   CreateShortcut "$SMPROGRAMS\WeaseLC\WeaseLC.lnk" "$INSTDIR\WeaseLC.exe" "/configure" "$INSTDIR\WeaselServer.exe"
-  CreateShortcut "$SMPROGRAMS\WeaseLC\模型管理.lnk" "$INSTDIR\WeaselDeployer.exe" "/local-model" "$INSTDIR\WeaselServer.exe"
+  CreateShortcut "$SMPROGRAMS\WeaseLC\管理本地模型.lnk" "$INSTDIR\WeaselDeployer.exe" "/local-model" "$INSTDIR\WeaselServer.exe"
   CreateShortcut "$SMPROGRAMS\WeaseLC\管理纠错.lnk" "$INSTDIR\WeaselDeployer.exe" "/correction" "$INSTDIR\WeaselServer.exe"
   CreateShortcut "$SMPROGRAMS\WeaseLC\卸载 WeaseLC.lnk" "$INSTDIR\Uninstall.exe"
   ${If} $SelectedStartup == 1
@@ -428,7 +428,7 @@ Section "WeaseLC"
     ${EndIf}
     Delete "$SMSTARTUP\WeaseLC.lnk"
     Delete "$SMPROGRAMS\WeaseLC\WeaseLC.lnk"
-  Delete "$SMPROGRAMS\WeaseLC\模型管理.lnk"
+  Delete "$SMPROGRAMS\WeaseLC\管理本地模型.lnk"
   Delete "$SMPROGRAMS\WeaseLC\管理纠错.lnk"
     Delete "$SMPROGRAMS\WeaseLC\卸载 WeaseLC.lnk"
     RMDir "$SMPROGRAMS\WeaseLC"
@@ -503,7 +503,7 @@ Section "Uninstall"
   DeleteRegKey HKCU "Software\Microsoft\CTF\TIP\{69C4CD90-CA76-4367-A307-EE18A40EE6D9}"
   Delete "$SMSTARTUP\WeaseLC.lnk"
   Delete "$SMPROGRAMS\WeaseLC\WeaseLC.lnk"
-  Delete "$SMPROGRAMS\WeaseLC\模型管理.lnk"
+  Delete "$SMPROGRAMS\WeaseLC\管理本地模型.lnk"
   Delete "$SMPROGRAMS\WeaseLC\管理纠错.lnk"
   Delete "$SMPROGRAMS\WeaseLC\卸载 WeaseLC.lnk"
   RMDir "$SMPROGRAMS\WeaseLC"

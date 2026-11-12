@@ -64,11 +64,20 @@ foreach ($arch in 'x64','Win32') {
 Copy-Item -LiteralPath (Join-Path $source 'LICENSE.txt') -Destination $payload
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'INSTALL-NOTES.txt') -Destination $payload
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') -Destination $payload
+$modelSource = Join-Path (Split-Path $source -Parent) 'local-model'
+$modelTools = New-Item -ItemType Directory -Path (Join-Path $payload 'model-tools')
+foreach ($name in 'Start-LocalModel.ps1','Download-Model.ps1','Qwen-4B-LICENSE.txt','llama-LICENSE.txt') {
+  Copy-Item -LiteralPath (Join-Path $modelSource $name) -Destination $modelTools.FullName
+}
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'MODEL-ASSETS.md') -Destination $modelTools.FullName
 $licenseFiles = [ordered]@{
   'librime.txt'='librime\LICENSE'; 'boost.txt'='deps\boost_1_84_0\LICENSE_1_0.txt'
   'glog.txt'='librime\deps\glog\COPYING'; 'leveldb.txt'='librime\deps\leveldb\LICENSE'
   'yaml-cpp.txt'='librime\deps\yaml-cpp\LICENSE'; 'marisa-trie.txt'='librime\deps\marisa-trie\COPYING.md'
   'opencc.txt'='librime\deps\opencc\LICENSE'; 'WTL-MS-PL.txt'='packaging\windows\licenses\WTL-MS-PL.txt'
+  'opencc-marisa.txt'='librime\deps\opencc\deps\marisa-0.2.6\COPYING.md'
+  'opencc-rapidjson.txt'='packaging\windows\licenses\RapidJSON-1.1.0.txt'
+  'opencc-darts-clone.txt'='packaging\windows\licenses\Darts-clone.txt'
 }
 foreach ($entry in $licenseFiles.GetEnumerator()) {
   Copy-Item -LiteralPath (Join-Path $source $entry.Value) -Destination (Join-Path $licenses $entry.Key)
