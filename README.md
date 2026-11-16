@@ -1,4 +1,4 @@
-# WeaseLC
+# WeaseLC —— Weasel with LLM Correction
 
 **为 Windows 小狼毫加入本地模型纠错。** 用熟悉的 Rime 方案打字，在候选框旁查看纠错建议，按 Tab 采纳。
 
