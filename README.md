@@ -14,7 +14,7 @@ WeaseLC 是基于 [小狼毫 Weasel 0.17.4](https://github.com/rime/weasel/tree/
 ## 开始使用
 
 1. 在 x64 Windows 10 或 11 上安装适用的 [WeaseLC Release](https://github.com/HeroYoung24/WeaseLC/releases)，选择输入方案和配色，再用 Win+空格切换到 WeaseLC。
-2. 想使用纠错时，从开始菜单或语言栏打开「管理本地模型」。可以下载推荐模型，也可以选已有目录。下载约 2.53 GB，启动推荐模型需要 PowerShell 7 和可用的 Vulkan 设备。
+2. 想使用纠错时，从开始菜单或语言栏打开「管理本地模型」。可以下载推荐模型，也可以选已有目录。下载约 2.53 GB，启动推荐模型需要可用的 Vulkan 设备。当前开发版支持系统自带的 Windows PowerShell 5.1 和 PowerShell 7，`0.1.0-beta.1` 安装包使用 PowerShell 7。
 3. 模型显示「已就绪」后，从语言栏开启本地自动纠错。也可在「管理纠错」先手动检查一段文字。自动纠错默认关闭。
 
 ## 默认模型

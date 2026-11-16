@@ -33,13 +33,13 @@ fs::path ManagedModelFolder() {
   CoTaskMemFree(path);
   return LocalAbsolutePath(folder) ? folder : fs::path{};
 }
-fs::path DownloadScript() {
+fs::path BundledModelScript(const wchar_t* name) {
   wchar_t exe[32768]{};
   const auto length = GetModuleFileNameW(nullptr, exe, _countof(exe));
   if (!length || length >= _countof(exe)) return {};
   auto folder = fs::path(exe).parent_path();
   if (!_wcsicmp(folder.filename().c_str(), L"Win32")) folder = folder.parent_path();
-  const auto script = folder / L"model-tools" / L"Download-Model.ps1";
+  const auto script = folder / L"model-tools" / name;
   std::error_code error;
   return LocalAbsolutePath(script) && fs::is_regular_file(script, error) ? script : fs::path{};
 }
@@ -80,10 +80,21 @@ fs::path PowerShell7() {
   const fs::path result = root / L"PowerShell" / L"7" / L"pwsh.exe";
   return fs::is_regular_file(result, error) ? result : fs::path{};
 }
+bool IsWindowsPowerShell(const fs::path& executable) {
+  return !_wcsicmp(executable.filename().c_str(), L"powershell.exe");
+}
 bool ValidPowerShell(const fs::path& executable) {
   std::error_code error;
   return LocalAbsolutePath(executable) &&
-      !_wcsicmp(executable.filename().c_str(), L"pwsh.exe") && fs::is_regular_file(executable, error);
+      (IsWindowsPowerShell(executable) || !_wcsicmp(executable.filename().c_str(), L"pwsh.exe")) &&
+      fs::is_regular_file(executable, error);
+}
+fs::path SystemWindowsPowerShell() {
+  wchar_t directory[MAX_PATH]{};
+  const auto length = GetSystemDirectoryW(directory, _countof(directory));
+  if (!length || length >= _countof(directory)) return {};
+  const auto executable = fs::path(directory) / L"WindowsPowerShell" / L"v1.0" / L"powershell.exe";
+  return ValidPowerShell(executable) ? executable : fs::path{};
 }
 fs::path PowerShellFromPath() {
   const auto length = GetEnvironmentVariableW(L"PATH", nullptr, 0);
@@ -118,7 +129,9 @@ fs::path PreferredPowerShell() {
     }
   }
   const auto standard = PowerShell7();
-  return standard.empty() ? PowerShellFromPath() : standard;
+  if (!standard.empty()) return standard;
+  const auto fromPath = PowerShellFromPath();
+  return fromPath.empty() ? SystemWindowsPowerShell() : fromPath;
 }
 bool SavePowerShell(const std::wstring& path) {
   if (!ValidPowerShell(path)) return false;
@@ -142,8 +155,8 @@ std::wstring SelectModelFolder(HWND owner, bool folderMode = true) {
   DWORD flags = 0; dialog->GetOptions(&flags);
   dialog->SetOptions(flags | (folderMode ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST) | FOS_FORCEFILESYSTEM | FOS_DONTADDTORECENT);
   if (!folderMode) {
-    const COMDLG_FILTERSPEC filter{L"PowerShell 7 (pwsh.exe)", L"pwsh.exe"};
-    dialog->SetFileTypes(1, &filter); dialog->SetTitle(L"PowerShell 7 (pwsh.exe)");
+    const COMDLG_FILTERSPEC filter{L"PowerShell 5.1 / 7", L"powershell.exe;pwsh.exe"};
+    dialog->SetFileTypes(1, &filter); dialog->SetTitle(L"PowerShell 5.1 / 7");
   }
   if (dialog->Show(owner) == S_OK) {
     IShellItem* item = nullptr; PWSTR path = nullptr;
@@ -224,9 +237,16 @@ void BeginHealth(Control& state) {
   state.healthThread=std::thread([health]{try{health->ready=LocalHealth();}catch(...){}health->done.store(true);});
 }
 bool StartFrozenModel(Control& state) {
-  return ValidPowerShell(state.powershell) && ValidModelFolder(state.folder) && state.launcher.Start(state.powershell.wstring(),
-      L"-NoProfile -NonInteractive -File \"" + (state.folder / L"Start-LocalModel.ps1").wstring() +
-      L"\" -Variant 4b -ThinkingBudget 0 -Port " + std::to_wstring(correction::kManagedModelPort) + L" -StopOnInputClose", 2);
+  if (!ValidPowerShell(state.powershell) || !ValidModelFolder(state.folder)) return false;
+  const bool legacy = IsWindowsPowerShell(state.powershell);
+  // Existing model folders may still contain a launcher from before 5.1 support.
+  const auto script = legacy ? BundledModelScript(L"Start-LocalModel.ps1") : state.folder / L"Start-LocalModel.ps1";
+  if (script.empty()) return false;
+  auto args = L"-NoProfile -NonInteractive -File \"" + script.wstring() +
+      L"\" -Variant 4b -ThinkingBudget 0 -Port " + std::to_wstring(correction::kManagedModelPort) + L" -StopOnInputClose";
+  if (legacy) args += L" -ModelDirectory \"" + (state.folder / L".").wstring() + L"\"";
+  // Windows PowerShell's Add-Type can spawn csc.exe and cvtres.exe in the job.
+  return state.launcher.Start(state.powershell.wstring(), args, legacy ? 4 : 2);
 }
 void ShowState(HWND dialog, Control& state, const wchar_t* text) {
   SetDlgItemTextW(dialog, IDC_MODEL_STATE, text);
@@ -248,8 +268,8 @@ const wchar_t* IdleModelState(const Control& state) {
       L"端口已有其他本地服务。请在原启动程序中管理该服务。",
       L"Another local service is using the port. Manage it from its launcher.");
   if (state.powershell.empty()) return state.Text(
-      L"未找到 PowerShell 7。请选择 PowerShell 7 的 pwsh.exe 文件。",
-      L"PowerShell 7 was not found. Select its pwsh.exe file.");
+      L"未找到 PowerShell。请选择 PowerShell 5.1 或 7 的程序文件。",
+      L"PowerShell was not found. Select a PowerShell 5.1 or 7 executable.");
   if (state.downloadStatus) return state.downloadStatus;
   if (state.folder.empty()) return state.Text(
       L"请选择已有模型目录，或下载推荐模型。",
@@ -264,7 +284,7 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
     if (!state->testing) {
       state->folder = FindModelFolder();
       state->powershell = PreferredPowerShell();
-      state->downloadScript = DownloadScript();
+      state->downloadScript = BundledModelScript(L"Download-Model.ps1");
       state->downloadFolder = ManagedModelFolder();
     }
     SetDlgItemTextW(dialog, IDC_MODEL_FOLDER, state->folder.c_str());
@@ -346,8 +366,8 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
     state->downloadStatus = started ? state->Text(
         L"正在下载和校验。关闭窗口可停止下载，稍后可重试。",
         L"Downloading and verifying. Close this window to stop and retry later.") : state->Text(
-        L"无法启动下载。请检查 PowerShell 7 路径。",
-        L"Could not start the download. Check the PowerShell 7 path.");
+        L"无法启动下载。请检查 PowerShell 路径。",
+        L"Could not start the download. Check the PowerShell path.");
     ShowState(dialog, *state, state->downloadStatus);
     return TRUE;
   }
@@ -375,8 +395,8 @@ INT_PTR CALLBACK Proc(HWND dialog, UINT message, WPARAM w, LPARAM l) try {
   if (LOWORD(w) == IDC_MODEL_STOP) { state->Stop(); ShowState(dialog, *state, state->Text(L"已停止本窗口启动的模型。", L"Stopped this window's model.")); return TRUE; }
   if (LOWORD(w) == IDC_MODEL_START && !state->Running() && !state->download.Process()) {
     if (!ValidModelFolder(state->folder) || !ValidPowerShell(state->powershell)) {
-      ShowState(dialog, *state, state->Text(L"请选择已准备好的 4B 模型目录和 PowerShell 7（pwsh.exe）。",
-          L"Select a prepared 4B model folder and PowerShell 7 (pwsh.exe).")); return TRUE;
+      ShowState(dialog, *state, state->Text(L"请选择已准备好的 4B 模型目录和 PowerShell 5.1 或 7。",
+          L"Select a prepared 4B model folder and PowerShell 5.1 or 7.")); return TRUE;
     }
     if (!SaveModelFolder(state->folder) || !SavePowerShell(state->powershell.wstring())) {
       ShowState(dialog,*state,state->Text(L"无法保存模型位置，请检查账户权限。",L"Could not save model paths. Check account permissions.")); return TRUE;
@@ -422,9 +442,22 @@ bool CheckOwnedLocalModel() try {
   auto check = [&](bool result, const char* label) { valid = valid && result; report << label << " = " << result << '\n'; report.flush(); return result; };
   Control state; state.folder = FindModelFolder();
   state.powershell = PreferredPowerShell();
+  wchar_t testFolder[32768]{};
+  const auto folderSize = GetEnvironmentVariableW(L"WEASELC_MODEL_TEST_FOLDER", testFolder, _countof(testFolder));
+  if (folderSize) {
+    if (!check(folderSize < _countof(testFolder) && ValidModelFolder(testFolder),
+        "controlled model test uses the requested fixture folder")) return false;
+    state.folder = testFolder;
+  }
   wchar_t testShell[32768]{};
   const auto shellSize = GetEnvironmentVariableW(L"WEASELC_MODEL_TEST_PWSH", testShell, _countof(testShell));
-  if (shellSize && shellSize < _countof(testShell) && ValidPowerShell(testShell)) state.powershell = testShell;
+  if (shellSize) {
+    if (!check(shellSize < _countof(testShell) && ValidPowerShell(testShell),
+        "controlled model test uses the requested PowerShell")) return false;
+    state.powershell = testShell;
+  }
+  if (!check(ValidPowerShell(SystemWindowsPowerShell()),
+      "the system Windows PowerShell executable is usable as a fallback")) return false;
   if (!check(!state.folder.empty() && !fs::exists(state.folder / L"ready.json") && !LocalHealth(),
       "controlled model test refuses an existing runtime or ready file")) return false;
   if (!check(ValidModelFolder(state.folder), "controlled model folder has the existing launcher runtime and 4B weights")) return false;

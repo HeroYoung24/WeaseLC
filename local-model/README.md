@@ -2,7 +2,7 @@
 
 ## 从应用准备模型
 
-1. 安装 [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows)，或准备已有的可信 `pwsh.exe`。WeaseLC 会依次查找保存路径、系统注册和标准安装位置、当前 `PATH`。
+1. 当前开发版会优先使用有效的已保存路径，或从系统注册、标准安装位置及 `PATH` 查找 PowerShell 7。找不到时，自动使用系统自带的 Windows PowerShell 5.1。`0.1.0-beta.1` 安装包需要 [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows)。
 2. 打开 WeaseLC 的「管理本地模型」，点「下载推荐模型」并确认。下载约 2.53 GB，建议预留至少 3 GB。校验完成后模型目录会预填为 `%LOCALAPPDATA%\WeaseLC\Models\Qwen3-4B`。
 3. 点「启动本地模型」。推荐运行时需要可用的 Vulkan 设备。看到「已就绪」后，可关闭窗口让模型继续在后台运行，或用「停止并退出」停止模型。
 4. 从语言栏开启本地自动纠错，或在「管理纠错」手动检查一段文字。
@@ -11,7 +11,7 @@
 
 ## PowerShell 与数据
 
-`pwsh.exe` 是 PowerShell 7 程序，`Start-LocalModel.ps1` 和 `Download-Model.ps1` 是项目脚本。WeaseLC 启动独立 PowerShell 进程，跳过个人启动配置，遵循当前脚本执行策略。已选择的 PowerShell 与模型目录会记忆。卸载保留这两个位置的文件，取消保留偏好只会清除记录。
+`pwsh.exe` 是 PowerShell 7，`powershell.exe` 是 Windows PowerShell 5.1。WeaseLC 在独立进程中执行 `Start-LocalModel.ps1` 和 `Download-Model.ps1`，跳过个人启动配置，遵循当前脚本执行策略。已选择的 PowerShell 与模型目录会记忆。使用 5.1 启动已有模型时，会调用随应用更新的启动脚本。卸载保留 PowerShell 和模型文件，取消保留偏好会清除路径记录。
 
 推荐模型只监听 `127.0.0.1:18963`，模型名为 `weasel-qwen3-4b`。模型下载和预热不读取输入框正文，自动纠错可单独开启或关闭。
 
@@ -24,7 +24,7 @@ pwsh -NoProfile -File .\local-model\Download-Model.ps1 -Variant 4b
 pwsh -NoProfile -File .\local-model\Start-LocalModel.ps1 -Variant 4b
 ```
 
-第一条下载和校验资产，第二条启动模型。保持终端打开，按 Ctrl+C 停止。使用应用管理模型时，请从「管理本地模型」启动。
+使用 Windows PowerShell 5.1 时，把命令开头的 `pwsh` 换为 `powershell.exe`。第一条下载和校验资产，第二条启动模型。保持终端打开，按 Ctrl+C 停止。使用应用管理模型时，请从「管理本地模型」启动。
 
 ## 来源与许可
 

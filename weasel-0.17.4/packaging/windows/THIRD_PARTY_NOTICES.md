@@ -24,7 +24,7 @@ distribution-manifest.json 列出本包文件和哈希，并标识源码提交�
 并附上 packaging/windows/Build-Distribution.ps1 及安装脚本。
 公开发布前须将准确的对应源码下载地址写入发布页。
 
-安装包内的 `model-tools` 保存下载脚本、`MODEL-ASSETS.md` 及 Qwen3-4B 和 llama.cpp 许可原文。权重和推理运行时从上游按需下载，PowerShell 7 由用户单独提供。
+安装包内的 `model-tools` 保存下载脚本、`MODEL-ASSETS.md` 及 Qwen3-4B 和 llama.cpp 许可原文。权重和推理运行时从上游按需下载。脚本使用系统自带的 PowerShell 5.1 或用户已有的 PowerShell 7。
 
 WTL 版权所有 Microsoft Corporation、WTL Team。随附 MS-PL 原文取自
 https://raw.githubusercontent.com/spdx/license-list-data/main/text/MS-PL.txt。

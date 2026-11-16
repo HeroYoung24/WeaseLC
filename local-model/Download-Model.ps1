@@ -3,10 +3,17 @@ param(
   [string]$Destination
 )
 $ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+  Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1')
+  Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Archive\Microsoft.PowerShell.Archive.psd1')
+}
 $root = $PSScriptRoot
 $managed = ![string]::IsNullOrEmpty($Destination)
 if ($managed) {
-  if ($Variant -ne '4b' -or ![IO.Path]::IsPathFullyQualified($Destination)) { throw 'Expected an absolute 4B destination.' }
+  # Require a drive-absolute or UNC path on Windows, including Windows PowerShell 5.1.
+  if ($Variant -ne '4b' -or $Destination -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+)') {
+    throw 'Expected an absolute 4B destination.'
+  }
   $root = [IO.Path]::GetFullPath($Destination)
   if ($root -eq [IO.Path]::GetPathRoot($root)) { throw 'Use a dedicated model folder.' }
   for ($at = [IO.DirectoryInfo]::new($root); $at; $at = $at.Parent) {
@@ -101,15 +108,15 @@ if ($managed) {
   return
 }
 if ($Variant -eq '7b') {
-  Invoke-WebRequest 'https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/raw/bb5d59e06d9551d752d08b292a50eb208b07ab1f/LICENSE' -OutFile (Join-Path $root 'Qwen25-7B-LICENSE.txt')
+  Invoke-WebRequest -UseBasicParsing 'https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/raw/bb5d59e06d9551d752d08b292a50eb208b07ab1f/LICENSE' -OutFile (Join-Path $root 'Qwen25-7B-LICENSE.txt')
 } elseif ($Variant -eq '4b-instruct') {
-  Invoke-WebRequest 'https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/raw/4a4242ec2100137ae2dd71061babe88472e858da/LICENSE' -OutFile (Join-Path $root 'Qwen-Instruct-2507-LICENSE.txt')
+  Invoke-WebRequest -UseBasicParsing 'https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/raw/4a4242ec2100137ae2dd71061babe88472e858da/LICENSE' -OutFile (Join-Path $root 'Qwen-Instruct-2507-LICENSE.txt')
 } elseif ($Variant -eq '4b') {
-  Invoke-WebRequest 'https://huggingface.co/Qwen/Qwen3-4B-GGUF/raw/bc640142c66e1fdd12af0bd68f40445458f3869b/LICENSE' -OutFile (Join-Path $root 'Qwen-4B-LICENSE.txt')
+  Invoke-WebRequest -UseBasicParsing 'https://huggingface.co/Qwen/Qwen3-4B-GGUF/raw/bc640142c66e1fdd12af0bd68f40445458f3869b/LICENSE' -OutFile (Join-Path $root 'Qwen-4B-LICENSE.txt')
 } else {
-  Invoke-WebRequest 'https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/raw/90862c4b9d2787eaed51d12237eafdfe7c5f6077/LICENSE' -OutFile (Join-Path $root 'Qwen-LICENSE.txt')
+  Invoke-WebRequest -UseBasicParsing 'https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/raw/90862c4b9d2787eaed51d12237eafdfe7c5f6077/LICENSE' -OutFile (Join-Path $root 'Qwen-LICENSE.txt')
 }
-Invoke-WebRequest 'https://raw.githubusercontent.com/ggml-org/llama.cpp/b11640/LICENSE' -OutFile (Join-Path $root 'llama-LICENSE.txt')
+Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/ggml-org/llama.cpp/b11640/LICENSE' -OutFile (Join-Path $root 'llama-LICENSE.txt')
 Write-Output 'Model and portable runtime ready.'
 } finally {
   if ($lock) { $lock.Dispose() }
